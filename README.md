@@ -24,7 +24,7 @@ At university campuses during peak lunch and dinner hours, hundreds of students 
 - **Evidence-First Transparency:** Estimates display exact data freshness (`LIVE <7m`, `RECENT <20m`, `AGING DATA`), report count, and confidence levels.
 - **Cold-Start Recommendation Protection:** Recommends less crowded dining outlets only when supported by at least 3 fresh reports (within 20m) and 50%+ confidence.
 - **Historical Best-Time-To-Go Intelligence:** Synthesizes past 14 days of crowdsourced data into 24-hour curves, highlighting peak rush and quietest meal hours.
-- **Durable Fail-Closed Persistence:** Eliminates silent mock fallbacks in production. If DynamoDB is unreachable, fails closed with HTTP 500 `PERSISTENCE_FAILED`.
+- **Durable Fail-Closed Persistence:** Eliminates silent mock fallbacks in production. If DynamoDB is unreachable, fails closed with HTTP 500 `PERSISTENCE_FAILED`. Raw observations retain a 30-day TTL buffer supporting 14-day rolling historical analysis.
 - **Server-Side Idempotency & Throttling:** Client `X-Idempotency-Key` deduplication and privacy-preserving anonymous rate limiting (HMAC-SHA256 client hash).
 - **Zero Personal Data Collected:** No student registration, student IDs, phone numbers, or IP logging.
 - **Dual-Mode Architecture:** Explicit separation between `production` (strictly cloud-backed) and `demo` (local browser simulation).
@@ -51,7 +51,7 @@ At university campuses during peak lunch and dinner hours, hundreds of students 
      └─────────────────────┼─────────────────────┴─────────────────────┘
                            ▼
               [ Amazon DynamoDB Single-Table ]
-              (Pay-Per-Request Mode + 7-Day TTL)
+              (Pay-Per-Request Mode + 30-Day TTL)
                            │
                            ▼
                [ Amazon CloudWatch Logs ]
@@ -61,7 +61,7 @@ At university campuses during peak lunch and dinner hours, hundreds of students 
 - **Amazon CloudFront & Amazon S3:** Static web hosting with Origin Access Control (OAC), HTTPS redirection, and SPA client routing.
 - **Amazon API Gateway (HTTP API v2):** Low-latency, cost-effective serverless API routing with configured CORS and route-level throttling.
 - **AWS Lambda (Python 3.12):** Microservices for queue calculation, report submission, recommendation scoring, historical trend aggregation, and admin auditing.
-- **Amazon DynamoDB:** Single-table storage design (`QueueSense-Main`) using on-demand capacity and 7-day TTL on raw observations.
+- **Amazon DynamoDB:** Single-table storage design (`QueueSense-Main`) using on-demand capacity and 30-day TTL on raw observations to preserve the 14-day historical analysis window.
 - **Amazon CloudWatch:** Real-time log capture, sanitized error tracing, and operational metrics.
 - **AWS SAM:** Infrastructure as code for reproducible, least-privilege cloud deployments.
 
@@ -69,6 +69,7 @@ At university campuses during peak lunch and dinner hours, hundreds of students 
 
 ## 4. Documentation & Verification Registers
 
+- [Master Engineering Remediation Report](file:///d:/Projects%20-%20antigravity/CA%20IIT%20BOMBAY/AWS/docs/MASTER_REMEDIATION_REPORT.md): Comprehensive zero-compromise audit and hardening report covering all 39 inspection items, mathematical proofs, and security attestations.
 - [Outlet Data Provenance Register](file:///d:/Projects%20-%20antigravity/CA%20IIT%20BOMBAY/AWS/docs/OUTLET_DATA_PROVENANCE.md): Full register of outlets, student-sourced citations, and ethical disclosures.
 - [Production Hardening & Release Audit](file:///d:/Projects%20-%20antigravity/CA%20IIT%20BOMBAY/AWS/docs/RELEASE_READINESS.md): Verification matrix covering P0, P1, and P2 security, data integrity, and test results.
 - [Production Cost Model](file:///d:/Projects%20-%20antigravity/CA%20IIT%20BOMBAY/AWS/docs/COST_MODEL.md): Pay-per-request pricing analysis for `ap-southeast-2` (Sydney) with realistic baseline cost analysis (~$0.05 - $0.55/mo).
