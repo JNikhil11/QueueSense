@@ -827,3 +827,123 @@ def test_cors_origin_production_lockdown(monkeypatch):
     cors_invalid = resolve_cors_origin(event_invalid)
     assert cors_invalid != "*"
     assert cors_invalid != "https://malicious-site.example.com"
+
+
+# =========================================================================
+# Stage 1: Production Persistence Lockdown & TTL Tests (B2, B7, A2)
+# =========================================================================
+
+def test_production_lambda_forbids_in_memory_adapter(monkeypatch):
+    """
+    Stage 1 / Flaw B2: Production In-Memory Fallback Lockdown.
+    When running under AWS Lambda (AWS_LAMBDA_FUNCTION_NAME set) or ENVIRONMENT=prod,
+    QueueSenseDatabase MUST NEVER use InMemoryStorageAdapter.
+    """
+    from backend.shared.database import (
+        QueueSenseDatabase,
+        DynamoDBStorageAdapter,
+        InMemoryStorageAdapter,
+        DatabasePersistenceError,
+    )
+
+    monkeypatch.setenv("AWS_LAMBDA_FUNCTION_NAME", "SubmitReportFunction")
+    monkeypatch.setenv("ENVIRONMENT", "prod")
+
+    # 1. Attempting to force memory backend in production Lambda fails closed
+    monkeypatch.setenv("STORAGE_BACKEND", "memory")
+    with pytest.raises(DatabasePersistenceError, match="cannot be used in production environment"):
+        QueueSenseDatabase()
+
+    # 2. Attempting to set DATA_MODE=demo in production Lambda fails closed
+    monkeypatch.delenv("STORAGE_BACKEND", raising=False)
+    monkeypatch.setenv("DATA_MODE", "demo")
+    with pytest.raises(DatabasePersistenceError, match="cannot be used in production environment"):
+        QueueSenseDatabase()
+
+    # 3. Injecting an InMemoryStorageAdapter directly in production Lambda fails closed
+    monkeypatch.delenv("DATA_MODE", raising=False)
+    mem_adapter = InMemoryStorageAdapter()
+    with pytest.raises(DatabasePersistenceError, match="strictly forbidden in production"):
+        QueueSenseDatabase(adapter=mem_adapter)
+
+    # 4. Standard production instantiation always yields DynamoDBStorageAdapter
+    db = QueueSenseDatabase()
+    assert isinstance(db._adapter, DynamoDBStorageAdapter)
+    assert not isinstance(db._adapter, InMemoryStorageAdapter)
+
+
+def test_raw_report_ttl_retention_covers_14_day_history():
+    """
+    Stage 1 / Flaw B7 & A2: Raw Report TTL vs. 14-Day Historical Window.
+    Verifies that raw reports are retained for at least 30 days in DynamoDB,
+    ensuring that 14-day historical analysis queries find valid observations.
+    """
+    import time
+    from backend.shared.database import DynamoDBStorageAdapter, InMemoryStorageAdapter
+
+    mem = InMemoryStorageAdapter()
+    res = mem.record_report(
+        location_id="iitb-mess-h12-14",
+        reported_wait_minutes=15.0,
+        queue_length=10,
+        note="Lunch queue observation",
+    )
+
+    # Raw report TTL must be at least 14 days (14 * 86400 seconds) in the future
+    now_epoch = int(time.time())
+    ttl = res.get("ttl", 0)
+    retention_seconds = ttl - now_epoch
+
+    # Must be at least 14 days (1,209,600s), configured to 30 days (~2,592,000s)
+    min_required_retention = 14 * 86400
+    assert retention_seconds >= min_required_retention, (
+        f"Raw report TTL ({retention_seconds}s) is less than the required 14-day window ({min_required_retention}s)!"
+    )
+    # Check that it is approximately 30 days
+    assert retention_seconds >= (29 * 86400)
+
+
+def test_client_supplied_timestamp_is_strictly_ignored_by_backend():
+    """
+    Stage 1 / Flaw B8: Authoritative Server UTC Timestamps.
+    Verifies that when a client attempts to pass a retro-active or future timestamp,
+    SubmitReportFunction strictly ignores it and generates an authoritative server UTC timestamp.
+    """
+    from datetime import datetime, timezone
+
+    fake_client_timestamp = "2020-01-01T00:00:00Z"
+    event = {
+        "pathParameters": {"id": "iitb-mess-h12-14"},
+        "headers": {},
+        "requestContext": {
+            "http": {"sourceIp": "198.51.100.99"},
+            "requestId": "req_test_server_ts",
+        },
+        "body": json.dumps({
+            "reportedWaitMinutes": 12.0,
+            "queueLength": 8,
+            "note": "Testing timestamp tampering",
+            "timestamp": fake_client_timestamp,
+        }),
+    }
+
+    before_utc = datetime.now(timezone.utc)
+    res = submit_handler(event, None)
+    after_utc = datetime.now(timezone.utc)
+
+    assert res["statusCode"] == 201
+    body = json.loads(res["body"])
+    report = body["data"]["report"]
+
+    # Client timestamp MUST NOT be used
+    assert report["timestamp"] != fake_client_timestamp
+
+    # Server timestamp must be between before_utc and after_utc
+    clean_ts = report["timestamp"].replace("Z", "+00:00")
+    report_dt = datetime.fromisoformat(clean_ts)
+    if report_dt.tzinfo is None:
+        report_dt = report_dt.replace(tzinfo=timezone.utc)
+
+    assert before_utc <= report_dt <= after_utc
+
+

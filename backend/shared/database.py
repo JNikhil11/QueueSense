@@ -376,7 +376,8 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
         now = datetime.now(timezone.utc)
         iso_timestamp = now.isoformat()
         report_id = f"rep_{uuid.uuid4().hex[:12]}"
-        epoch_ttl = int(time.time()) + (7 * 86400)  # 7 days
+        # Retain raw crowdsourced observations for 30 days so 14-day rolling historical queries succeed with safety buffer
+        epoch_ttl = int(time.time()) + (30 * 86400)  # 30 days
 
         pk = f"LOCATION#{location_id}"
         sk = f"REPORT#{iso_timestamp}#{report_id}"
@@ -691,7 +692,7 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
             "queueLength": int(queue_length),
             "note": note,
             "timestamp": iso_timestamp,
-            "ttl": int(time.time()) + (7 * 86400),
+            "ttl": int(time.time()) + (30 * 86400),
         }
 
         with self._lock:
@@ -833,19 +834,38 @@ class QueueSenseDatabase:
 
         backend_env = os.environ.get("STORAGE_BACKEND", "").lower()
         data_mode_env = os.environ.get("DATA_MODE", "").lower()
-        is_test_env = (
-            os.environ.get("PYTEST_CURRENT_TEST") is not None
-            or os.environ.get("USE_IN_MEMORY_ADAPTER", "").lower() == "true"
-            or backend_env == "memory"
-            or data_mode_env in ("test", "demo")
-        )
+        is_lambda = bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+        env_name = os.environ.get("ENVIRONMENT", "").lower()
+        is_in_pytest = os.environ.get("PYTEST_CURRENT_TEST") is not None
+        is_production = is_lambda or (not is_in_pytest and env_name in ("prod", "production"))
 
-        if adapter is not None:
-            self._adapter = adapter
-        elif is_test_env:
-            self._adapter = get_shared_test_adapter()
+        if is_production:
+            # Under production AWS Lambda or ENVIRONMENT=prod/production:
+            # 1. Non-DynamoDB or in-memory adapters are strictly rejected.
+            # 2. STORAGE_BACKEND=memory or DATA_MODE=demo/test is a fatal configuration error.
+            if adapter is not None and not isinstance(adapter, DynamoDBStorageAdapter):
+                raise DatabasePersistenceError(
+                    "Security/Reliability Violation: In-memory or non-DynamoDB storage adapter is strictly forbidden in production."
+                )
+            if backend_env == "memory" or data_mode_env in ("test", "demo"):
+                raise DatabasePersistenceError(
+                    f"Configuration Error: STORAGE_BACKEND='{backend_env}' or DATA_MODE='{data_mode_env}' cannot be used in production environment."
+                )
+            self._adapter = adapter or DynamoDBStorageAdapter(table_name=self.table_name)
         else:
-            self._adapter = DynamoDBStorageAdapter(table_name=self.table_name)
+            is_test_env = (
+                is_in_pytest
+                or os.environ.get("USE_IN_MEMORY_ADAPTER", "").lower() == "true"
+                or backend_env == "memory"
+                or data_mode_env in ("test", "demo")
+            )
+
+            if adapter is not None:
+                self._adapter = adapter
+            elif is_test_env:
+                self._adapter = get_shared_test_adapter()
+            else:
+                self._adapter = DynamoDBStorageAdapter(table_name=self.table_name)
 
     def list_locations(self) -> List[Dict[str, Any]]:
         return self._adapter.list_locations()
