@@ -34,7 +34,11 @@ from backend.functions.get_recommendations.app import lambda_handler as rec_hand
 from backend.functions.get_historical.app import lambda_handler as historical_handler
 from backend.functions.admin.app import lambda_handler as admin_handler
 from backend.shared.prediction import compute_smart_recommendation
-from backend.shared.security import get_rate_limit_salt, SecurityConfigurationError
+from backend.shared.security import (
+    get_rate_limit_salt,
+    compute_anonymous_client_hash,
+    SecurityConfigurationError,
+)
 from backend.shared.response import resolve_cors_origin
 
 
@@ -202,22 +206,128 @@ def test_rate_limit_storage_failure_fails_closed():
         adapter.set_simulate_rate_limit_failure(False)
 
 
+def test_user_agent_rotation_does_not_bypass_rate_limit():
+    """
+    Priority 0 Security Remediation:
+    Verify that an attacker rotating the User-Agent header from the same source IP
+    cannot bypass the rate limit. All User-Agents from the same IP must resolve to
+    the identical rate-limit identity.
+    """
+    reset_shared_test_adapter()
+
+    # 1. Verify hash identity is stable across varying User-Agents
+    base_ip = "203.0.113.88"
+    ev1 = {
+        "requestContext": {"http": {"sourceIp": base_ip}},
+        "headers": {"user-agent": "Mozilla/5.0 (Windows NT 10.0)"},
+    }
+    ev2 = {
+        "requestContext": {"http": {"sourceIp": base_ip}},
+        "headers": {"user-agent": "CustomCurl/7.88.1"},
+    }
+    ev3 = {
+        "requestContext": {"http": {"sourceIp": base_ip}},
+        "headers": {"user-agent": "RotatedBot/9.9.9"},
+    }
+
+    hash1 = compute_anonymous_client_hash(ev1)
+    hash2 = compute_anonymous_client_hash(ev2)
+    hash3 = compute_anonymous_client_hash(ev3)
+
+    assert hash1 == hash2 == hash3, "Client hash must be identical for the same source IP regardless of User-Agent"
+
+    # 2. Verify submission rate limit triggers on 6th request even with rotated User-Agents
+    for i in range(5):
+        event = {
+            "pathParameters": {"id": "iitb-mess-h12-14"},
+            "headers": {"user-agent": f"RotatingAgentBot/{i}.0"},
+            "requestContext": {
+                "http": {"sourceIp": base_ip},
+                "requestId": f"req_rotate_{i}",
+            },
+            "body": json.dumps({
+                "reportedWaitMinutes": 8.0,
+                "queueLength": 10,
+                "idempotencyKey": f"key-rotate-{i}",
+            }),
+        }
+        res = submit_handler(event, None)
+        assert res["statusCode"] == 201
+
+    # 6th submission with a brand new User-Agent MUST be blocked with 429
+    event_6 = {
+        "pathParameters": {"id": "iitb-mess-h12-14"},
+        "headers": {"user-agent": "BrandNewUnseenAgent/99.0"},
+        "requestContext": {
+            "http": {"sourceIp": base_ip},
+            "requestId": "req_rotate_overflow",
+        },
+        "body": json.dumps({
+            "reportedWaitMinutes": 10.0,
+            "queueLength": 15,
+            "idempotencyKey": "key-rotate-overflow",
+        }),
+    }
+    res_6 = submit_handler(event_6, None)
+    assert res_6["statusCode"] == 429
+    body = json.loads(res_6["body"])
+    assert body["errorCode"] == "RATE_LIMIT_EXCEEDED"
+
+
+def test_client_forwarded_headers_are_strictly_ignored():
+    """
+    Priority 0 Security Remediation:
+    Verify that client-supplied X-Forwarded-For or Forwarded headers are strictly ignored,
+    and only trusted requestContext.http.sourceIp is used.
+    """
+    trusted_ip = "198.51.100.42"
+    spoofed_ip = "1.2.3.4"
+
+    event_spoofed = {
+        "requestContext": {"http": {"sourceIp": trusted_ip}},
+        "headers": {
+            "x-forwarded-for": spoofed_ip,
+            "forwarded": f"for={spoofed_ip}",
+        },
+    }
+    event_honest = {
+        "requestContext": {"http": {"sourceIp": trusted_ip}},
+        "headers": {},
+    }
+
+    hash_spoofed = compute_anonymous_client_hash(event_spoofed)
+    hash_honest = compute_anonymous_client_hash(event_honest)
+
+    assert hash_spoofed == hash_honest, "Spoofed forwarded headers must be ignored in client identity calculation"
+
+
 def test_missing_rate_limit_salt_fails_closed_in_production(monkeypatch):
     """
-    Priority 1: In production mode, missing or insecure RATE_LIMIT_SALT must raise SecurityConfigurationError
-    and return HTTP 500 SECURITY_CONFIGURATION_ERROR.
+    Priority 1: In production mode, missing, short (< 32 chars), or weak RATE_LIMIT_SALT
+    must raise SecurityConfigurationError and return HTTP 500 SECURITY_CONFIGURATION_ERROR.
     """
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("DATA_MODE", "production")
+
+    # 1. Missing salt
     monkeypatch.setenv("RATE_LIMIT_SALT", "")
-
-    with pytest.raises(SecurityConfigurationError):
+    with pytest.raises(SecurityConfigurationError, match="missing"):
         get_rate_limit_salt()
 
-    # Short salt (< 16 chars) must also fail closed
-    monkeypatch.setenv("RATE_LIMIT_SALT", "too-short")
-    with pytest.raises(SecurityConfigurationError):
+    # 2. Short salt (< 32 chars)
+    monkeypatch.setenv("RATE_LIMIT_SALT", "short-phrase-16chars")
+    with pytest.raises(SecurityConfigurationError, match="insufficient entropy"):
         get_rate_limit_salt()
+
+    # 3. Weak memorable dictionary phrase
+    monkeypatch.setenv("RATE_LIMIT_SALT", "my-default-secret-password-phrase-for-testing-123456")
+    with pytest.raises(SecurityConfigurationError, match="predictable or weak pattern"):
+        get_rate_limit_salt()
+
+    # 4. Valid 64-hex high-entropy salt succeeds
+    valid_hex_salt = "f3a8b2c1d4e5987019283746abcdef987019283746abcdef987019283746abcdef"
+    monkeypatch.setenv("RATE_LIMIT_SALT", valid_hex_salt)
+    assert get_rate_limit_salt() == valid_hex_salt
 
 
 def test_admin_authorization_cognito_and_production_lockdown(monkeypatch):

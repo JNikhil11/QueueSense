@@ -29,8 +29,9 @@ This audit verifies that the QueueSense platform satisfies all **Production Hard
 | Area | Implementation & Architecture | Verification Evidence |
 |---|---|---|
 | **Atomic Idempotency** | Uses `boto3` `transact_write_items` atomically writing both report item and idempotency record (`IDEMPOTENCY#{key}`) with `attribute_not_exists(PK)`. Replays return cached report; conflicts return HTTP 409 `IDEMPOTENCY_CONFLICT`. | `test_idempotency_deduplication`, `test_concurrent_idempotency_simulation`, `test_idempotency_write_failure_fails_closed` pass. |
-| **Fail-Closed Rate Limiting** | HMAC-SHA256 anonymous client hashing (source IP + User-Agent). DynamoDB counter update strictly fails closed if storage error occurs. Fails closed with HTTP 500 if `RATE_LIMIT_SALT` is missing or $< 16$ chars in production. | `test_client_rate_limiting_enforced`, `test_rate_limit_storage_failure_fails_closed`, `test_missing_rate_limit_salt_fails_closed_in_production` pass. |
+| **Fail-Closed Rate Limiting & User-Agent Isolation** | HMAC-SHA256 anonymous client hashing based exclusively on trusted `requestContext.http.sourceIp` (client headers like `User-Agent` and `X-Forwarded-For` are strictly excluded, preventing rotation bypasses). Storage errors fail closed (HTTP 503 `RATE_LIMIT_CHECK_FAILED`). Missing, weak, or $< 32$ character salt fails closed with HTTP 500. | `test_client_rate_limiting_enforced`, `test_user_agent_rotation_does_not_bypass_rate_limit`, `test_client_forwarded_headers_are_strictly_ignored`, `test_rate_limit_storage_failure_fails_closed`, `test_missing_rate_limit_salt_fails_closed_in_production` pass. |
 | **Cognito Admin Auth** | SAM template defines `QueueSenseUserPool`, `QueueSenseUserPoolClient`, and `QueueSenseAdminGroup`. API Gateway HttpApi applies JWT authorizer. Lambda checks `cognito:groups` contains `Admins`. Static keys disabled in production. | `test_admin_authorization_cognito_and_production_lockdown` passes. |
+| **Least-Privilege IAM Scoping** | Replaced `DynamoDBCrudPolicy` on `GetLocationsFunction`, `GetQueueFunction`, `SubmitReportFunction`, and `GetRecommendationsFunction` with explicit statements granting only exact actions used (`GetItem`, `Query`, `PutItem`, `Scan`, `UpdateItem`), eliminating unused `dynamodb:DeleteItem`. | `infrastructure/template.yaml` validated with `sam validate --lint`. |
 | **Throttling In SAM** | `AWS::Serverless::HttpApi` template defines `DefaultRouteSettings` (Rate: 50, Burst: 100) and `RouteSettings` for `POST /locations/{id}/reports` (Rate: 10, Burst: 20). | `sam validate --lint -t infrastructure/template.yaml` validated with 0 errors. |
 | **Historical Intelligence** | Query index cutoff (`SK >= REPORT#{14_days_ago}`). Timezone conversion to `Asia/Kolkata` (IST, UTC+05:30). Hourly trends report `sampleCount`, `historicalAverageWaitMinutes`, and `metricType: "HISTORICAL_AVERAGES"`. Peak hours suppressed when sample count $< 3$. | `test_historical_timezone_conversion_and_cutoff` and `test_historical_insufficient_samples_suppresses_rush_hours` pass. |
 | **Directory Realism** | Meal session timings (`Breakfast: 07:30-09:30, Lunch: 12:00-14:15, Dinner: 19:30-21:30`) and approximate capacity (`Large Dining Complex (~500-650 approx.)`) for all 10 IITB and 5 VIT-AP outlets. | Verified in `database.py`, `api.ts`, and `OutletCard.tsx`. |
@@ -43,14 +44,14 @@ This audit verifies that the QueueSense platform satisfies all **Production Hard
 
 ### Backend Unit & Integration Tests (Python 3.12 / pytest)
 ```
-collected 39 items
+collected 41 items
 backend/tests/test_api_handlers.py ........                              [ 20%]
-backend/tests/test_database.py ...                                       [ 28%]
-backend/tests/test_prediction.py ...........                             [ 56%]
-backend/tests/test_production_hardening.py .............                 [ 89%]
+backend/tests/test_database.py ...                                       [ 27%]
+backend/tests/test_prediction.py ...........                             [ 54%]
+backend/tests/test_production_hardening.py ...............               [ 90%]
 backend/tests/test_validation.py ......                                  [100%]
 
-============================= 39 passed in 0.20s ==============================
+============================= 41 passed in 0.39s ==============================
 ```
 
 ### Frontend Unit Tests (Vitest)

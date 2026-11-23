@@ -249,8 +249,14 @@ Resources:
       CodeUri: ../backend/
       Handler: functions.get_locations.app.lambda_handler
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${TableName}-${Environment}"
+        - Statement:
+            - Sid: GetLocationsDynamoDBAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Scan
+                - dynamodb:PutItem
+              Resource: !GetAtt MainTable.Arn
       Events:
         ListLocations:
           Type: HttpApi
@@ -265,8 +271,14 @@ Resources:
       CodeUri: ../backend/
       Handler: functions.get_queue.app.lambda_handler
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${TableName}-${Environment}"
+        - Statement:
+            - Sid: GetQueueDynamoDBAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:PutItem
+              Resource: !GetAtt MainTable.Arn
       Events:
         GetQueueDetails:
           Type: HttpApi
@@ -287,8 +299,15 @@ Resources:
       CodeUri: ../backend/
       Handler: functions.submit_report.app.lambda_handler
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${TableName}-${Environment}"
+        - Statement:
+            - Sid: SubmitReportDynamoDBAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt MainTable.Arn
       Events:
         SubmitObservation:
           Type: HttpApi
@@ -303,8 +322,15 @@ Resources:
       CodeUri: ../backend/
       Handler: functions.get_recommendations.app.lambda_handler
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${TableName}-${Environment}"
+        - Statement:
+            - Sid: GetRecommendationsDynamoDBAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Scan
+                - dynamodb:Query
+                - dynamodb:PutItem
+              Resource: !GetAtt MainTable.Arn
       Events:
         FetchRecommendations:
           Type: HttpApi
