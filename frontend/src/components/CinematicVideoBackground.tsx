@@ -123,3 +123,4 @@ export const CinematicVideoBackground: React.FC<CinematicVideoBackgroundProps> =
     </div>
   );
 };
+

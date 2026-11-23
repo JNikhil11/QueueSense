@@ -183,9 +183,40 @@
   animation: flow-drift 12s ease-in-out infinite;
 }
 
+/* Modal Entrance & Focus Animations */
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: modal-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-modal-in {
+  animation: modal-scale-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-pulse-live,
   .animate-flow-drift,
+  .animate-fade-in,
+  .animate-modal-in,
   .outlet-card,
   .stat-card,
   .recommendation-card,
@@ -204,7 +235,7 @@
 @media (hover: hover) and (pointer: fine) {
   /* Outlets Grid: Dim non-hovered cards when any card is hovered (pure opacity, zero filter saturation overhead) */
   .cards-grid:has(.outlet-card:hover) .outlet-card:not(:hover) {
-    opacity: 0.72;
+    opacity: 0.52;
     transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
@@ -227,7 +258,7 @@
 
   /* Stats Grid: Dim non-hovered stat cards */
   .stats-grid:has(.stat-card:hover) .stat-card:not(:hover) {
-    opacity: 0.72;
+    opacity: 0.55;
     transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
 

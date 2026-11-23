@@ -606,7 +606,7 @@ export const api = {
           body: JSON.stringify({ ...payload, idempotencyKey }),
         });
 
-        if (res.status === 201) {
+        if (res.status === 200 || res.status === 201) {
           const json = await res.json();
           return { ...json.data, isLive: true };
         }

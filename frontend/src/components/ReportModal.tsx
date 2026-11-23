@@ -35,6 +35,18 @@ export const ReportModal: React.FC<ReportModalProps> = ({
     }
   }, [initialLocationId, locations]);
 
+  // Keyboard navigation & accessibility: Close modal on Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const quickWaits = [2, 5, 8, 12, 15, 20];
@@ -85,9 +97,12 @@ export const ReportModal: React.FC<ReportModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="report-dialog-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in"
     >
-      <div className="w-full max-w-lg max-h-[90vh] rounded-3xl glass-panel-elevated shadow-2xl flex flex-col overflow-hidden glass-specular-edge border-[#39FF14]/25">
+      <div className="w-full max-w-lg max-h-[90vh] rounded-3xl glass-panel-elevated shadow-2xl flex flex-col overflow-hidden glass-specular-edge border-[#39FF14]/25 animate-modal-in">
         {/* Header */}
         <div className="p-5 sm:p-6 border-b border-white/[0.08] flex items-center justify-between shrink-0">
           <div>

@@ -53,6 +53,18 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
     fetchData();
   }, [locationId, refreshTrigger]);
 
+  // Keyboard navigation & accessibility: Close modal on Escape
+  useEffect(() => {
+    if (!locationId) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [locationId, onClose]);
+
   if (!locationId) return null;
 
   const latestReport = reports.length > 0 ? reports[0] : null;
@@ -80,9 +92,12 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="outlet-detail-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in"
     >
-      <div className="w-full max-w-2xl max-h-[90vh] rounded-3xl glass-panel-elevated shadow-2xl flex flex-col overflow-hidden glass-specular-edge border-[#39FF14]/30">
+      <div className="w-full max-w-2xl max-h-[90vh] rounded-3xl glass-panel-elevated shadow-2xl flex flex-col overflow-hidden glass-specular-edge border-[#39FF14]/30 animate-modal-in">
         {/* Header */}
         <div className="p-6 border-b border-white/[0.08] flex items-start justify-between">
           <div>

@@ -194,4 +194,102 @@ describe('Global Cinematic Video Background & Modal Synchronization Engine', () 
     expect(finalState.layerDisplay).toBe('block');
     expect(finalState.isPaused).toBe(false);
   });
+
+  it('restores card hover dimming and lift without layout shifts or text blurring', async () => {
+    await page.goto(PREVIEW_URL, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('.outlet-card');
+
+    const cards = await page.$$('.outlet-card');
+    expect(cards.length).toBeGreaterThan(1);
+
+    // Initial state: all cards at full opacity
+    const initialOpacities = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('.outlet-card')).map(
+        (c) => window.getComputedStyle(c).opacity
+      );
+    });
+    expect(initialOpacities.every((op) => op === '1')).toBe(true);
+
+    // Hover first card
+    await cards[0].hover();
+    await new Promise((r) => setTimeout(r, 350));
+
+    const hoverState = await page.evaluate(() => {
+      const allCards = Array.from(document.querySelectorAll('.outlet-card'));
+      return {
+        hoveredOpacity: window.getComputedStyle(allCards[0]).opacity,
+        surroundingOpacities: allCards.slice(1).map((c) => window.getComputedStyle(c).opacity),
+        hoveredTransform: window.getComputedStyle(allCards[0]).transform,
+      };
+    });
+
+    expect(hoverState.hoveredOpacity).toBe('1');
+    // Surrounding cards are dimmed to 0.52
+    expect(hoverState.surroundingOpacities.every((op) => parseFloat(op) < 0.65)).toBe(true);
+    // Active card lifts subtly (translateY(-4px))
+    expect(hoverState.hoveredTransform).not.toBe('none');
+
+    // Move pointer away to navbar
+    const header = await page.$('header');
+    await header?.hover();
+    await new Promise((r) => setTimeout(r, 350));
+
+    const resetOpacities = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('.outlet-card')).map(
+        (c) => window.getComputedStyle(c).opacity
+      );
+    });
+    expect(resetOpacities.every((op) => op === '1')).toBe(true);
+  });
+
+  it('supports Escape key to dismiss modals and safely resume background video', async () => {
+    await page.goto(PREVIEW_URL, { waitUntil: 'networkidle2' });
+    const reportBtn = await page.waitForSelector('header button.btn-electric');
+    await reportBtn?.click();
+
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+
+    // Verify video paused
+    const pausedDuringModal = await page.evaluate(() => {
+      const video = document.querySelector('[data-testid="cinematic-video-layer"] video') as HTMLVideoElement | null;
+      return video?.paused;
+    });
+    expect(pausedDuringModal).toBe(true);
+
+    // Press Escape key
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), { timeout: 5000 });
+
+    // Video resumes
+    await new Promise((r) => setTimeout(r, 300));
+    const resumedAfterEscape = await page.evaluate(() => {
+      const layer = document.querySelector('[data-testid="cinematic-video-layer"]') as HTMLElement | null;
+      const video = layer?.querySelector('video') as HTMLVideoElement | null;
+      return {
+        layerDisplay: layer ? window.getComputedStyle(layer).display : null,
+        isPaused: video ? video.paused : null,
+      };
+    });
+
+    expect(resumedAfterEscape.layerDisplay).toBe('block');
+    expect(resumedAfterEscape.isPaused).toBe(false);
+  });
+
+  it('supports backdrop click to dismiss modals', async () => {
+    await page.goto(PREVIEW_URL, { waitUntil: 'networkidle2' });
+    const reportBtn = await page.waitForSelector('header button.btn-electric');
+    await reportBtn?.click();
+
+    const backdrop = await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+
+    // Click on the backdrop padding area (top left corner of dialog overlay)
+    const box = await backdrop!.boundingBox();
+    if (box) {
+      await page.mouse.click(box.x + 10, box.y + 10);
+    }
+
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), { timeout: 5000 });
+    const dialogClosed = await page.evaluate(() => !document.querySelector('[role="dialog"]'));
+    expect(dialogClosed).toBe(true);
+  });
 });

@@ -23,7 +23,7 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
       : null;
 
   return (
-    <div className="outlet-card group relative rounded-3xl glass-panel glass-card-ambient p-5 sm:p-6 flex flex-col justify-between transition-all duration-300 glass-specular-edge border-[#39FF14]/30 hover:border-[#39FF14]/60 min-w-0">
+    <div className="outlet-card group relative rounded-3xl glass-panel glass-card-ambient p-5 sm:p-6 flex flex-col justify-between glass-specular-edge border-[#39FF14]/30 hover:border-[#39FF14]/60 min-w-0">
       {/* Top Meta Header */}
       <div>
         <div className="flex items-start justify-between gap-3 mb-2.5">

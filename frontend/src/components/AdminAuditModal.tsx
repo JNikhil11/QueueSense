@@ -55,11 +55,31 @@ export const AdminAuditModal: React.FC<AdminAuditModalProps> = ({ isOpen, onClos
     }
   }, [isOpen]);
 
+  // Keyboard navigation & accessibility: Close modal on Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in">
-      <div className="w-full max-w-3xl max-h-[85vh] rounded-3xl glass-panel-elevated shadow-2xl flex flex-col overflow-hidden glass-specular-edge border-[#7DF9FF]/30">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="admin-audit-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in"
+    >
+      <div className="w-full max-w-3xl max-h-[85vh] rounded-3xl glass-panel-elevated shadow-2xl flex flex-col overflow-hidden glass-specular-edge border-[#7DF9FF]/30 animate-modal-in">
         {/* Header */}
         <div className="p-6 border-b border-white/[0.08] flex items-center justify-between">
           <div className="flex items-center gap-3">
