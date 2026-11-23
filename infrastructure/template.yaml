@@ -255,6 +255,7 @@ Resources:
               Action:
                 - dynamodb:GetItem
                 - dynamodb:Scan
+                - dynamodb:Query
                 - dynamodb:PutItem
               Resource: !GetAtt MainTable.Arn
       Events:
@@ -298,6 +299,9 @@ Resources:
     Properties:
       CodeUri: ../backend/
       Handler: functions.submit_report.app.lambda_handler
+      Environment:
+        Variables:
+          RATE_LIMIT_SALT_PARAMETER_NAME: !Sub "/queuesense/${Environment}/rate_limit_salt"
       Policies:
         - Statement:
             - Sid: SubmitReportDynamoDBAccess
@@ -308,6 +312,11 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:UpdateItem
               Resource: !GetAtt MainTable.Arn
+            - Sid: SubmitReportSSMParameterAccess
+              Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/queuesense/${Environment}/rate_limit_salt"
       Events:
         SubmitObservation:
           Type: HttpApi

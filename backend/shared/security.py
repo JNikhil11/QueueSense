@@ -8,8 +8,13 @@ No hardcoded secret fallbacks in production.
 from __future__ import annotations
 import hmac
 import hashlib
+import logging
 import os
+import sys
 from typing import Dict, Any, Optional
+
+logger = logging.getLogger("queuesense.security")
+logger.setLevel(logging.INFO)
 
 WEAK_SALT_PATTERNS = {
     "password",
@@ -22,38 +27,27 @@ WEAK_SALT_PATTERNS = {
     "testing",
 }
 
+# Module-level in-memory cache for the validated salt in the Lambda execution environment
+_CACHED_SALT: Optional[str] = None
+
 
 class SecurityConfigurationError(Exception):
     """Raised when required security credentials or salt configurations are missing or weak."""
     pass
 
 
-def get_rate_limit_salt() -> str:
-    """
-    Retrieves the required HMAC salt for anonymous client hashing.
-    Fails closed if the secret is missing or insecure in production.
-    Strictly requires a cryptographically strong secret (>= 32 characters, e.g. 256-bit hex).
-    """
-    salt = os.environ.get("RATE_LIMIT_SALT")
-    env = os.environ.get("ENVIRONMENT", "").lower()
-    data_mode = os.environ.get("DATA_MODE", "").lower()
-    is_production = (
-        env in ("prod", "production")
-        or data_mode == "production"
-        or bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
-    )
+def clear_salt_cache() -> None:
+    """Clears the in-memory cached salt, primarily for testing and lifecycle resets."""
+    global _CACHED_SALT
+    _CACHED_SALT = None
+    for mod_name in ("security", "backend.shared.security"):
+        mod = sys.modules.get(mod_name)
+        if mod and mod is not globals() and hasattr(mod, "_CACHED_SALT"):
+            setattr(mod, "_CACHED_SALT", None)
 
-    if not salt or not salt.strip():
-        if is_production:
-            raise SecurityConfigurationError(
-                "RATE_LIMIT_SALT environment variable is missing. Production strictly requires a strong, high-entropy secret."
-            )
-        # Unit test / non-production dev fallback
-        if os.environ.get("PYTEST_CURRENT_TEST") or data_mode in ("test", "demo"):
-            return "test_transient_dev_salt_only_non_prod_entropy_32_chars_minimum_12345"
-        raise SecurityConfigurationError("RATE_LIMIT_SALT must be set in environment.")
 
-    clean_salt = salt.strip()
+def _validate_salt_strength(clean_salt: str, is_production: bool) -> None:
+    """Validates that the provided salt meets strict production entropy requirements."""
     if is_production:
         if len(clean_salt) < 32:
             raise SecurityConfigurationError(
@@ -65,7 +59,92 @@ def get_rate_limit_salt() -> str:
                 "RATE_LIMIT_SALT matches a predictable or weak pattern. Provide a cryptographically random secret."
             )
 
-    return clean_salt
+
+def get_rate_limit_salt() -> str:
+    """
+    Retrieves the required HMAC salt for anonymous client hashing.
+    Fails closed if the secret is missing or insecure in production.
+    Strictly requires a cryptographically strong secret (>= 32 characters, e.g. 256-bit hex).
+
+    Delivery Strategy:
+    1. Returns in-memory cached salt if previously retrieved in this Lambda container.
+    2. Checks direct RATE_LIMIT_SALT environment variable (local dev / test configuration).
+    3. If not set, checks RATE_LIMIT_SALT_PARAMETER_NAME and fetches the SecureString parameter
+       from AWS Systems Manager (SSM) Parameter Store with WithDecryption=True using boto3.
+       The fetched value is validated and cached in-memory for subsequent container invocations.
+    4. If both are absent or retrieval fails, production strictly fails closed.
+    """
+    global _CACHED_SALT
+    if _CACHED_SALT is not None:
+        return _CACHED_SALT
+
+    env = os.environ.get("ENVIRONMENT", "").lower()
+    data_mode = os.environ.get("DATA_MODE", "").lower()
+    is_production = (
+        env in ("prod", "production")
+        or data_mode == "production"
+        or bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+    )
+
+    # 1. Direct environment variable (local development, isolated testing)
+    direct_salt = os.environ.get("RATE_LIMIT_SALT")
+    if direct_salt and direct_salt.strip():
+        clean_salt = direct_salt.strip()
+        _validate_salt_strength(clean_salt, is_production)
+        _CACHED_SALT = clean_salt
+        return _CACHED_SALT
+
+    # 2. Runtime retrieval from AWS SSM Parameter Store SecureString
+    ssm_param_name = os.environ.get("RATE_LIMIT_SALT_PARAMETER_NAME")
+    if ssm_param_name and ssm_param_name.strip():
+        clean_param_name = ssm_param_name.strip()
+        try:
+            import boto3  # type: ignore
+        except ImportError:
+            raise SecurityConfigurationError("boto3 is required to retrieve SSM parameter in production.")
+
+        try:
+            from botocore.exceptions import ClientError  # type: ignore
+        except ImportError:
+            ClientError = Exception  # type: ignore
+
+        try:
+            ssm_client = boto3.client("ssm")
+            response = ssm_client.get_parameter(Name=clean_param_name, WithDecryption=True)
+            param_val = response.get("Parameter", {}).get("Value")
+            if not param_val or not param_val.strip():
+                raise SecurityConfigurationError(
+                    f"SSM Parameter '{clean_param_name}' contains an empty value."
+                )
+            clean_salt = param_val.strip()
+            _validate_salt_strength(clean_salt, is_production)
+            _CACHED_SALT = clean_salt
+            return _CACHED_SALT
+        except SecurityConfigurationError:
+            raise
+        except Exception as e:
+            # ClientError, AccessDenied, ParameterNotFound, KMS decryption failure, etc.
+            error_code = getattr(e, "response", {}).get("Error", {}).get("Code", type(e).__name__)
+            logger.error(
+                "Failed to retrieve rate limit salt from SSM parameter '%s': %s",
+                clean_param_name,
+                error_code,
+            )
+            raise SecurityConfigurationError(
+                f"Failed to securely retrieve rate limit salt from SSM parameter '{clean_param_name}': {error_code}"
+            )
+
+    # 3. Neither RATE_LIMIT_SALT nor RATE_LIMIT_SALT_PARAMETER_NAME is provided
+    if is_production:
+        raise SecurityConfigurationError(
+            "RATE_LIMIT_SALT or RATE_LIMIT_SALT_PARAMETER_NAME is missing. Production strictly requires a strong, high-entropy secret."
+        )
+
+    # Unit test / non-production dev fallback
+    if os.environ.get("PYTEST_CURRENT_TEST") or data_mode in ("test", "demo"):
+        return "test_transient_dev_salt_only_non_prod_entropy_32_chars_minimum_12345"
+
+    raise SecurityConfigurationError("RATE_LIMIT_SALT must be set in environment.")
 
 
 def compute_anonymous_client_hash(
@@ -122,3 +201,12 @@ def extract_idempotency_key(event: Dict[str, Any], body: Optional[Dict[str, Any]
             return body_key.strip()[:64]
 
     return None
+
+
+# Module aliasing to prevent dual-import identity mismatch between
+# `import security` and `from backend.shared import security` in test suites
+if "security" in sys.modules and "backend.shared.security" not in sys.modules:
+    sys.modules["backend.shared.security"] = sys.modules["security"]
+elif "backend.shared.security" in sys.modules and "security" not in sys.modules:
+    sys.modules["security"] = sys.modules["backend.shared.security"]
+

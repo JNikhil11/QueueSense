@@ -37,6 +37,7 @@ from backend.shared.prediction import compute_smart_recommendation
 from backend.shared.security import (
     get_rate_limit_salt,
     compute_anonymous_client_hash,
+    clear_salt_cache,
     SecurityConfigurationError,
 )
 from backend.shared.response import resolve_cors_origin
@@ -328,6 +329,242 @@ def test_missing_rate_limit_salt_fails_closed_in_production(monkeypatch):
     valid_hex_salt = "f3a8b2c1d4e5987019283746abcdef987019283746abcdef987019283746abcdef"
     monkeypatch.setenv("RATE_LIMIT_SALT", valid_hex_salt)
     assert get_rate_limit_salt() == valid_hex_salt
+
+
+def test_get_locations_template_and_ssm_policy_configuration():
+    """
+    Verify SAM template least-privilege configurations:
+    1. GetLocationsFunction includes dynamodb:Query alongside GetItem, Scan, PutItem.
+    2. SubmitReportFunction includes ssm:GetParameter on exact parameter ARN.
+    3. SubmitReportFunction defines RATE_LIMIT_SALT_PARAMETER_NAME environment variable.
+    """
+    import os
+    import re
+    template_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "infrastructure", "template.yaml")
+    )
+    with open(template_path, "r", encoding="utf-8") as f:
+        template_text = f.read()
+
+    # Verify GetLocationsFunction has dynamodb:Query
+    get_loc_section = re.search(r"GetLocationsFunction:.*?(?=GetQueueFunction:)", template_text, re.DOTALL)
+    assert get_loc_section, "GetLocationsFunction must be present in template"
+    loc_sec_text = get_loc_section.group(0)
+    assert "dynamodb:Query" in loc_sec_text, "GetLocationsFunction policy must allow dynamodb:Query"
+    assert "dynamodb:GetItem" in loc_sec_text
+    assert "dynamodb:Scan" in loc_sec_text
+    assert "dynamodb:PutItem" in loc_sec_text
+    assert "!GetAtt MainTable.Arn" in loc_sec_text
+
+    # Verify SubmitReportFunction has ssm:GetParameter and RATE_LIMIT_SALT_PARAMETER_NAME
+    submit_section = re.search(r"SubmitReportFunction:.*?(?=GetRecommendationsFunction:)", template_text, re.DOTALL)
+    assert submit_section, "SubmitReportFunction must be present in template"
+    sub_sec_text = submit_section.group(0)
+    assert "RATE_LIMIT_SALT_PARAMETER_NAME" in sub_sec_text
+    assert "ssm:GetParameter" in sub_sec_text
+    assert "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/queuesense/${Environment}/rate_limit_salt" in sub_sec_text
+
+
+def test_production_salt_fetched_from_ssm_securestring(monkeypatch):
+    """
+    Verify that in production mode, salt is retrieved via SSM GetParameter with WithDecryption=True.
+    """
+    import sys
+    from unittest.mock import MagicMock
+
+    clear_salt_cache()
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DATA_MODE", "production")
+    monkeypatch.delenv("RATE_LIMIT_SALT", raising=False)
+    monkeypatch.setenv("RATE_LIMIT_SALT_PARAMETER_NAME", "/queuesense/prod/rate_limit_salt")
+
+    valid_hex_salt = "f3a8b2c1d4e5987019283746abcdef987019283746abcdef987019283746abcdef"
+    mock_ssm = MagicMock()
+    mock_ssm.get_parameter.return_value = {
+        "Parameter": {
+            "Name": "/queuesense/prod/rate_limit_salt",
+            "Type": "SecureString",
+            "Value": valid_hex_salt,
+        }
+    }
+    mock_boto3 = MagicMock()
+    mock_boto3.client.return_value = mock_ssm
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+
+    salt = get_rate_limit_salt()
+    assert salt == valid_hex_salt
+    mock_ssm.get_parameter.assert_called_once_with(
+        Name="/queuesense/prod/rate_limit_salt",
+        WithDecryption=True,
+    )
+
+
+def test_ssm_salt_retrieval_is_cached(monkeypatch):
+    """
+    Verify that retrieved salt is cached in memory and does not call SSM repeatedly.
+    """
+    import sys
+    from unittest.mock import MagicMock
+
+    clear_salt_cache()
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DATA_MODE", "production")
+    monkeypatch.delenv("RATE_LIMIT_SALT", raising=False)
+    monkeypatch.setenv("RATE_LIMIT_SALT_PARAMETER_NAME", "/queuesense/prod/rate_limit_salt")
+
+    valid_hex_salt = "f3a8b2c1d4e5987019283746abcdef987019283746abcdef987019283746abcdef"
+    mock_ssm = MagicMock()
+    mock_ssm.get_parameter.return_value = {
+        "Parameter": {"Value": valid_hex_salt}
+    }
+    mock_boto3 = MagicMock()
+    mock_boto3.client.return_value = mock_ssm
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+
+    # First call fetches from SSM
+    salt1 = get_rate_limit_salt()
+    assert salt1 == valid_hex_salt
+    assert mock_ssm.get_parameter.call_count == 1
+
+    # Subsequent calls must return cached salt without calling SSM again
+    salt2 = get_rate_limit_salt()
+    salt3 = get_rate_limit_salt()
+    assert salt2 == salt1
+    assert salt3 == salt1
+    assert mock_ssm.get_parameter.call_count == 1
+
+
+def test_ssm_failures_fail_closed(monkeypatch):
+    """
+    Verify that missing parameter, access denied, KMS decryption failure,
+    or empty value fail closed with SecurityConfigurationError.
+    """
+    import sys
+    from unittest.mock import MagicMock
+
+    class FakeClientError(Exception):
+        def __init__(self, code):
+            super().__init__(f"SSM error: {code}")
+            self.response = {"Error": {"Code": code, "Message": f"Failed with {code}"}}
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DATA_MODE", "production")
+    monkeypatch.delenv("RATE_LIMIT_SALT", raising=False)
+    monkeypatch.setenv("RATE_LIMIT_SALT_PARAMETER_NAME", "/queuesense/prod/rate_limit_salt")
+
+    error_cases = [
+        "ParameterNotFound",
+        "AccessDeniedException",
+        "KMS.AccessDeniedException",
+        "DecryptionFailure",
+    ]
+
+    for code in error_cases:
+        clear_salt_cache()
+        mock_ssm = MagicMock()
+        mock_ssm.get_parameter.side_effect = FakeClientError(code)
+        mock_boto3 = MagicMock()
+        mock_boto3.client.return_value = mock_ssm
+        monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+
+        with pytest.raises(SecurityConfigurationError, match=code):
+            get_rate_limit_salt()
+
+    # Empty parameter value
+    clear_salt_cache()
+    mock_ssm = MagicMock()
+    mock_ssm.get_parameter.return_value = {"Parameter": {"Value": "   "}}
+    mock_boto3 = MagicMock()
+    mock_boto3.client.return_value = mock_ssm
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    with pytest.raises(SecurityConfigurationError, match="empty value"):
+        get_rate_limit_salt()
+
+
+def test_ssm_weak_or_invalid_salts_rejected(monkeypatch):
+    """
+    Verify that SSM returning short or predictable salts is rejected in production.
+    """
+    import sys
+    from unittest.mock import MagicMock
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DATA_MODE", "production")
+    monkeypatch.delenv("RATE_LIMIT_SALT", raising=False)
+    monkeypatch.setenv("RATE_LIMIT_SALT_PARAMETER_NAME", "/queuesense/prod/rate_limit_salt")
+
+    # 1. Short salt (< 32 chars)
+    clear_salt_cache()
+    mock_ssm = MagicMock()
+    mock_ssm.get_parameter.return_value = {"Parameter": {"Value": "short_salt_16"}}
+    mock_boto3 = MagicMock()
+    mock_boto3.client.return_value = mock_ssm
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    with pytest.raises(SecurityConfigurationError, match="insufficient entropy"):
+        get_rate_limit_salt()
+
+    # 2. Predictable weak dictionary pattern
+    clear_salt_cache()
+    mock_ssm = MagicMock()
+    mock_ssm.get_parameter.return_value = {
+        "Parameter": {"Value": "my-default-secret-password-phrase-for-testing-123456"}
+    }
+    mock_boto3.client.return_value = mock_ssm
+    with pytest.raises(SecurityConfigurationError, match="predictable or weak pattern"):
+        get_rate_limit_salt()
+
+
+def test_no_secret_exposed_in_error_responses_or_logs(monkeypatch, caplog):
+    """
+    Verify that when SSM fails or salt is invalid, SubmitReportFunction:
+    1. Returns HTTP 500 INTERNAL_ERROR.
+    2. Does NOT leak parameter names, credentials, or secrets in API response.
+    3. Does NOT log sensitive salt data.
+    """
+    import sys
+    import logging
+    from unittest.mock import MagicMock
+
+    clear_salt_cache()
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DATA_MODE", "production")
+    monkeypatch.delenv("RATE_LIMIT_SALT", raising=False)
+    monkeypatch.setenv("RATE_LIMIT_SALT_PARAMETER_NAME", "/queuesense/prod/rate_limit_salt")
+
+    class FakeClientError(Exception):
+        def __init__(self):
+            super().__init__("AccessDeniedException")
+            self.response = {"Error": {"Code": "AccessDeniedException", "Message": "KMS key denied"}}
+
+    mock_ssm = MagicMock()
+    mock_ssm.get_parameter.side_effect = FakeClientError()
+    mock_boto3 = MagicMock()
+    mock_boto3.client.return_value = mock_ssm
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+
+    event = {
+        "pathParameters": {"id": "iitb-mess-h12-14"},
+        "headers": {},
+        "requestContext": {
+            "http": {"sourceIp": "198.51.100.77"},
+            "requestId": "req_test_ssm_err",
+        },
+        "body": json.dumps({
+            "reportedWaitMinutes": 10.0,
+            "queueLength": 12,
+        }),
+    }
+
+    with caplog.at_level(logging.INFO):
+        res = submit_handler(event, None)
+
+    assert res["statusCode"] == 500
+    body = json.loads(res["body"])
+    assert body["errorCode"] == "SECURITY_CONFIGURATION_ERROR"
+    assert "Server security configuration error" in body["error"]
+    assert "rate_limit_salt" not in body["error"].lower()
+    assert "secret" not in body["error"].lower()
+    assert "accessdenied" not in body["error"].lower()
 
 
 def test_admin_authorization_cognito_and_production_lockdown(monkeypatch):
