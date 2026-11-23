@@ -1,0 +1,194 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  QueueSense Serverless Backend Infrastructure
+  Techfest, IIT Bombay × AWS ShipIt Challenge
+  Real-Time Campus Queue Intelligence
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment stage name
+  TableName:
+    Type: String
+    Default: QueueSense-Main
+    Description: DynamoDB single-table name
+
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 256
+    Runtime: python3.12
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref MainTable
+        ENVIRONMENT: !Ref Environment
+
+Resources:
+  # ==========================================
+  # Storage: DynamoDB Single-Table Design
+  # ==========================================
+  MainTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${TableName}-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Project
+          Value: QueueSense
+        - Key: Challenge
+          Value: Techfest-AWS-ShipIt
+
+  # ==========================================
+  # API Gateway: HTTP API with CORS
+  # ==========================================
+  QueueSenseHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Name: !Sub "queuesense-api-${Environment}"
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - X-Api-Key
+        MaxAge: 600
+
+  # ==========================================
+  # Lambda Functions
+  # ==========================================
+
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: functions.health.app.lambda_handler
+      Events:
+        HealthCheck:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref QueueSenseHttpApi
+            Path: /health
+            Method: GET
+
+  GetLocationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: functions.get_locations.app.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TableName}-${Environment}"
+      Events:
+        ListLocations:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref QueueSenseHttpApi
+            Path: /locations
+            Method: GET
+
+  GetQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: functions.get_queue.app.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TableName}-${Environment}"
+      Events:
+        GetQueueDetails:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref QueueSenseHttpApi
+            Path: /locations/{id}/queue
+            Method: GET
+        GetLocationInfo:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref QueueSenseHttpApi
+            Path: /locations/{id}
+            Method: GET
+
+  SubmitReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: functions.submit_report.app.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TableName}-${Environment}"
+      Events:
+        SubmitObservation:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref QueueSenseHttpApi
+            Path: /locations/{id}/reports
+            Method: POST
+
+  GetRecommendationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: functions.get_recommendations.app.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${TableName}-${Environment}"
+      Events:
+        FetchRecommendations:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref QueueSenseHttpApi
+            Path: /recommendations
+            Method: GET
+
+  AdminReportsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: functions.admin.app.lambda_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${TableName}-${Environment}"
+      Events:
+        AdminAuditFeed:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref QueueSenseHttpApi
+            Path: /admin/reports
+            Method: GET
+
+Outputs:
+  HttpApiUrl:
+    Description: HTTP API Gateway endpoint URL for QueueSense
+    Value: !Sub "https://${QueueSenseHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  DynamoDBTableName:
+    Description: DynamoDB Table Name
+    Value: !Ref MainTable
+  AwsRegion:
+    Description: AWS Target Region
+    Value: !Ref "AWS::Region"
