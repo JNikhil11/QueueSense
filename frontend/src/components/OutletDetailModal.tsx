@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { CampusLocation, QueueEstimate, QueueReport } from '../types';
+import { CampusLocation, QueueEstimate, QueueReport, HistoricalData } from '../types';
 import { api } from '../services/api';
 import { CongestionBadge, FreshnessBadge, ConfidenceMeter } from './StatusBadge';
-import { X, Clock, Users, Plus, AlertCircle, History, RefreshCw, MapPin, CheckCircle2 } from 'lucide-react';
+import { X, Clock, Users, Plus, AlertCircle, History, RefreshCw, MapPin, CheckCircle2, TrendingUp } from 'lucide-react';
 
 interface OutletDetailModalProps {
   locationId: string | null;
@@ -21,17 +21,27 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
   const [location, setLocation] = useState<CampusLocation | null>(null);
   const [estimate, setEstimate] = useState<QueueEstimate | null>(null);
   const [reports, setReports] = useState<QueueReport[]>([]);
+  const [historical, setHistorical] = useState<HistoricalData | null>(null);
   const [isLive, setIsLive] = useState<boolean>(false);
 
   const fetchData = async () => {
     if (!locationId) return;
     try {
       setLoading(true);
-      const res = await api.getLocationQueue(locationId);
-      setLocation(res.location);
-      setEstimate(res.estimate);
-      setReports(res.reports);
-      setIsLive(res.isLive);
+      const [queueRes, histRes] = await Promise.allSettled([
+        api.getLocationQueue(locationId),
+        api.getHistorical(locationId),
+      ]);
+
+      if (queueRes.status === 'fulfilled') {
+        setLocation(queueRes.value.location);
+        setEstimate(queueRes.value.estimate);
+        setReports(queueRes.value.reports);
+        setIsLive(queueRes.value.isLive);
+      }
+      if (histRes.status === 'fulfilled') {
+        setHistorical(histRes.value.data);
+      }
     } catch (err) {
       console.error('Failed to load outlet details:', err);
     } finally {
@@ -56,6 +66,15 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
         : `${latestAgeMin}m ago`
       : '';
 
+  // Filter daytime operating hours (8:00 to 22:00) for historical display
+  const daytimeTrends = (historical?.hourlyTrends || []).filter(
+    (h) => h.hour >= 8 && h.hour <= 22
+  );
+  const maxWaitInTrends = Math.max(
+    ...daytimeTrends.map((h) => h.averageWaitMinutes || 0),
+    1
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in">
       <div className="w-full max-w-2xl max-h-[90vh] rounded-3xl glass-panel-elevated shadow-2xl flex flex-col overflow-hidden glass-specular-edge border-[#39FF14]/30">
@@ -66,12 +85,18 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
               <span className="text-[10px] uppercase font-mono font-bold tracking-wider px-2.5 py-0.5 rounded-full bg-[#7DF9FF]/10 text-[#7DF9FF] border border-[#7DF9FF]/30">
                 {location?.category || 'OUTLET'}
               </span>
-              {location?.verificationStatus === 'VERIFIED_CAMPUS_DIRECTORY' && (
-                <span className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.04] text-[#8E9E93] border border-white/10" title={location?.verificationSource}>
+              {location?.verificationStatus === 'STUDENT_SOURCED' && (
+                <span
+                  className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.04] text-[#8E9E93] border border-white/10"
+                  title={location?.verificationSource}
+                >
                   <CheckCircle2 className="w-3 h-3 text-[#39FF14]" />
-                  <span>Verified Campus Directory</span>
+                  <span>Student Sourced</span>
                 </span>
               )}
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.04] text-[#5A695F] border border-white/10">
+                {isLive ? 'AWS Cloud' : 'Local Demo'}
+              </span>
               {estimate && <FreshnessBadge state={estimate.freshness} />}
               {estimate && <CongestionBadge level={estimate.congestion} />}
             </div>
@@ -194,6 +219,92 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
                 </div>
               )}
 
+              {/* Historical Best-Time-To-Go / Rush Hours */}
+              {historical && (
+                <div className="p-4 rounded-2xl bg-[#090E0B]/70 border border-white/[0.08] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-[#7DF9FF]" />
+                      <h4 className="font-display text-sm font-bold text-white">
+                        Typical Wait Times by Hour
+                      </h4>
+                    </div>
+                    <span className="text-[10px] font-mono text-[#5A695F]">
+                      Past 14 Days
+                    </span>
+                  </div>
+
+                  {historical.status === 'insufficient_history' ? (
+                    <div className="py-4 text-center text-xs font-mono text-[#8E9E93] bg-white/[0.02] rounded-xl border border-dashed border-white/10">
+                      {historical.summary}
+                    </div>
+                  ) : (
+                    <>
+                      {/* Quietest & Busiest Badges */}
+                      <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                        {historical.quietestHour && (
+                          <div className="p-2.5 rounded-xl bg-[#39FF14]/10 border border-[#39FF14]/30 flex items-center justify-between">
+                            <span className="text-[#8E9E93]">Best time to go:</span>
+                            <span className="text-[#39FF14] font-bold">
+                              {historical.quietestHour.label} (~{historical.quietestHour.averageWaitMinutes}m)
+                            </span>
+                          </div>
+                        )}
+                        {historical.busiestHour && (
+                          <div className="p-2.5 rounded-xl bg-[#FFA028]/10 border border-[#FFA028]/30 flex items-center justify-between">
+                            <span className="text-[#8E9E93]">Peak rush:</span>
+                            <span className="text-[#FFA028] font-bold">
+                              {historical.busiestHour.label} (~{historical.busiestHour.averageWaitMinutes}m)
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Hourly Mini Histogram */}
+                      <div className="pt-2">
+                        <div className="flex items-end gap-1 h-20 w-full px-1">
+                          {daytimeTrends.map((bucket) => {
+                            const val = bucket.averageWaitMinutes || 0;
+                            const heightPct = Math.max(10, Math.round((val / maxWaitInTrends) * 100));
+                            const isPeak = historical.busiestHour?.hour === bucket.hour;
+                            const isQuiet = historical.quietestHour?.hour === bucket.hour;
+
+                            return (
+                              <div
+                                key={bucket.hour}
+                                className="flex-1 flex flex-col items-center gap-1 group relative cursor-pointer"
+                                title={`${bucket.label}: ~${val}m wait (${bucket.observationCount} reports)`}
+                              >
+                                <div
+                                  className={`w-full rounded-t-sm transition-all duration-300 ${
+                                    isPeak
+                                      ? 'bg-[#FFA028]'
+                                      : isQuiet
+                                      ? 'bg-[#39FF14]'
+                                      : val > 0
+                                      ? 'bg-[#7DF9FF]/60 group-hover:bg-[#7DF9FF]'
+                                      : 'bg-white/10'
+                                  }`}
+                                  style={{ height: `${heightPct}%` }}
+                                />
+                                <span className="text-[8px] font-mono text-[#5A695F]">
+                                  {bucket.hour % 3 === 0 ? bucket.hour : ''}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="flex justify-between text-[9px] font-mono text-[#5A695F] pt-1 px-1">
+                          <span>08:00</span>
+                          <span>14:00</span>
+                          <span>22:00</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* Algorithm Rationale Notice */}
               {estimate && (
                 <div className="p-4 rounded-2xl bg-[#131C15]/70 border border-white/[0.08] text-xs text-[#8E9E93] flex items-start gap-3">
@@ -244,45 +355,37 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {reports.map((r, index) => {
+                    {reports.map((r) => {
                       const ageMin = Math.round(
                         (Date.now() - new Date(r.timestamp).getTime()) / (60 * 1000)
                       );
-                      const timeStr = ageMin <= 1 ? 'Just now' : `${ageMin}m ago`;
-                      const isFirst = index === 0;
+                      const ageText = ageMin <= 1 ? 'Just now' : `${ageMin}m ago`;
 
                       return (
                         <div
                           key={r.reportId}
-                          className={`p-3.5 rounded-2xl bg-[#090E0B]/80 border ${
-                            isFirst ? 'border-[#39FF14]/40 bg-[#0C150E]/90' : 'border-white/[0.06]'
-                          } flex items-start justify-between gap-3 text-xs hover:border-[#39FF14]/30 transition-colors`}
+                          className="p-3.5 rounded-2xl bg-[#090E0B]/50 border border-white/[0.06] flex items-center justify-between gap-4 text-xs font-mono hover:border-white/20 transition-colors"
                         >
                           <div className="space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {isFirst && (
-                                <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-[#39FF14]/20 text-[#39FF14] font-bold">
-                                  Latest
-                                </span>
-                              )}
-                              <span className="font-mono font-bold text-[#39FF14]">
+                            <div className="flex items-center gap-3">
+                              <span className="text-[#39FF14] font-bold text-sm">
                                 {r.reportedWaitMinutes}m wait
                               </span>
-                              <span className="text-[#5A695F]">•</span>
-                              <span className="font-mono text-[#F4F7F5]">
-                                {r.queueLength} in line
+                              <span className="text-[#7DF9FF]">
+                                {r.queueLength} in queue
                               </span>
-                              <span className="text-[#5A695F]">•</span>
-                              <span className="font-mono text-[11px] text-[#8E9E93]">
-                                {timeStr}
+                              <span className="text-[10px] text-[#5A695F]">
+                                ({ageText})
                               </span>
                             </div>
                             {r.note && (
-                              <p className="text-[#8E9E93] italic">"{r.note}"</p>
+                              <div className="text-[11px] text-[#8E9E93] font-sans italic">
+                                "{r.note}"
+                              </div>
                             )}
                           </div>
-                          <span className="text-[10px] font-mono text-[#5A695F] shrink-0 px-2 py-0.5 rounded bg-white/[0.03]">
-                            {r.reportId.slice(0, 10)}
+                          <span className="text-[9px] text-[#5A695F] shrink-0">
+                            {r.reportId}
                           </span>
                         </div>
                       );
@@ -295,16 +398,24 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="p-5 border-t border-white/[0.08] bg-[#090E0B]/80 flex items-center justify-between gap-3">
-          <span className="text-[11px] text-[#5A695F] font-mono">
-            {isLive ? 'AWS Cloud Synchronized' : 'Offline Simulation Fixture'}
-          </span>
+        <div className="p-4 border-t border-white/[0.08] bg-[#070A08]/90 flex items-center justify-between">
           <button
-            onClick={() => onOpenReportModal(locationId)}
-            className="flex items-center gap-2 px-5 py-2.5 text-xs sm:text-sm btn-electric"
+            onClick={fetchData}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono text-[#8E9E93] hover:text-white hover:bg-white/[0.04] transition-colors"
           >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span>Add Observation</span>
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Refresh</span>
+          </button>
+
+          <button
+            onClick={() => {
+              onClose();
+              onOpenReportModal(locationId);
+            }}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-mono text-xs uppercase tracking-wider font-bold bg-[#39FF14] text-black shadow-[0_0_20px_rgba(57,255,20,0.4)] hover:bg-[#32e012] transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Submit Observation</span>
           </button>
         </div>
       </div>

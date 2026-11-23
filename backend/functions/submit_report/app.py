@@ -1,10 +1,13 @@
 """
 QueueSense - POST /locations/{id}/reports Lambda Handler
-Validates user submission, applies server timestamp & ID, updates DynamoDB,
+Validates user submission, applies server timestamp & ID, enforces rate limiting,
+deduplicates retries via idempotency key, durably persists to DynamoDB,
 recomputes real-time queue estimate, and returns updated prediction.
+Never converts persistence failures into silent success.
 """
 
 import json
+import logging
 import os
 import sys
 
@@ -16,31 +19,39 @@ if "/opt/python" not in sys.path:
     sys.path.insert(0, "/opt/python")
 
 from response import create_api_response
-from database import QueueSenseDatabase
+from database import QueueSenseDatabase, DatabasePersistenceError
 from validation import validate_location_id, validate_report_payload
 from prediction import calculate_queue_estimate
+from security import compute_anonymous_client_hash, extract_idempotency_key
+
+logger = logging.getLogger("queuesense.submit_report")
+logger.setLevel(logging.INFO)
 
 
 def lambda_handler(event, context):
+    request_id = getattr(context, "aws_request_id", None) or "local_req"
+
     try:
-        # Extract location ID
+        # 1. Extract and validate location ID
         path_params = event.get("pathParameters") or {}
         location_id = path_params.get("id")
 
         if not location_id or not validate_location_id(location_id):
             return create_api_response(
                 status_code=400,
-                data=None,
-                error="Invalid or missing location identifier.",
+                error="Invalid or missing campus outlet identifier.",
+                error_code="INVALID_LOCATION_ID",
+                request_id=request_id,
             )
 
-        # Parse request body
+        # 2. Parse request body
         raw_body = event.get("body")
         if not raw_body:
             return create_api_response(
                 status_code=400,
-                data=None,
-                error="Missing request body.",
+                error="Missing request body payload.",
+                error_code="EMPTY_PAYLOAD",
+                request_id=request_id,
             )
 
         if isinstance(raw_body, str):
@@ -49,39 +60,61 @@ def lambda_handler(event, context):
             except json.JSONDecodeError:
                 return create_api_response(
                     status_code=400,
-                    data=None,
-                    error="Malformed JSON payload.",
+                    error="Malformed JSON payload in request.",
+                    error_code="MALFORMED_JSON",
+                    request_id=request_id,
                 )
         else:
             body = raw_body
 
-        # Validate input bounds and sanitize
+        # 3. Validate input bounds and sanitize text
         is_valid, sanitized_data, errors = validate_report_payload(body)
         if not is_valid:
             return create_api_response(
                 status_code=422,
                 data={"validationErrors": errors},
                 error="; ".join(errors),
+                error_code="VALIDATION_FAILED",
+                request_id=request_id,
             )
 
         db = QueueSenseDatabase()
+
+        # 4. Enforce Privacy-Preserving Rate Limiting (5 reports per 5 minutes per client hash)
+        client_hash = compute_anonymous_client_hash(event)
+        is_allowed = db.check_rate_limit(client_hash=client_hash, window_seconds=300, max_requests=5)
+        if not is_allowed:
+            logger.warning("Rate limit exceeded for client hash: %s on location %s", client_hash, location_id)
+            return create_api_response(
+                status_code=429,
+                error="Submission rate limit reached. Please wait a few minutes before submitting another report.",
+                error_code="RATE_LIMIT_EXCEEDED",
+                request_id=request_id,
+            )
+
+        # 5. Verify outlet existence
         location = db.get_location(location_id)
         if not location:
             return create_api_response(
                 status_code=404,
-                data=None,
-                error=f"Location '{location_id}' does not exist.",
+                error=f"Campus outlet '{location_id}' was not found in directory.",
+                error_code="LOCATION_NOT_FOUND",
+                request_id=request_id,
             )
 
-        # Record new report with server-generated timestamp & ID
+        # 6. Extract Idempotency Key (prevents duplicate submissions on network retries)
+        idempotency_key = extract_idempotency_key(event, body)
+
+        # 7. Record new report durably (fails closed if DynamoDB write fails)
         new_report = db.record_report(
             location_id=location_id,
             reported_wait_minutes=sanitized_data["reportedWaitMinutes"],
             queue_length=sanitized_data["queueLength"],
             note=sanitized_data.get("note"),
+            idempotency_key=idempotency_key,
         )
 
-        # Immediately recalculate updated queue estimate
+        # 8. Recalculate queue estimate from recent reports
         recent_reports = db.get_recent_reports(location_id, limit=30)
         updated_estimate = calculate_queue_estimate(recent_reports)
         db.save_current_estimate(location_id, updated_estimate)
@@ -89,8 +122,8 @@ def lambda_handler(event, context):
         clean_report = {
             "reportId": new_report["reportId"],
             "locationId": location_id,
-            "reportedWaitMinutes": new_report["reportedWaitMinutes"],
-            "queueLength": new_report["queueLength"],
+            "reportedWaitMinutes": float(new_report["reportedWaitMinutes"]),
+            "queueLength": int(new_report["queueLength"]),
             "note": new_report.get("note"),
             "timestamp": new_report["timestamp"],
         }
@@ -102,11 +135,22 @@ def lambda_handler(event, context):
                 "report": clean_report,
                 "updatedEstimate": updated_estimate,
             },
-        )
-    except Exception as e:
-        return create_api_response(
-            status_code=500,
-            data=None,
-            error=f"Internal error processing queue report: {str(e)}",
+            request_id=request_id,
         )
 
+    except DatabasePersistenceError as e:
+        logger.error("Database persistence failure [req=%s]: %s", request_id, str(e), exc_info=True)
+        return create_api_response(
+            status_code=500,
+            error="Failed to record observation to durable storage. Please retry.",
+            error_code="PERSISTENCE_FAILED",
+            request_id=request_id,
+        )
+    except Exception as e:
+        logger.error("Unexpected handler error [req=%s]: %s", request_id, str(e), exc_info=True)
+        return create_api_response(
+            status_code=500,
+            error="An internal error occurred while processing your queue report.",
+            error_code="INTERNAL_ERROR",
+            request_id=request_id,
+        )

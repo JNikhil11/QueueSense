@@ -1,23 +1,37 @@
 /**
  * QueueSense API Client
- * Supports seamless switching between live AWS API Gateway and offline mock fixtures.
- * Explicitly distinguishes live cloud data from demo/seed data.
+ * Strict Separation: Production (Live AWS API) vs. Demo (Local Simulated Data)
+ * Enforces server-side idempotency, rate-limiting handling, and durable persistence.
  */
 
-import { CampusLocation, QueueEstimate, QueueReport, SmartRecommendation, ReportSubmissionPayload } from '../types';
+import {
+  CampusLocation,
+  QueueEstimate,
+  QueueReport,
+  SmartRecommendation,
+  ReportSubmissionPayload,
+  HistoricalData,
+  DataMode,
+} from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
-// Authentic IIT Bombay Campus Dining Directory (SMP / Gymkhana Verified)
-export const INITIAL_LOCATIONS: CampusLocation[] = [
+export const DATA_MODE: DataMode = (
+  import.meta.env.VITE_DATA_MODE || (import.meta.env.PROD ? 'production' : 'demo')
+) as DataMode;
+
+export const CAMPUS_ID = import.meta.env.VITE_CAMPUS_ID || 'iitb';
+
+// Student-Sourced IIT Bombay Dining Directory
+export const IITB_LOCATIONS: CampusLocation[] = [
   {
     id: 'iitb-mess-h12-14',
     name: 'Hostel 12-13-14 Dining Complex',
     category: 'MESS',
     description: 'Central multi-tiered student mess serving breakfast, lunch, snacks, and dinner counters.',
     landmarkLocation: 'Hostel 12-14 Complex, Lakeside Road, East Campus',
-    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
-    verificationSource: 'IIT Bombay Council of Student Affairs / Mess Council',
+    verificationStatus: 'STUDENT_SOURCED',
+    verificationSource: 'IIT Bombay Student Mentorship Guide & Techfest Ambassador Sourced',
     openHours: '07:30 - 21:30',
     capacity: 650,
     active: true,
@@ -28,8 +42,8 @@ export const INITIAL_LOCATIONS: CampusLocation[] = [
     category: 'MESS',
     description: 'Modern high-capacity hostel mess catering to senior undergraduate and postgraduate wings.',
     landmarkLocation: 'Hostel 15-16 Quadrangle, North-East Campus',
-    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
-    verificationSource: 'IIT Bombay Student Mentor Program (SMP)',
+    verificationStatus: 'STUDENT_SOURCED',
+    verificationSource: 'IIT Bombay Student Mentor Program (SMP) Guide',
     openHours: '07:30 - 21:30',
     capacity: 550,
     active: true,
@@ -40,7 +54,7 @@ export const INITIAL_LOCATIONS: CampusLocation[] = [
     category: 'MESS',
     description: 'Historic hostel mess renowned for South and North Indian rotating regional menus.',
     landmarkLocation: 'Hostel 2 Quadrangle, near Gymkhana Grounds',
-    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Hostel 2 Council & SMP Guide',
     openHours: '07:30 - 21:00',
     capacity: 350,
@@ -52,7 +66,7 @@ export const INITIAL_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Beloved campus late-night staple serving fresh fruit juices, dosas, parathas, and tea.',
     landmarkLocation: 'Ground Floor, Hostel 3, Main Hostel Avenue',
-    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Gymkhana Freshers Guide',
     openHours: '14:00 - 02:30',
     capacity: 120,
@@ -64,8 +78,8 @@ export const INITIAL_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'High-velocity daytime cafeteria serving express lunches, coffee, sandwiches, and rolls.',
     landmarkLocation: 'Ground Floor, Lecture Hall Complex (LHC), Academic Area',
-    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
-    verificationSource: 'IIT Bombay Academic Facilities & SMP',
+    verificationStatus: 'STUDENT_SOURCED',
+    verificationSource: 'IIT Bombay Academic Facilities & SMP Guide',
     openHours: '08:30 - 18:30',
     capacity: 220,
     active: true,
@@ -76,7 +90,7 @@ export const INITIAL_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Multi-cuisine sit-down restaurant and faculty guest lounge serving thalis and meals.',
     landmarkLocation: 'Gulmohar Building, First Floor, Opposite Main Building',
-    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Estate & Hospitality Directory',
     openHours: '11:00 - 22:30',
     capacity: 180,
@@ -88,7 +102,7 @@ export const INITIAL_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Quick-service eatery favored by computer science students for coffee, noodles, and wraps.',
     landmarkLocation: 'Kanwal Rekhi School of Information Technology (KReSIT)',
-    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Dept of Computer Science & Eng',
     openHours: '09:00 - 20:00',
     capacity: 90,
@@ -100,7 +114,7 @@ export const INITIAL_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Active evening hangout spot serving milkshakes, burgers, hot fries, and snacks.',
     landmarkLocation: 'Students Activity Centre (SAC) Grounds',
-    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Gymkhana Cultural Affairs',
     openHours: '16:00 - 01:00',
     capacity: 140,
@@ -112,7 +126,7 @@ export const INITIAL_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Artisan coffee, bakery items, iced brews, and quiet tables for study sessions.',
     landmarkLocation: 'Adjacent to Central Library, Main Academic Spine',
-    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Central Library Amenities',
     openHours: '08:00 - 23:00',
     capacity: 80,
@@ -124,7 +138,7 @@ export const INITIAL_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Exclusive dairy outlet offering ice creams, flavored milk, milkshakes, and packaged snacks.',
     landmarkLocation: 'Near Hostel 1 & Campus School Junction',
-    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Commercial Establishments',
     openHours: '09:00 - 23:00',
     capacity: 40,
@@ -132,8 +146,74 @@ export const INITIAL_LOCATIONS: CampusLocation[] = [
   },
 ];
 
-// Realistic Initial Observations for IIT Bombay Outlets
-// Explicitly labeled as DEMO / SIMULATED observations
+// Student-Sourced VIT-AP Dining Directory
+export const VITAP_LOCATIONS: CampusLocation[] = [
+  {
+    id: 'vitap-mess-a',
+    name: 'North Mess A (Central Dining)',
+    category: 'MESS',
+    description: 'Central dining complex with multi-cuisine counters for undergraduate students.',
+    landmarkLocation: 'North Student Block, Ground Floor',
+    verificationStatus: 'STUDENT_SOURCED',
+    verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
+    openHours: '07:30 - 21:30',
+    capacity: 450,
+    active: true,
+  },
+  {
+    id: 'vitap-mess-b',
+    name: 'South Mess B (Annex Dining)',
+    category: 'MESS',
+    description: 'South dining hall featuring vegetarian and regional dining counters.',
+    landmarkLocation: 'South Student Block, Near LH-1',
+    verificationStatus: 'STUDENT_SOURCED',
+    verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
+    openHours: '07:30 - 21:00',
+    capacity: 350,
+    active: true,
+  },
+  {
+    id: 'vitap-rock-plaza',
+    name: 'Rock Plaza Food Court',
+    category: 'CANTEEN',
+    description: 'Open-air food court offering quick snacks, fruit juices, and meals.',
+    landmarkLocation: 'Central Plaza, Between Academic & Hostel Blocks',
+    verificationStatus: 'STUDENT_SOURCED',
+    verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
+    openHours: '10:00 - 23:00',
+    capacity: 180,
+    active: true,
+  },
+  {
+    id: 'vitap-academic-bistro',
+    name: 'Academic Bistro',
+    category: 'CANTEEN',
+    description: 'Express counter near lecture halls for sandwiches, rolls, and coffee.',
+    landmarkLocation: 'Central Block (CB), Ground Floor',
+    verificationStatus: 'STUDENT_SOURCED',
+    verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
+    openHours: '08:30 - 18:00',
+    capacity: 120,
+    active: true,
+  },
+  {
+    id: 'vitap-night-canteen',
+    name: 'Night Owl Cafe',
+    category: 'CANTEEN',
+    description: 'Late-night snacks and beverages counter for hostel residents.',
+    landmarkLocation: 'Hostel Block 2, Courtyard',
+    verificationStatus: 'STUDENT_SOURCED',
+    verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
+    openHours: '20:00 - 02:00',
+    capacity: 60,
+    active: true,
+  },
+];
+
+export const INITIAL_LOCATIONS: CampusLocation[] =
+  CAMPUS_ID === 'vitap' ? VITAP_LOCATIONS : IITB_LOCATIONS;
+
+// Demo / Simulated Seed Reports (only used in demo/dev mode)
 const DEFAULT_SEED_REPORTS: Record<string, QueueReport[]> = {
   'iitb-mess-h12-14': [
     {
@@ -142,7 +222,7 @@ const DEFAULT_SEED_REPORTS: Record<string, QueueReport[]> = {
       reportedWaitMinutes: 14,
       queueLength: 22,
       note: 'Dinner rush, both South & North counters active',
-      timestamp: new Date(Date.now() - 3 * 60 * 1000).toISOString(), // 3m ago
+      timestamp: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
     },
     {
       reportId: 'rep_seed_102',
@@ -150,7 +230,7 @@ const DEFAULT_SEED_REPORTS: Record<string, QueueReport[]> = {
       reportedWaitMinutes: 12,
       queueLength: 19,
       note: 'Line moving steadily',
-      timestamp: new Date(Date.now() - 7 * 60 * 1000).toISOString(), // 7m ago
+      timestamp: new Date(Date.now() - 7 * 60 * 1000).toISOString(),
     },
     {
       reportId: 'rep_seed_103',
@@ -158,7 +238,7 @@ const DEFAULT_SEED_REPORTS: Record<string, QueueReport[]> = {
       reportedWaitMinutes: 15,
       queueLength: 24,
       note: 'Heavy arrival from Hostel 13',
-      timestamp: new Date(Date.now() - 12 * 60 * 1000).toISOString(), // 12m ago
+      timestamp: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
     },
   ],
   'iitb-mess-h15-16': [
@@ -168,7 +248,7 @@ const DEFAULT_SEED_REPORTS: Record<string, QueueReport[]> = {
       reportedWaitMinutes: 5,
       queueLength: 6,
       note: 'Very short queue right now, swift service',
-      timestamp: new Date(Date.now() - 2 * 60 * 1000).toISOString(), // 2m ago
+      timestamp: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
     },
     {
       reportId: 'rep_seed_105',
@@ -176,7 +256,15 @@ const DEFAULT_SEED_REPORTS: Record<string, QueueReport[]> = {
       reportedWaitMinutes: 6,
       queueLength: 8,
       note: 'Veg meal counter clear',
-      timestamp: new Date(Date.now() - 8 * 60 * 1000).toISOString(), // 8m ago
+      timestamp: new Date(Date.now() - 8 * 60 * 1000).toISOString(),
+    },
+    {
+      reportId: 'rep_seed_105b',
+      locationId: 'iitb-mess-h15-16',
+      reportedWaitMinutes: 5.5,
+      queueLength: 7,
+      note: 'Smooth flow at counter 2',
+      timestamp: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
     },
   ],
   'iitb-mess-h2': [
@@ -186,7 +274,7 @@ const DEFAULT_SEED_REPORTS: Record<string, QueueReport[]> = {
       reportedWaitMinutes: 8,
       queueLength: 11,
       note: 'Moderate crowd for special dinner',
-      timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5m ago
+      timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
     },
   ],
   'iitb-canteen-h3': [
@@ -196,7 +284,7 @@ const DEFAULT_SEED_REPORTS: Record<string, QueueReport[]> = {
       reportedWaitMinutes: 4,
       queueLength: 5,
       note: 'Fast juice token queue',
-      timestamp: new Date(Date.now() - 4 * 60 * 1000).toISOString(), // 4m ago
+      timestamp: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
     },
   ],
   'iitb-canteen-lhc': [
@@ -206,7 +294,7 @@ const DEFAULT_SEED_REPORTS: Record<string, QueueReport[]> = {
       reportedWaitMinutes: 18,
       queueLength: 28,
       note: 'Post-lecture crowd at sandwich counter',
-      timestamp: new Date(Date.now() - 9 * 60 * 1000).toISOString(), // 9m ago
+      timestamp: new Date(Date.now() - 9 * 60 * 1000).toISOString(),
     },
   ],
   'iitb-canteen-gulmohar': [
@@ -216,7 +304,7 @@ const DEFAULT_SEED_REPORTS: Record<string, QueueReport[]> = {
       reportedWaitMinutes: 7,
       queueLength: 9,
       note: 'Thali tokens moving fast',
-      timestamp: new Date(Date.now() - 14 * 60 * 1000).toISOString(), // 14m ago
+      timestamp: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
     },
   ],
   'iitb-canteen-kresit': [
@@ -226,7 +314,7 @@ const DEFAULT_SEED_REPORTS: Record<string, QueueReport[]> = {
       reportedWaitMinutes: 3,
       queueLength: 4,
       note: 'Quiet lab break',
-      timestamp: new Date(Date.now() - 6 * 60 * 1000).toISOString(), // 6m ago
+      timestamp: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
     },
   ],
   'iitb-cafe-92': [],
@@ -234,17 +322,14 @@ const DEFAULT_SEED_REPORTS: Record<string, QueueReport[]> = {
   'iitb-amul-parlour': [],
 };
 
-// Storage Key for Local Browser Simulation Persistence
-const STORAGE_KEY = 'queuesense_iitb_observations_v2';
+const STORAGE_KEY = `queuesense_${CAMPUS_ID}_observations_v2`;
 
-// Load stored reports from LocalStorage or initialize with defaults
 function loadReportsStore(): Record<string, QueueReport[]> {
   try {
     if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        // Ensure all initial locations have an array
         const store: Record<string, QueueReport[]> = {};
         INITIAL_LOCATIONS.forEach((l) => {
           store[l.id] = parsed[l.id] || DEFAULT_SEED_REPORTS[l.id] || [];
@@ -253,9 +338,8 @@ function loadReportsStore(): Record<string, QueueReport[]> {
       }
     }
   } catch (e) {
-    // Graceful fallback for non-browser or sandbox environments
+    // Ignore fallback
   }
-  // Clone seed reports to avoid mutation
   const initialStore: Record<string, QueueReport[]> = {};
   INITIAL_LOCATIONS.forEach((l) => {
     initialStore[l.id] = [...(DEFAULT_SEED_REPORTS[l.id] || [])];
@@ -263,20 +347,18 @@ function loadReportsStore(): Record<string, QueueReport[]> {
   return initialStore;
 }
 
-// Persist reports store to LocalStorage
 function persistReportsStore(store: Record<string, QueueReport[]>): void {
   try {
     if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
     }
   } catch (e) {
-    // Graceful fallback
+    // Ignore fallback
   }
 }
 
 const mockReports: Record<string, QueueReport[]> = loadReportsStore();
 
-// Client-side pure estimation calculation (mirrors backend Python prediction module)
 export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
   const now = Date.now();
   const TAU_MS = 15 * 60 * 1000;
@@ -350,13 +432,11 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
   const estimatedWait = Math.round((weightedWaitSum / totalWeight) * 10) / 10;
   const estimatedQueue = Math.round(weightedQueueSum / totalWeight);
 
-  // Congestion
   let congestion: QueueEstimate['congestion'] = 'LOW';
   if (estimatedWait >= 15.5) congestion = 'VERY_HIGH';
   else if (estimatedWait >= 8.5) congestion = 'HIGH';
   else if (estimatedWait >= 3.5) congestion = 'MODERATE';
 
-  // Freshness
   let freshness: QueueEstimate['freshness'] = 'NO RECENT DATA';
   if (newestAgeMinutes !== null) {
     if (newestAgeMinutes <= 7) freshness = 'LIVE';
@@ -364,11 +444,9 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
     else if (newestAgeMinutes <= 60) freshness = 'STALE';
   }
 
-  // Disagreement
   const waits = recentReports.map((r) => r.reportedWaitMinutes);
   const disagreement = waits.length > 1 ? Math.round((Math.max(...waits) - Math.min(...waits)) * 10) / 10 : 0;
 
-  // Confidence
   const volumeScore = Math.min(recentReports.length / 4, 1.0) * 0.45;
   const recencyFactor = Math.max(0, 1.0 - (newestAgeMinutes || 0) / 25) * 0.35;
   const agreementFactor = waits.length > 1 ? Math.max(0, 1.0 - disagreement / 15) * 0.2 : 0.08;
@@ -416,6 +494,10 @@ export const api = {
     return Boolean(API_BASE_URL && API_BASE_URL.startsWith('http'));
   },
 
+  getDataMode(): DataMode {
+    return DATA_MODE;
+  },
+
   async getLocations(): Promise<{ data: CampusLocation[]; isLive: boolean }> {
     if (this.isLiveApiConfigured()) {
       try {
@@ -424,12 +506,20 @@ export const api = {
           const json = await res.json();
           return { data: json.data, isLive: true };
         }
-      } catch (err) {
-        console.warn('API Gateway unreachable, falling back to mock fixtures:', err);
+        if (DATA_MODE === 'production') {
+          throw new Error(`API returned status ${res.status}`);
+        }
+      } catch (err: any) {
+        if (DATA_MODE === 'production') {
+          throw new Error(`Live data temporarily unavailable: ${err.message || 'API unreachable'}`);
+        }
+        console.warn('API Gateway unreachable, falling back to demo fixtures:', err);
       }
+    } else if (DATA_MODE === 'production') {
+      throw new Error('Production mode active: Live API URL (VITE_API_URL) is not configured.');
     }
 
-    // Offline / Mock fallback
+    // Demo Mode Fixtures
     const locationsWithEstimates = INITIAL_LOCATIONS.map((loc) => ({
       ...loc,
       estimate: computeClientEstimate(mockReports[loc.id] || []),
@@ -451,9 +541,17 @@ export const api = {
           const json = await res.json();
           return { ...json.data, isLive: true };
         }
-      } catch (err) {
-        console.warn('API Gateway unreachable, falling back to mock fixtures:', err);
+        if (DATA_MODE === 'production') {
+          throw new Error(`API returned status ${res.status}`);
+        }
+      } catch (err: any) {
+        if (DATA_MODE === 'production') {
+          throw new Error(`Live queue data temporarily unavailable: ${err.message || 'API unreachable'}`);
+        }
+        console.warn('API Gateway unreachable, falling back to demo fixtures:', err);
       }
+    } else if (DATA_MODE === 'production') {
+      throw new Error('Production mode active: Live API URL is not configured.');
     }
 
     const loc = INITIAL_LOCATIONS.find((l) => l.id === locationId) || INITIAL_LOCATIONS[0];
@@ -474,29 +572,51 @@ export const api = {
     locationId: string,
     payload: ReportSubmissionPayload
   ): Promise<{ report: QueueReport; updatedEstimate: QueueEstimate; isLive: boolean }> {
+    // Generate server-side idempotency key
+    const idempotencyKey =
+      payload.idempotencyKey ||
+      'idem_' +
+        (typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`);
+
     if (this.isLiveApiConfigured()) {
       try {
         const res = await fetch(`${API_BASE_URL}/locations/${locationId}/reports`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Idempotency-Key': idempotencyKey,
+          },
+          body: JSON.stringify({ ...payload, idempotencyKey }),
         });
-        if (res.ok) {
+
+        if (res.status === 201) {
           const json = await res.json();
           return { ...json.data, isLive: true };
         }
-        const errJson = await res.json();
-        throw new Error(errJson.error || 'Failed to submit report to server');
+
+        const errJson = await res.json().catch(() => ({}));
+        if (res.status === 429) {
+          throw new Error(
+            errJson.error || 'Submission rate limit reached. Please wait a few minutes before reporting again.'
+          );
+        }
+        if (res.status === 500 && errJson.errorCode === 'PERSISTENCE_FAILED') {
+          throw new Error('Database persistence failed. Observation could not be durably recorded. Please retry.');
+        }
+        throw new Error(errJson.error || `Server rejected report with status ${res.status}`);
       } catch (err: any) {
-        if (!err.message?.includes('Failed to submit')) {
-          console.warn('API Gateway unreachable, storing report locally:', err);
-        } else {
+        if (DATA_MODE === 'production') {
           throw err;
         }
+        console.warn('API Gateway unreachable, storing report locally (demo mode):', err);
       }
+    } else if (DATA_MODE === 'production') {
+      throw new Error('Production mode active: Cannot submit observation without configured live API endpoint.');
     }
 
-    // Mock fallback submission
+    // Demo fallback submission
     const newReport: QueueReport = {
       reportId: `rep_local_${Date.now()}`,
       locationId,
@@ -510,7 +630,6 @@ export const api = {
       mockReports[locationId] = [];
     }
     mockReports[locationId].unshift(newReport);
-    // Persist to local storage for durable offline simulation
     persistReportsStore(mockReports);
     const updatedEstimate = computeClientEstimate(mockReports[locationId]);
 
@@ -529,23 +648,33 @@ export const api = {
           const json = await res.json();
           return { data: json.data, isLive: true };
         }
-      } catch (err) {
+        if (DATA_MODE === 'production') {
+          throw new Error(`API returned status ${res.status}`);
+        }
+      } catch (err: any) {
+        if (DATA_MODE === 'production') {
+          throw new Error(`Live recommendations temporarily unavailable: ${err.message || 'API unreachable'}`);
+        }
         console.warn('API Gateway unreachable, calculating recommendations locally:', err);
       }
+    } else if (DATA_MODE === 'production') {
+      throw new Error('Production mode active: Live API URL is not configured.');
     }
 
-    // Calculate recommendation across mock outlets
+    // Cold-Start Protected Demo Recommendation Calculation
     const candidates = INITIAL_LOCATIONS.map((loc) => ({
       ...loc,
       estimate: computeClientEstimate(mockReports[loc.id] || []),
     }));
 
+    // Must have at least 3 fresh reports and >= 50% confidence
     const eligible = candidates.filter(
       (c) =>
         c.estimate &&
         c.estimate.predictedWaitMinutes !== null &&
         ['LIVE', 'RECENT'].includes(c.estimate.freshness) &&
-        c.estimate.confidence >= 0.25
+        c.estimate.recentReportCount >= 3 &&
+        c.estimate.confidence >= 0.50
     );
 
     if (eligible.length === 0) {
@@ -553,8 +682,11 @@ export const api = {
         data: {
           recommendedLocationId: null,
           recommendedLocationName: null,
-          reason: 'Not enough recent queue reports across campus to make a reliable recommendation yet.',
+          reason:
+            'Not enough recent queue reports across campus to make a reliable recommendation yet. At least 3 fresh observations and 50%+ confidence required.',
           isEligible: false,
+          state: 'insufficient_data',
+          minReportsRequired: 3,
           candidateCount: candidates.length,
           eligibleCount: 0,
         },
@@ -584,8 +716,9 @@ export const api = {
         congestion: wEst.congestion,
         confidence: wEst.confidence,
         confidenceLabel: wEst.confidenceLabel,
-        reason: `Shortest estimated wait (~${wEst.predictedWaitMinutes} min) with ${wEst.confidenceLabel.toLowerCase()} evidence; verified by ${wEst.recentReportCount} report${wEst.recentReportCount === 1 ? '' : 's'} updated ${ageText}.`,
+        reason: `Shortest estimated wait (~${wEst.predictedWaitMinutes} min) with ${wEst.confidenceLabel.toLowerCase()} evidence; verified by ${wEst.recentReportCount} fresh reports updated ${ageText}.`,
         isEligible: true,
+        state: 'recommended',
         candidateCount: candidates.length,
         eligibleCount: eligible.length,
       },
@@ -593,17 +726,107 @@ export const api = {
     };
   },
 
-  async getAdminReports(): Promise<{ reports: QueueReport[]; isLive: boolean }> {
+  async getHistorical(locationId: string): Promise<{ data: HistoricalData; isLive: boolean }> {
     if (this.isLiveApiConfigured()) {
       try {
-        const res = await fetch(`${API_BASE_URL}/admin/reports`);
+        const res = await fetch(`${API_BASE_URL}/locations/${locationId}/historical`);
+        if (res.ok) {
+          const json = await res.json();
+          return { data: json.data, isLive: true };
+        }
+        if (DATA_MODE === 'production') {
+          throw new Error(`Historical API returned status ${res.status}`);
+        }
+      } catch (err: any) {
+        if (DATA_MODE === 'production') {
+          throw new Error(`Historical queue patterns temporarily unavailable: ${err.message || 'API unreachable'}`);
+        }
+      }
+    } else if (DATA_MODE === 'production') {
+      throw new Error('Production mode active: Live API URL is not configured.');
+    }
+
+    // Demo Mode Simulated Historical Curve
+    const hourlyTrends = Array.from({ length: 24 }, (_, h) => {
+      // Meal rush simulation: lunch (12-14) and dinner (19-21)
+      let avgWait: number | null = null;
+      let count = 0;
+      if (h >= 8 && h <= 22) {
+        if (h >= 12 && h <= 14) {
+          avgWait = Math.round((14 + Math.sin(h) * 4) * 10) / 10;
+          count = 12;
+        } else if (h >= 19 && h <= 21) {
+          avgWait = Math.round((16 + Math.cos(h) * 5) * 10) / 10;
+          count = 16;
+        } else {
+          avgWait = Math.round((4 + (h % 3)) * 10) / 10;
+          count = 6;
+        }
+      }
+      return {
+        hour: h,
+        label: `${h.toString().padStart(2, '0')}:00`,
+        averageWaitMinutes: avgWait,
+        averageQueueLength: avgWait ? Math.round(avgWait * 1.5) : null,
+        observationCount: count,
+      };
+    });
+
+    return {
+      data: {
+        locationId,
+        status: 'available',
+        totalObservations: 42,
+        hourlyTrends,
+        busiestHour: {
+          hour: 20,
+          label: '20:00',
+          averageWaitMinutes: 18.5,
+        },
+        quietestHour: {
+          hour: 16,
+          label: '16:00',
+          averageWaitMinutes: 3.5,
+        },
+        summary: 'Demo historical curve synthesized from 42 campus observations over past 14 days.',
+      },
+      isLive: false,
+    };
+  },
+
+  async getAdminReports(adminKey?: string): Promise<{ reports: QueueReport[]; isLive: boolean }> {
+    const key =
+      adminKey ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('queuesense_admin_key') : null) ||
+      import.meta.env.VITE_ADMIN_KEY ||
+      'queuesense-admin-secret-dev-key';
+
+    if (this.isLiveApiConfigured()) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/admin/reports`, {
+          headers: {
+            Authorization: `Bearer ${key}`,
+            'X-Admin-Key': key,
+          },
+        });
         if (res.ok) {
           const json = await res.json();
           return { reports: json.data.reports, isLive: true };
         }
-      } catch (err) {
-        console.warn('API Gateway unreachable, returning mock admin audit feed:', err);
+        if (res.status === 401) {
+          throw new Error('UNAUTHORIZED');
+        }
+        if (DATA_MODE === 'production') {
+          throw new Error(`Admin audit API returned status ${res.status}`);
+        }
+      } catch (err: any) {
+        if (err.message === 'UNAUTHORIZED' || DATA_MODE === 'production') {
+          throw err;
+        }
+        console.warn('API Gateway unreachable, returning demo admin audit feed:', err);
       }
+    } else if (DATA_MODE === 'production') {
+      throw new Error('Production mode active: Live API URL is not configured.');
     }
 
     const allReports: QueueReport[] = [];
@@ -615,4 +838,3 @@ export const api = {
     return { reports: allReports, isLive: false };
   },
 };
-

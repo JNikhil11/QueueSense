@@ -3,6 +3,7 @@ QueueSense - GET /locations/{id}/queue Lambda Handler
 Returns current queue prediction and recent observation history for a specific outlet.
 """
 
+import logging
 import os
 import sys
 
@@ -14,22 +15,27 @@ if "/opt/python" not in sys.path:
     sys.path.insert(0, "/opt/python")
 
 from response import create_api_response
-from database import QueueSenseDatabase
+from database import QueueSenseDatabase, DatabasePersistenceError
 from validation import validate_location_id
 from prediction import calculate_queue_estimate
 
+logger = logging.getLogger("queuesense.get_queue")
+logger.setLevel(logging.INFO)
+
 
 def lambda_handler(event, context):
+    request_id = getattr(context, "aws_request_id", None) or "local_req"
+
     try:
-        # Extract location ID from path parameters
         path_params = event.get("pathParameters") or {}
         location_id = path_params.get("id")
 
         if not location_id or not validate_location_id(location_id):
             return create_api_response(
                 status_code=400,
-                data=None,
-                error="Invalid or missing location identifier.",
+                error="Invalid or missing campus outlet identifier.",
+                error_code="INVALID_LOCATION_ID",
+                request_id=request_id,
             )
 
         db = QueueSenseDatabase()
@@ -37,8 +43,9 @@ def lambda_handler(event, context):
         if not location:
             return create_api_response(
                 status_code=404,
-                data=None,
                 error=f"Campus outlet with id '{location_id}' was not found.",
+                error_code="LOCATION_NOT_FOUND",
+                request_id=request_id,
             )
 
         # Retrieve recent reports
@@ -70,11 +77,21 @@ def lambda_handler(event, context):
                 "estimate": estimate,
                 "reports": clean_reports,
             },
+            request_id=request_id,
         )
-    except Exception as e:
+    except DatabasePersistenceError as e:
+        logger.error("Database failure in get_queue [req=%s]: %s", request_id, str(e), exc_info=True)
         return create_api_response(
             status_code=500,
-            data=None,
-            error=f"Error fetching queue data: {str(e)}",
+            error="Failed to retrieve queue details from database.",
+            error_code="PERSISTENCE_FAILED",
+            request_id=request_id,
         )
-
+    except Exception as e:
+        logger.error("Error fetching queue data [req=%s]: %s", request_id, str(e), exc_info=True)
+        return create_api_response(
+            status_code=500,
+            error="An internal error occurred while fetching queue details.",
+            error_code="INTERNAL_ERROR",
+            request_id=request_id,
+        )

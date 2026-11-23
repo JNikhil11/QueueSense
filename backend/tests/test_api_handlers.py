@@ -10,6 +10,7 @@ from backend.functions.get_queue.app import lambda_handler as queue_handler
 from backend.functions.submit_report.app import lambda_handler as submit_handler
 from backend.functions.get_recommendations.app import lambda_handler as rec_handler
 from backend.functions.admin.app import lambda_handler as admin_handler
+from backend.functions.get_historical.app import lambda_handler as historical_handler
 
 
 def test_health_handler():
@@ -81,11 +82,38 @@ def test_get_recommendations_handler():
     assert "reason" in body["data"]
 
 
-def test_admin_reports_handler():
-    event = {"queryStringParameters": {"limit": "10"}}
+def test_admin_reports_handler_authorized():
+    event = {
+        "queryStringParameters": {"limit": "10"},
+        "headers": {"Authorization": "Bearer queuesense-admin-secret-dev-key"},
+    }
     res = admin_handler(event, None)
     assert res["statusCode"] == 200
     body = json.loads(res["body"])
     assert body["success"] is True
     assert "reports" in body["data"]
+
+
+def test_admin_reports_handler_unauthorized():
+    event = {
+        "queryStringParameters": {"limit": "10"},
+        "headers": {},
+    }
+    res = admin_handler(event, None)
+    assert res["statusCode"] == 401
+    body = json.loads(res["body"])
+    assert body["success"] is False
+    assert body["errorCode"] == "UNAUTHORIZED"
+
+
+def test_get_historical_handler():
+    event = {"pathParameters": {"id": "iitb-mess-h12-14"}}
+    res = historical_handler(event, None)
+    assert res["statusCode"] == 200
+    body = json.loads(res["body"])
+    assert body["success"] is True
+    assert "hourlyTrends" in body["data"]
+    assert len(body["data"]["hourlyTrends"]) == 24
+    assert body["data"]["locationId"] == "iitb-mess-h12-14"
+
 

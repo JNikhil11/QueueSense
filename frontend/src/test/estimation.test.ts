@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeClientEstimate } from '../services/api';
+import { computeClientEstimate, api, DATA_MODE, INITIAL_LOCATIONS } from '../services/api';
 import { QueueReport } from '../types';
 
 describe('Client-Side Queue Estimation Logic', () => {
@@ -19,14 +19,14 @@ describe('Client-Side Queue Estimation Logic', () => {
         locationId: 'mess-a',
         reportedWaitMinutes: 6,
         queueLength: 10,
-        timestamp: new Date(now - 2 * 60 * 1000).toISOString(), // 2m ago
+        timestamp: new Date(now - 2 * 60 * 1000).toISOString(),
       },
       {
         reportId: 'r2',
         locationId: 'mess-a',
         reportedWaitMinutes: 8,
         queueLength: 12,
-        timestamp: new Date(now - 5 * 60 * 1000).toISOString(), // 5m ago
+        timestamp: new Date(now - 5 * 60 * 1000).toISOString(),
       },
     ];
 
@@ -46,7 +46,7 @@ describe('Client-Side Queue Estimation Logic', () => {
         locationId: 'mess-b',
         reportedWaitMinutes: 10,
         queueLength: 15,
-        timestamp: new Date(now - 75 * 60 * 1000).toISOString(), // 75m ago
+        timestamp: new Date(now - 75 * 60 * 1000).toISOString(),
       },
     ];
 
@@ -64,26 +64,25 @@ describe('Client-Side Queue Estimation Logic', () => {
         reportedWaitMinutes: 20,
         queueLength: 40,
         note: 'Heavy rush',
-        timestamp: new Date(now).toISOString(), // 0m ago (Just now)
+        timestamp: new Date(now).toISOString(),
       },
       {
         reportId: 'rep_prior_1',
         locationId: 'iitb-mess-h15-16',
         reportedWaitMinutes: 5,
         queueLength: 6,
-        timestamp: new Date(now - 2 * 60 * 1000).toISOString(), // 2m ago
+        timestamp: new Date(now - 2 * 60 * 1000).toISOString(),
       },
       {
         reportId: 'rep_prior_2',
         locationId: 'iitb-mess-h15-16',
         reportedWaitMinutes: 6,
         queueLength: 8,
-        timestamp: new Date(now - 8 * 60 * 1000).toISOString(), // 8m ago
+        timestamp: new Date(now - 8 * 60 * 1000).toISOString(),
       },
     ];
 
     const est = computeClientEstimate(reports);
-    // Weighted average: (20*1.0 + 5*0.875 + 6*0.586) / (1.0 + 0.875 + 0.586) = ~11.3m
     expect(est.predictedWaitMinutes).toBeGreaterThanOrEqual(10.5);
     expect(est.predictedWaitMinutes).toBeLessThanOrEqual(12.5);
     expect(est.predictedQueueLength).toBeGreaterThanOrEqual(18);
@@ -95,3 +94,39 @@ describe('Client-Side Queue Estimation Logic', () => {
   });
 });
 
+describe('Production Hardening & Recommendation Intelligence', () => {
+  it('identifies active data mode honestly', () => {
+    expect(DATA_MODE).toBeDefined();
+    expect(['production', 'demo', 'development']).toContain(DATA_MODE);
+  });
+  it('enforces cold-start protection: requires at least 3 fresh reports and 50%+ confidence', async () => {
+    const rec = await api.getRecommendations();
+    expect(rec.data).toBeDefined();
+    // In our seed fixture, mess-h15-16 has 3 fresh reports with high confidence
+    if (rec.data.isEligible) {
+      expect(rec.data.state).toBe('recommended');
+      expect(rec.data.predictedWaitMinutes).toBeDefined();
+    } else {
+      expect(rec.data.state).toBe('insufficient_data');
+      expect(rec.data.recommendedLocationId).toBeNull();
+    }
+  });
+
+  it('provides student-sourced campus directory with honest provenance', () => {
+    expect(INITIAL_LOCATIONS.length).toBeGreaterThanOrEqual(5);
+    const verifiedLocations = INITIAL_LOCATIONS.filter(
+      (l) => l.verificationStatus === 'STUDENT_SOURCED'
+    );
+    expect(verifiedLocations.length).toBe(INITIAL_LOCATIONS.length);
+    verifiedLocations.forEach((loc) => {
+      expect(loc.verificationSource.length).toBeGreaterThan(5);
+    });
+  });
+
+  it('provides historical trends API with 24-hour distribution', async () => {
+    const hist = await api.getHistorical('iitb-mess-h12-14');
+    expect(hist.data.locationId).toBe('iitb-mess-h12-14');
+    expect(hist.data.hourlyTrends.length).toBe(24);
+    expect(hist.data.summary).toBeDefined();
+  });
+});

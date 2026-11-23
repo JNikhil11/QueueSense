@@ -37,10 +37,21 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
             >
               {location.category}
             </span>
-            {location.verificationStatus === 'VERIFIED_CAMPUS_DIRECTORY' && (
-              <span className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.04] text-[#8E9E93] border border-white/10" title={location.verificationSource}>
+            {location.verificationStatus === 'STUDENT_SOURCED' && (
+              <span
+                className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.04] text-[#8E9E93] border border-white/10"
+                title={location.verificationSource}
+              >
                 <CheckCircle2 className="w-3 h-3 text-[#39FF14]" />
-                <span>Verified</span>
+                <span>Student Sourced</span>
+              </span>
+            )}
+            {location.verificationStatus === 'COMMUNITY_LISTING' && (
+              <span
+                className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.04] text-[#8E9E93] border border-white/10"
+                title={location.verificationSource}
+              >
+                <span>Community Listing</span>
               </span>
             )}
             {est && <FreshnessBadge state={est.freshness} />}

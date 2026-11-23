@@ -2,7 +2,9 @@ export type CongestionLevel = 'LOW' | 'MODERATE' | 'HIGH' | 'VERY_HIGH' | 'UNKNO
 
 export type FreshnessState = 'LIVE' | 'RECENT' | 'STALE' | 'NO RECENT DATA';
 
-export type ConfidenceLabel = 'HIGH' | 'MODERATE' | 'LIMITED' | 'VERY LOW' | 'NO DATA';
+export type ConfidenceLabel = 'HIGH' | 'MODERATE' | 'LIMITED' | 'VERY LOW' | 'NO DATA' | 'INSUFFICIENT DATA';
+
+export type DataMode = 'production' | 'demo' | 'development';
 
 export interface QueueEstimate {
   predictedWaitMinutes: number | null;
@@ -27,7 +29,7 @@ export interface CampusLocation {
   category: 'MESS' | 'CANTEEN';
   description: string;
   landmarkLocation: string;
-  verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY' | 'COMMUNITY_LISTING';
+  verificationStatus: 'STUDENT_SOURCED' | 'UNVERIFIED_LISTING' | 'COMMUNITY_LISTING' | 'VERIFIED_CAMPUS_DIRECTORY';
   verificationSource: string;
   openHours: string;
   capacity: number;
@@ -54,6 +56,8 @@ export interface SmartRecommendation {
   confidenceLabel?: ConfidenceLabel;
   reason: string;
   isEligible: boolean;
+  state?: 'recommended' | 'insufficient_data';
+  minReportsRequired?: number;
   candidateCount: number;
   eligibleCount: number;
 }
@@ -62,5 +66,32 @@ export interface ReportSubmissionPayload {
   reportedWaitMinutes: number;
   queueLength: number;
   note?: string;
+  idempotencyKey?: string;
 }
 
+export interface HistoricalHourlyBucket {
+  hour: number;
+  label: string;
+  averageWaitMinutes: number | null;
+  averageQueueLength: number | null;
+  observationCount: number;
+}
+
+export interface HistoricalData {
+  locationId: string;
+  locationName?: string;
+  status: 'available' | 'insufficient_history';
+  totalObservations: number;
+  hourlyTrends: HistoricalHourlyBucket[];
+  busiestHour: {
+    hour: number;
+    label: string;
+    averageWaitMinutes: number;
+  } | null;
+  quietestHour: {
+    hour: number;
+    label: string;
+    averageWaitMinutes: number;
+  } | null;
+  summary: string;
+}

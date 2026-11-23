@@ -14,9 +14,10 @@
 | `GET` | `/locations` | List all campus food outlets with current queue estimates | Public |
 | `GET` | `/locations/{id}` | Retrieve specific outlet details | Public |
 | `GET` | `/locations/{id}/queue` | Get real-time queue estimate and recent report timeline | Public |
-| `POST` | `/locations/{id}/reports` | Submit a crowdsourced queue observation | Public |
+| `GET` | `/locations/{id}/historical` | Aggregated 24-hour wait time and queue patterns | Public |
+| `POST` | `/locations/{id}/reports` | Submit a crowdsourced queue observation | Rate-Limited |
 | `GET` | `/recommendations` | Get campus-wide smart outlet recommendation | Public |
-| `GET` | `/admin/reports` | Campus-wide audit log of observations | Protected/Audit |
+| `GET` | `/admin/reports` | Campus-wide audit log of observations | Protected (`Bearer` / `X-Admin-Key`) |
 
 ---
 
@@ -125,25 +126,64 @@ Submits a student queue observation. The server validates bounds, generates uniq
 
 ---
 
-### 2.4 `GET /recommendations`
-Evaluates all campus outlets and determines the best outlet to visit.
+### 2.5 `GET /locations/{id}/historical`
+Retrieves aggregated 24-hour queue patterns synthesized from past student observations over the last 14 days. Identifies peak rush and best time to go during operating hours (08:00 - 22:00).
 
 **Response (200 OK):**
 ```json
 {
   "success": true,
   "data": {
-    "recommendedLocationId": "mess-b-south",
-    "recommendedLocationName": "South Mess B (Annex Dining)",
-    "predictedWaitMinutes": 5.0,
-    "congestion": "MODERATE",
-    "confidence": 0.75,
-    "confidenceLabel": "HIGH",
-    "reason": "Shortest estimated wait (~5 min) with high evidence; verified by 2 reports updated 2m ago.",
-    "isEligible": true,
-    "candidateCount": 5,
-    "eligibleCount": 2
+    "locationId": "iitb-mess-h12-14",
+    "locationName": "Hostel 12-13-14 Dining Complex",
+    "status": "available",
+    "totalObservations": 42,
+    "hourlyTrends": [
+      {
+        "hour": 13,
+        "label": "13:00",
+        "averageWaitMinutes": 16.5,
+        "averageQueueLength": 24.0,
+        "observationCount": 8
+      }
+    ],
+    "busiestHour": {
+      "hour": 20,
+      "label": "20:00",
+      "averageWaitMinutes": 18.2
+    },
+    "quietestHour": {
+      "hour": 16,
+      "label": "16:00",
+      "averageWaitMinutes": 3.5
+    },
+    "summary": "Historical curve synthesized from 42 verified student reports over the past 14 days."
   }
 }
 ```
+
+---
+
+## 3. Standardized Error Handling
+
+All error responses return clean JSON payloads without leaking raw internal exception stack traces:
+
+```json
+{
+  "success": false,
+  "error": "Submission rate limit reached. Please wait a few minutes before reporting again.",
+  "errorCode": "RATE_LIMIT_EXCEEDED",
+  "requestId": "c1f7a28e-5b23-4d6b-9c88-123456789abc"
+}
+```
+
+### Common Error Codes:
+- `INVALID_LOCATION_ID` (HTTP 400): Location identifier missing or failed regex validation.
+- `EMPTY_PAYLOAD` / `MALFORMED_JSON` / `VALIDATION_FAILED` (HTTP 400/422): Input parameters out of physical bounds.
+- `UNAUTHORIZED` (HTTP 401): Missing or invalid admin authorization token.
+- `LOCATION_NOT_FOUND` (HTTP 404): Outlet does not exist in directory.
+- `RATE_LIMIT_EXCEEDED` (HTTP 429): Client exceeded anonymous submission threshold (5 requests per 5 minutes).
+- `PERSISTENCE_FAILED` (HTTP 500): Database storage rejected write; client must retry (no optimistic false success).
+- `INTERNAL_ERROR` (HTTP 500): General unhandled backend exception.
+
 

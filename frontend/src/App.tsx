@@ -211,6 +211,24 @@ export const App: React.FC = () => {
         onOpenAdminModal={() => setIsAdminModalOpen(true)}
       />
 
+      {/* Demo Mode Persistent Banner */}
+      {!isLiveApi && (
+        <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-[#FFA028]/10 border border-[#FFA028]/30 text-[#FFA028] text-xs font-mono backdrop-blur-md">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[#FFA028] animate-pulse" />
+              <strong>DEMO MODE ACTIVE</strong>
+              <span className="hidden sm:inline text-[#8E9E93]">
+                — Displaying simulated campus queue observations. Reports persist to local browser storage.
+              </span>
+            </div>
+            <span className="text-[10px] text-[#8E9E93] bg-white/[0.04] px-2 py-0.5 rounded border border-white/10 shrink-0">
+              IIT Bombay Campus
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pb-20">
         {/* Hero Section */}
@@ -218,9 +236,24 @@ export const App: React.FC = () => {
 
         {/* Global Error Notice if any */}
         {errorMsg && (
-          <div className="my-4 p-4 rounded-2xl bg-[#CC162D]/15 border border-[#CC162D]/40 text-[#FF4A60] text-xs flex items-center gap-2.5">
-            <AlertCircle className="w-4 h-4 shrink-0 text-[#FF4A60]" />
-            <span>{errorMsg}</span>
+          <div className="my-6 p-6 rounded-3xl bg-[#CC162D]/15 border border-[#CC162D]/40 text-[#FF4A60] flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-6 h-6 shrink-0 text-[#FF4A60] mt-0.5" />
+              <div>
+                <h4 className="font-display font-bold text-base text-white">
+                  Live Data Temporarily Unavailable
+                </h4>
+                <p className="text-xs text-[#8E9E93] mt-1">
+                  {errorMsg}. Production mode enforces data integrity and will not silently substitute mock fixtures for live cloud observations.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => loadData(true)}
+              className="shrink-0 px-4 py-2 rounded-xl bg-[#CC162D]/30 border border-[#CC162D]/60 text-white font-mono text-xs hover:bg-[#CC162D]/50 transition-colors"
+            >
+              Retry Sync
+            </button>
           </div>
         )}
 

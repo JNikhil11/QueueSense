@@ -305,13 +305,18 @@ def calculate_queue_estimate(
 
 
 def compute_smart_recommendation(
-    locations_with_estimates: List[Dict[str, Any]]
+    locations_with_estimates: List[Dict[str, Any]],
+    min_reports: int = 3,
+    min_confidence: float = 0.50,
 ) -> Dict[str, Any]:
     """
     Defensible recommendation engine:
     Recommends the outlet with the shortest credible wait time.
-    Disqualifies outlets with STALE, NO RECENT DATA, or VERY LOW confidence.
-    Explains the exact reasoning in plain language.
+    Cold-Start Protection:
+    Requires at least min_reports (default: 3) fresh observations (<= 20m)
+    AND confidence >= min_confidence (default: 0.50).
+    When insufficient data exists across all campus outlets, returns an explicit
+    insufficient_data state instead of declaring an unjustified winner.
     """
     eligible: List[Dict[str, Any]] = []
 
@@ -320,16 +325,18 @@ def compute_smart_recommendation(
         freshness = est.get("freshness", "NO RECENT DATA")
         confidence = est.get("confidence", 0.0)
         predicted_wait = est.get("predictedWaitMinutes")
+        recent_count = est.get("recentReportCount", 0)
 
         # Must be an active location
         if not loc.get("active", True):
             continue
 
-        # Must have fresh or recent data, valid wait time, and non-negligible confidence
+        # Must have fresh or recent data, valid wait time, minimum reports, and minimum confidence
         if (
             predicted_wait is not None
             and freshness in ("LIVE", "RECENT")
-            and confidence >= 0.25
+            and recent_count >= min_reports
+            and confidence >= min_confidence
         ):
             eligible.append(loc)
 
@@ -337,8 +344,19 @@ def compute_smart_recommendation(
         return {
             "recommendedLocationId": None,
             "recommendedLocationName": None,
-            "reason": "Not enough recent queue reports across campus to make a reliable recommendation yet.",
+            "predictedWaitMinutes": None,
+            "congestion": "UNKNOWN",
+            "confidence": 0.0,
+            "confidenceLabel": "INSUFFICIENT DATA",
+            "reason": (
+                f"Not enough recent queue reports across campus to make a reliable recommendation yet. "
+                f"At least {min_reports} fresh observations (within 20 minutes) and {int(min_confidence * 100)}%+ "
+                f"confidence are required."
+            ),
             "isEligible": False,
+            "state": "insufficient_data",
+            "minReportsRequired": min_reports,
+            "minConfidenceRequired": min_confidence,
             "candidateCount": len(locations_with_estimates),
             "eligibleCount": 0,
         }
@@ -360,7 +378,7 @@ def compute_smart_recommendation(
     age_text = f"{int(round(w_age))}m ago" if w_age and w_age >= 1 else "just now"
     reason = (
         f"Shortest estimated wait (~{w_wait} min) with {w_est['confidenceLabel'].lower()} evidence; "
-        f"verified by {w_reports} report{'s' if w_reports != 1 else ''} updated {age_text}."
+        f"verified by {w_reports} fresh reports updated {age_text}."
     )
 
     return {
@@ -372,6 +390,7 @@ def compute_smart_recommendation(
         "confidenceLabel": w_est["confidenceLabel"],
         "reason": reason,
         "isEligible": True,
+        "state": "recommended",
         "candidateCount": len(locations_with_estimates),
         "eligibleCount": len(eligible),
     }

@@ -3,6 +3,7 @@ QueueSense - GET /locations Lambda Handler
 Returns all active campus locations with their real-time queue estimate snapshot.
 """
 
+import logging
 import os
 import sys
 
@@ -14,11 +15,16 @@ if "/opt/python" not in sys.path:
     sys.path.insert(0, "/opt/python")
 
 from response import create_api_response
-from database import QueueSenseDatabase
+from database import QueueSenseDatabase, DatabasePersistenceError
 from prediction import calculate_queue_estimate
+
+logger = logging.getLogger("queuesense.get_locations")
+logger.setLevel(logging.INFO)
 
 
 def lambda_handler(event, context):
+    request_id = getattr(context, "aws_request_id", None) or "local_req"
+
     try:
         db = QueueSenseDatabase()
         locations = db.list_locations()
@@ -40,11 +46,24 @@ def lambda_handler(event, context):
             clean_loc["estimate"] = clean_est
             results.append(clean_loc)
 
-        return create_api_response(status_code=200, data=results)
-    except Exception as e:
+        return create_api_response(
+            status_code=200,
+            data=results,
+            request_id=request_id,
+        )
+    except DatabasePersistenceError as e:
+        logger.error("Database failure in get_locations [req=%s]: %s", request_id, str(e), exc_info=True)
         return create_api_response(
             status_code=500,
-            data=None,
-            error=f"Failed to retrieve campus locations: {str(e)}",
+            error="Failed to retrieve campus locations from database.",
+            error_code="PERSISTENCE_FAILED",
+            request_id=request_id,
         )
-
+    except Exception as e:
+        logger.error("Failed to retrieve campus locations [req=%s]: %s", request_id, str(e), exc_info=True)
+        return create_api_response(
+            status_code=500,
+            error="An internal error occurred while retrieving campus locations.",
+            error_code="INTERNAL_ERROR",
+            request_id=request_id,
+        )

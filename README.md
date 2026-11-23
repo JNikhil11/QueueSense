@@ -20,13 +20,15 @@ At university campuses during peak lunch and dinner hours, hundreds of students 
 
 ## 2. Key Capabilities
 
-- **Real-Time Congestion Visibility:** Instant access to estimated waiting times and queue sizes across 10 verified IIT Bombay messes and canteens.
+- **Real-Time Congestion Visibility:** Instant access to estimated waiting times and queue sizes across 10 student-sourced IIT Bombay messes and canteens (and configurable for VIT-AP).
 - **Evidence-First Transparency:** Estimates display exact data freshness (`LIVE <7m`, `RECENT <20m`, `AGING DATA`), report count, and confidence levels.
-- **Smart Recommendations:** Recommends less crowded dining outlets only when supported by fresh, high-confidence evidence.
-- **Sub-5-Second Reporting:** Streamlined observation flow with presets for wait time and queue length.
-- **Zero Personal Data Collected:** No student registration, student IDs, phone numbers, or device tracking.
-- **Dual-Mode Architecture:** Seamlessly switches between live AWS API Gateway and offline local mock fixtures.
-- **Administrator Audit Stream:** Campus-wide activity feed with automated statistical outlier flagging.
+- **Cold-Start Recommendation Protection:** Recommends less crowded dining outlets only when supported by at least 3 fresh reports (within 20m) and 50%+ confidence.
+- **Historical Best-Time-To-Go Intelligence:** Synthesizes past 14 days of crowdsourced data into 24-hour curves, highlighting peak rush and quietest meal hours.
+- **Durable Fail-Closed Persistence:** Eliminates silent mock fallbacks in production. If DynamoDB is unreachable, fails closed with HTTP 500 `PERSISTENCE_FAILED`.
+- **Server-Side Idempotency & Throttling:** Client `X-Idempotency-Key` deduplication and privacy-preserving anonymous rate limiting (HMAC-SHA256 client hash).
+- **Zero Personal Data Collected:** No student registration, student IDs, phone numbers, or IP logging.
+- **Dual-Mode Architecture:** Explicit separation between `production` (strictly cloud-backed) and `demo` (local browser simulation).
+- **Protected Administrator Audit Stream:** Secured with API key / bearer token authorization and automated statistical outlier flagging.
 
 ---
 
@@ -36,33 +38,41 @@ At university campuses during peak lunch and dinner hours, hundreds of students 
 [ Student Browser / Mobile ] 
            │
            ▼
-[ AWS Amplify / S3 Static Web Hosting ]
+[ Amazon CloudFront (CDN + HTTPS) ] ──(OAC)──► [ Amazon S3 Private Bucket ]
            │
            ▼
 [ Amazon API Gateway (HTTP API v2) ]
            │
-     ┌─────┴───────────────┬─────────────────────┐
-     ▼                     ▼                     ▼
-[ Health & Outlets ]   [ Report Submission ]  [ Recommendations ]
-(Python 3.12 Lambda)   (Python 3.12 Lambda)   (Python 3.12 Lambda)
-     │                     │                     │
-     └─────────────────────┼─────────────────────┘
+     ┌─────┴───────────────┬─────────────────────┬─────────────────────┐
+     ▼                     ▼                     ▼                     ▼
+[ Health & Outlets ]   [ Report Submission ]  [ Recommendations ]   [ Historical Trends ]
+(Python 3.12 Lambda)   (Python 3.12 Lambda)   (Python 3.12 Lambda)  (Python 3.12 Lambda)
+     │                     │                     │                     │
+     └─────────────────────┼─────────────────────┴─────────────────────┘
                            ▼
               [ Amazon DynamoDB Single-Table ]
-              (Pay-Per-Request Mode + TTL)
+              (Pay-Per-Request Mode + 7-Day TTL)
                            │
                            ▼
                [ Amazon CloudWatch Logs ]
 ```
 
 ### AWS Services Used
-- **Amazon API Gateway (HTTP API):** Low-latency, cost-effective serverless API routing with CORS support.
-- **AWS Lambda (Python 3.12):** Microservices for queue calculation, report submission, and recommendation scoring.
+- **Amazon CloudFront & Amazon S3:** Static web hosting with Origin Access Control (OAC), HTTPS redirection, and SPA client routing.
+- **Amazon API Gateway (HTTP API v2):** Low-latency, cost-effective serverless API routing with configured CORS and route-level throttling.
+- **AWS Lambda (Python 3.12):** Microservices for queue calculation, report submission, recommendation scoring, historical trend aggregation, and admin auditing.
 - **Amazon DynamoDB:** Single-table storage design (`QueueSense-Main`) using on-demand capacity and 7-day TTL on raw observations.
-- **Amazon CloudWatch:** Real-time log capture and operational metrics.
+- **Amazon CloudWatch:** Real-time log capture, sanitized error tracing, and operational metrics.
 - **AWS SAM:** Infrastructure as code for reproducible, least-privilege cloud deployments.
 
 ---
+
+## 4. Documentation & Verification Registers
+
+- [Outlet Data Provenance Register](file:///d:/Projects%20-%20antigravity/CA%20IIT%20BOMBAY/AWS/docs/OUTLET_DATA_PROVENANCE.md): Full register of outlets, student-sourced citations, and ethical disclosures.
+- [Production Hardening & Release Audit](file:///d:/Projects%20-%20antigravity/CA%20IIT%20BOMBAY/AWS/docs/RELEASE_READINESS.md): Verification matrix covering P0, P1, and P2 security, data integrity, and test results.
+- [Production Cost Model](file:///d:/Projects%20-%20antigravity/CA%20IIT%20BOMBAY/AWS/docs/COST_MODEL.md): Pay-per-request pricing analysis for `ap-southeast-2` (Sydney) with zero idle cost.
+- [API Specification](file:///d:/Projects%20-%20antigravity/CA%20IIT%20BOMBAY/AWS/docs/API.md): Detailed schemas for all HTTP API endpoints.
 
 ## 4. Mathematical Estimation Model
 
