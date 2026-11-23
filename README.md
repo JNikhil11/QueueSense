@@ -28,7 +28,7 @@ At university campuses during peak lunch and dinner hours, hundreds of students 
 - **Server-Side Idempotency & Throttling:** Client `X-Idempotency-Key` deduplication and privacy-preserving anonymous rate limiting (HMAC-SHA256 client hash).
 - **Zero Personal Data Collected:** No student registration, student IDs, phone numbers, or IP logging.
 - **Dual-Mode Architecture:** Explicit separation between `production` (strictly cloud-backed) and `demo` (local browser simulation).
-- **Protected Administrator Audit Stream:** Secured with API key / bearer token authorization and automated statistical outlier flagging.
+- **Protected Administrator Audit Stream:** Secured with AWS Cognito User Pool authentication (`Admins` group) and automated statistical outlier flagging.
 
 ---
 
@@ -71,7 +71,7 @@ At university campuses during peak lunch and dinner hours, hundreds of students 
 
 - [Outlet Data Provenance Register](file:///d:/Projects%20-%20antigravity/CA%20IIT%20BOMBAY/AWS/docs/OUTLET_DATA_PROVENANCE.md): Full register of outlets, student-sourced citations, and ethical disclosures.
 - [Production Hardening & Release Audit](file:///d:/Projects%20-%20antigravity/CA%20IIT%20BOMBAY/AWS/docs/RELEASE_READINESS.md): Verification matrix covering P0, P1, and P2 security, data integrity, and test results.
-- [Production Cost Model](file:///d:/Projects%20-%20antigravity/CA%20IIT%20BOMBAY/AWS/docs/COST_MODEL.md): Pay-per-request pricing analysis for `ap-southeast-2` (Sydney) with zero idle cost.
+- [Production Cost Model](file:///d:/Projects%20-%20antigravity/CA%20IIT%20BOMBAY/AWS/docs/COST_MODEL.md): Pay-per-request pricing analysis for `ap-southeast-2` (Sydney) with realistic baseline cost analysis (~$0.05 - $0.55/mo).
 - [API Specification](file:///d:/Projects%20-%20antigravity/CA%20IIT%20BOMBAY/AWS/docs/API.md): Detailed schemas for all HTTP API endpoints.
 
 ## 4. Mathematical Estimation Model

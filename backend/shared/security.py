@@ -2,6 +2,7 @@
 QueueSense - Security, Privacy & Throttling Utilities
 Implements privacy-preserving client identity hashing, secure token checks,
 and safe header extraction without exposing student IP addresses.
+No hardcoded secret fallbacks in production.
 """
 
 from __future__ import annotations
@@ -10,7 +11,39 @@ import hashlib
 import os
 from typing import Dict, Any, Optional
 
-DEFAULT_HMAC_SALT = os.environ.get("RATE_LIMIT_SALT", "queuesense_privacy_salt_2026")
+
+class SecurityConfigurationError(Exception):
+    """Raised when required security credentials or salt configurations are missing."""
+    pass
+
+
+def get_rate_limit_salt() -> str:
+    """
+    Retrieves the required HMAC salt for anonymous client hashing.
+    Fails closed if the secret is missing or insecure in production.
+    """
+    salt = os.environ.get("RATE_LIMIT_SALT")
+    env = os.environ.get("ENVIRONMENT", "").lower()
+    data_mode = os.environ.get("DATA_MODE", "").lower()
+    is_production = env in ("prod", "production") or data_mode == "production" or bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+
+    if not salt or not salt.strip():
+        if is_production:
+            raise SecurityConfigurationError(
+                "RATE_LIMIT_SALT environment variable is missing. Production strictly requires a strong, high-entropy secret."
+            )
+        # Check if running in a unit test environment
+        if os.environ.get("PYTEST_CURRENT_TEST") or data_mode in ("test", "demo"):
+            return "test_transient_dev_salt_only_non_prod_123456"
+        raise SecurityConfigurationError("RATE_LIMIT_SALT must be set in environment.")
+
+    clean_salt = salt.strip()
+    if is_production and len(clean_salt) < 16:
+        raise SecurityConfigurationError(
+            "RATE_LIMIT_SALT is insufficiently secure. Minimum 16 characters required in production."
+        )
+
+    return clean_salt
 
 
 def compute_anonymous_client_hash(
@@ -22,7 +55,8 @@ def compute_anonymous_client_hash(
     based on the source IP and User-Agent.
     The raw IP address is NEVER logged, stored, or persisted.
     """
-    secret = (salt or DEFAULT_HMAC_SALT).encode("utf-8")
+    effective_salt = salt if (salt and salt.strip()) else get_rate_limit_salt()
+    secret = effective_salt.encode("utf-8")
 
     # Extract source IP from HTTP API v2 or REST API event
     request_context = event.get("requestContext") or {}

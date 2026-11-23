@@ -8,10 +8,10 @@
 
 ## 1. Executive Summary & Honest Pricing Policy
 
-A common pitfall in student hackathons is claiming serverless architectures are "100% Free Forever under all conditions."  
+A common pitfall in student hackathons is claiming serverless architectures are "100% Free Forever with guaranteed $0.00 under all conditions."  
 **QueueSense rejects this misleading claim.**
 
-QueueSense is architected to guarantee **Zero Idle Cost ($0.00/month when inactive)** using AWS On-Demand pay-per-request pricing. Under normal campus usage and competition judge evaluation, it easily fits within the **AWS Always-Free Tier**. As traffic scales to thousands of concurrent campus users, costs scale linearly and remain under **$5.00 per month**.
+QueueSense is architected for **minimal near-zero idle baseline cost (~$0.10 - $0.60/month depending on Route 53 hosted zones and CloudWatch log ingestion)** by relying on AWS On-Demand pay-per-request serverless primitives rather than continuously provisioned EC2 instances, containers, or RDS clusters. Under judge evaluation and initial campus pilot usage, request-based compute and storage stay comfortably within the **AWS Always-Free Tier**. As traffic scales across a full university campus, operational costs scale linearly and predictably, remaining under **$5.00 per month**.
 
 ---
 
@@ -38,6 +38,12 @@ QueueSense is architected to guarantee **Zero Idle Cost ($0.00/month when inacti
 - **CloudFront Free Tier:** 1 TB data transfer out per month + 10,000,000 HTTP/HTTPS requests per month (Always Free).
 - **Amazon S3 (Standard Storage):** $0.025 per GB-month (bundle dist size: ~300 KB).
 - **CloudFront Invalidation:** First 1,000 path invalidations per month are free ($0.00).
+
+### 2.5 Baseline & Auxiliary Services (Idle Cost Reality)
+- **Amazon Cognito User Pool:** First 50,000 monthly active users (MAUs) are free ($0.00). Administrator operator auth incurs $0.00/mo.
+- **Amazon CloudWatch Logs:** Ingestion ($0.50/GB in `ap-southeast-2`) and storage ($0.03/GB-month). With QueueSense's 14-day retention policy and structured JSON logging, baseline idle logging is ~$0.02 to $0.05/month.
+- **Amazon Route 53 (Optional Custom Domain):** $0.50 per hosted zone per month. If using the default CloudFront/API Gateway domains (`*.cloudfront.net`, `*.execute-api.ap-southeast-2.amazonaws.com`), this fee is $0.00.
+- **Estimated Net Baseline at Zero Traffic:** **~$0.05/month** (without custom domain) to **~$0.55/month** (with custom domain).
 
 ---
 
@@ -104,3 +110,4 @@ QueueSense is architected to guarantee **Zero Idle Cost ($0.00/month when inacti
    Individual observations expire automatically after 7 days (`ttl = epoch + 604800`). Expired items are deleted by AWS internal background processes at zero write cost, preventing storage bloat.
 4. **Origin Access Control (OAC):**  
    Private S3 bucket access is gated strictly behind CloudFront OAC. Malicious or direct scrapers cannot bypass CloudFront caching to induce S3 GET charges.
+

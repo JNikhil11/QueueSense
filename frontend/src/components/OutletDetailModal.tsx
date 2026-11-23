@@ -230,7 +230,7 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
                       </h4>
                     </div>
                     <span className="text-[10px] font-mono text-[#5A695F]">
-                      Past 14 Days
+                      Past 14 Days (Asia/Kolkata)
                     </span>
                   </div>
 
@@ -246,7 +246,7 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
                           <div className="p-2.5 rounded-xl bg-[#39FF14]/10 border border-[#39FF14]/30 flex items-center justify-between">
                             <span className="text-[#8E9E93]">Best time to go:</span>
                             <span className="text-[#39FF14] font-bold">
-                              {historical.quietestHour.label} (~{historical.quietestHour.averageWaitMinutes}m)
+                              {historical.quietestHour.label} (~{historical.quietestHour.historicalAverageWaitMinutes ?? historical.quietestHour.averageWaitMinutes}m)
                             </span>
                           </div>
                         )}
@@ -254,7 +254,7 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
                           <div className="p-2.5 rounded-xl bg-[#FFA028]/10 border border-[#FFA028]/30 flex items-center justify-between">
                             <span className="text-[#8E9E93]">Peak rush:</span>
                             <span className="text-[#FFA028] font-bold">
-                              {historical.busiestHour.label} (~{historical.busiestHour.averageWaitMinutes}m)
+                              {historical.busiestHour.label} (~{historical.busiestHour.historicalAverageWaitMinutes ?? historical.busiestHour.averageWaitMinutes}m)
                             </span>
                           </div>
                         )}
@@ -331,8 +331,8 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
                 <div className="p-3.5 rounded-2xl bg-[#090E0B]/60 border border-white/[0.06] flex items-center gap-2.5">
                   <Users className="w-4 h-4 text-[#39FF14]" />
                   <div>
-                    <div className="text-[10px] uppercase font-mono text-[#5A695F]">Seating Capacity</div>
-                    <div className="text-white font-mono font-medium">{location?.capacity} students</div>
+                    <div className="text-[10px] uppercase font-mono text-[#5A695F]">Capacity Estimate</div>
+                    <div className="text-white font-mono font-medium">{location?.capacityEstimate || `${location?.capacity} students approx.`}</div>
                   </div>
                 </div>
               </div>

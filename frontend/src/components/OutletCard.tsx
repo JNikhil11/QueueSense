@@ -153,13 +153,13 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
       {/* Footer Specs & Actions */}
       <div className="pt-2 flex items-center justify-between gap-3 text-xs border-t border-white/[0.04]">
         <div className="flex items-center gap-3 text-[#8E9E93]">
-          <span className="flex items-center gap-1 text-[11px] font-mono">
-            <Clock className="w-3 h-3 text-[#7DF9FF]" />
-            {location.openHours}
+          <span className="flex items-center gap-1 text-[11px] font-mono" title={location.openHours}>
+            <Clock className="w-3 h-3 text-[#7DF9FF] shrink-0" />
+            <span className="truncate max-w-[130px]">{location.openHours}</span>
           </span>
-          <span className="flex items-center gap-1 text-[11px] font-mono">
-            <Users className="w-3 h-3 text-[#5A695F]" />
-            {location.capacity} cap
+          <span className="flex items-center gap-1 text-[11px] font-mono" title={location.capacityEstimate || `${location.capacity} cap`}>
+            <Users className="w-3 h-3 text-[#5A695F] shrink-0" />
+            <span className="truncate max-w-[100px]">{location.capacityEstimate || `${location.capacity} cap`}</span>
           </span>
         </div>
 

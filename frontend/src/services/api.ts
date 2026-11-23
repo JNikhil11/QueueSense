@@ -32,8 +32,9 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     landmarkLocation: 'Hostel 12-14 Complex, Lakeside Road, East Campus',
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Student Mentorship Guide & Techfest Ambassador Sourced',
-    openHours: '07:30 - 21:30',
-    capacity: 650,
+    openHours: 'Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:30)',
+    capacityEstimate: 'Large Dining Complex (~500-650 approx.)',
+    capacity: 600,
     active: true,
   },
   {
@@ -44,8 +45,9 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     landmarkLocation: 'Hostel 15-16 Quadrangle, North-East Campus',
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Student Mentor Program (SMP) Guide',
-    openHours: '07:30 - 21:30',
-    capacity: 550,
+    openHours: 'Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:30)',
+    capacityEstimate: 'Large Modern Dining Hall (~450-550 approx.)',
+    capacity: 500,
     active: true,
   },
   {
@@ -56,7 +58,8 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     landmarkLocation: 'Hostel 2 Quadrangle, near Gymkhana Grounds',
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Hostel 2 Council & SMP Guide',
-    openHours: '07:30 - 21:00',
+    openHours: 'Breakfast (07:30-09:30), Lunch (12:00-14:00), Dinner (19:30-21:15)',
+    capacityEstimate: 'Hostel Dining Hall (~300-380 approx.)',
     capacity: 350,
     active: true,
   },
@@ -68,8 +71,9 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     landmarkLocation: 'Ground Floor, Hostel 3, Main Hostel Avenue',
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Gymkhana Freshers Guide',
-    openHours: '14:00 - 02:30',
-    capacity: 120,
+    openHours: '14:00 - 02:30 (Late Night Canteen)',
+    capacityEstimate: 'Hostel Canteen Counter (~80-120 approx.)',
+    capacity: 100,
     active: true,
   },
   {
@@ -80,8 +84,9 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     landmarkLocation: 'Ground Floor, Lecture Hall Complex (LHC), Academic Area',
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Academic Facilities & SMP Guide',
-    openHours: '08:30 - 18:30',
-    capacity: 220,
+    openHours: '08:30 - 18:30 (Academic Class Hours)',
+    capacityEstimate: 'Academic Cafeteria (~180-240 approx.)',
+    capacity: 200,
     active: true,
   },
   {
@@ -92,8 +97,9 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     landmarkLocation: 'Gulmohar Building, First Floor, Opposite Main Building',
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Estate & Hospitality Directory',
-    openHours: '11:00 - 22:30',
-    capacity: 180,
+    openHours: 'Lunch (11:30-15:00), Dinner (19:00-22:30)',
+    capacityEstimate: 'Restaurant & Lounge (~140-180 approx.)',
+    capacity: 160,
     active: true,
   },
   {
@@ -104,8 +110,9 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     landmarkLocation: 'Kanwal Rekhi School of Information Technology (KReSIT)',
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Dept of Computer Science & Eng',
-    openHours: '09:00 - 20:00',
-    capacity: 90,
+    openHours: '09:00 - 20:00 (Department Hours)',
+    capacityEstimate: 'Quick-Service Counter (~70-100 approx.)',
+    capacity: 85,
     active: true,
   },
   {
@@ -116,8 +123,9 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     landmarkLocation: 'Students Activity Centre (SAC) Grounds',
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Gymkhana Cultural Affairs',
-    openHours: '16:00 - 01:00',
-    capacity: 140,
+    openHours: '16:00 - 01:00 (Evening / Night)',
+    capacityEstimate: 'Student Activity Cafe (~100-150 approx.)',
+    capacity: 120,
     active: true,
   },
   {
@@ -128,8 +136,9 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     landmarkLocation: 'Adjacent to Central Library, Main Academic Spine',
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Central Library Amenities',
-    openHours: '08:00 - 23:00',
-    capacity: 80,
+    openHours: '08:00 - 23:00 (Library Hours)',
+    capacityEstimate: 'Coffee Lounge (~60-80 approx.)',
+    capacity: 70,
     active: true,
   },
   {
@@ -141,6 +150,7 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'IIT Bombay Commercial Establishments',
     openHours: '09:00 - 23:00',
+    capacityEstimate: 'Dairy Kiosk & Takeaway (~30-50 approx.)',
     capacity: 40,
     active: true,
   },
@@ -156,8 +166,9 @@ export const VITAP_LOCATIONS: CampusLocation[] = [
     landmarkLocation: 'North Student Block, Ground Floor',
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
-    openHours: '07:30 - 21:30',
-    capacity: 450,
+    openHours: 'Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:30)',
+    capacityEstimate: 'Central Dining Complex (~350-450 approx.)',
+    capacity: 400,
     active: true,
   },
   {
@@ -168,8 +179,9 @@ export const VITAP_LOCATIONS: CampusLocation[] = [
     landmarkLocation: 'South Student Block, Near LH-1',
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
-    openHours: '07:30 - 21:00',
-    capacity: 350,
+    openHours: 'Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:00)',
+    capacityEstimate: 'Medium Dining Hall (~250-350 approx.)',
+    capacity: 300,
     active: true,
   },
   {
@@ -181,7 +193,8 @@ export const VITAP_LOCATIONS: CampusLocation[] = [
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
     openHours: '10:00 - 23:00',
-    capacity: 180,
+    capacityEstimate: 'Open Plaza Seating (~120-180 approx.)',
+    capacity: 150,
     active: true,
   },
   {
@@ -192,20 +205,22 @@ export const VITAP_LOCATIONS: CampusLocation[] = [
     landmarkLocation: 'Central Block (CB), Ground Floor',
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
-    openHours: '08:30 - 18:00',
-    capacity: 120,
+    openHours: '08:30 - 18:00 (Class Hours)',
+    capacityEstimate: 'Express Counter (~80-120 approx.)',
+    capacity: 100,
     active: true,
   },
   {
-    id: 'vitap-night-canteen',
-    name: 'Night Owl Cafe',
+    id: 'vitap-midnight-fuel',
+    name: 'Midnight Fuel Canteen',
     category: 'CANTEEN',
-    description: 'Late-night snacks and beverages counter for hostel residents.',
-    landmarkLocation: 'Hostel Block 2, Courtyard',
+    description: 'Late-evening campus eatery active during study and project hours.',
+    landmarkLocation: 'Hostel Avenue Commercial Area',
     verificationStatus: 'STUDENT_SOURCED',
     verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
-    openHours: '20:00 - 02:00',
-    capacity: 60,
+    openHours: '17:00 - 02:00 (Late Night)',
+    capacityEstimate: 'Late Night Counter (~100-150 approx.)',
+    capacity: 120,
     active: true,
   },
 ];
@@ -766,6 +781,9 @@ export const api = {
       return {
         hour: h,
         label: `${h.toString().padStart(2, '0')}:00`,
+        historicalAverageWaitMinutes: avgWait,
+        historicalAverageQueueLength: avgWait ? Math.round(avgWait * 1.5) : null,
+        sampleCount: count,
         averageWaitMinutes: avgWait,
         averageQueueLength: avgWait ? Math.round(avgWait * 1.5) : null,
         observationCount: count,
@@ -776,44 +794,53 @@ export const api = {
       data: {
         locationId,
         status: 'available',
+        timezone: 'Asia/Kolkata',
+        metricType: 'HISTORICAL_AVERAGES',
+        minSamplesRequiredForPeak: 3,
         totalObservations: 42,
+        disclaimer: 'Historical averages reflect empirical crowdsourced observations in Indian Standard Time (IST, UTC+05:30) and should not be treated as deterministic real-time forecasts.',
         hourlyTrends,
         busiestHour: {
           hour: 20,
           label: '20:00',
+          historicalAverageWaitMinutes: 18.5,
           averageWaitMinutes: 18.5,
+          sampleCount: 16,
         },
         quietestHour: {
           hour: 16,
           label: '16:00',
+          historicalAverageWaitMinutes: 3.5,
           averageWaitMinutes: 3.5,
+          sampleCount: 6,
         },
-        summary: 'Demo historical curve synthesized from 42 campus observations over past 14 days.',
+        summary: 'Demo historical average curve aggregated from 42 campus observations over past 14 days (Campus Timezone: Asia/Kolkata).',
       },
       isLive: false,
     };
   },
 
-  async getAdminReports(adminKey?: string): Promise<{ reports: QueueReport[]; isLive: boolean }> {
-    const key =
-      adminKey ||
-      (typeof localStorage !== 'undefined' ? localStorage.getItem('queuesense_admin_key') : null) ||
-      import.meta.env.VITE_ADMIN_KEY ||
-      'queuesense-admin-secret-dev-key';
+  async getAdminReports(bearerToken?: string): Promise<{ reports: QueueReport[]; isLive: boolean }> {
+    const token =
+      bearerToken ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('queuesense_admin_token') : null) ||
+      '';
 
     if (this.isLiveApiConfigured()) {
+      if (!token || !token.trim()) {
+        throw new Error('UNAUTHORIZED');
+      }
       try {
         const res = await fetch(`${API_BASE_URL}/admin/reports`, {
           headers: {
-            Authorization: `Bearer ${key}`,
-            'X-Admin-Key': key,
+            Authorization: `Bearer ${token.trim()}`,
           },
         });
         if (res.ok) {
           const json = await res.json();
           return { reports: json.data.reports, isLive: true };
         }
-        if (res.status === 401) {
+        if (res.status === 401 || res.status === 403) {
           throw new Error('UNAUTHORIZED');
         }
         if (DATA_MODE === 'production') {

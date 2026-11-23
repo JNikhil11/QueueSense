@@ -2,24 +2,40 @@
 QueueSense - Production Hardening Test Suite
 Verifies:
 1. Fail-closed behavior on database persistence errors (HTTP 500 PERSISTENCE_FAILED).
-2. Server-side idempotency deduplication with X-Idempotency-Key.
-3. Privacy-preserving anonymous rate-limiting (HTTP 429 RATE_LIMIT_EXCEEDED).
-4. Cold-start recommendation protection (minimum 3 reports and >= 50% confidence).
-5. Historical trends aggregation by hour and day-of-week.
+2. Server-side idempotency deduplication with TransactWriteItems / atomic reservations.
+3. Concurrent idempotency requests with identical keys.
+4. Fail-closed idempotency and rate-limit storage failures.
+5. Missing or short RATE_LIMIT_SALT failing closed in production.
+6. Cognito User Pool admin authorization and static key rejection in production.
+7. Historical aggregation: 14-day cutoff query, timezone conversion to Asia/Kolkata (IST),
+   and suppression of peak/quietest hours when sample count < 3.
+8. Strict CORS origin resolution in production without wildcard fallbacks.
 """
 
 import json
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone, timedelta
+try:
+    from zoneinfo import ZoneInfo
+    CAMPUS_TIMEZONE = ZoneInfo("Asia/Kolkata")
+except Exception:
+    CAMPUS_TIMEZONE = timezone(timedelta(hours=5, minutes=30), name="Asia/Kolkata")
 import pytest
+
 from backend.shared.database import (
     QueueSenseDatabase,
     InMemoryStorageAdapter,
     DatabasePersistenceError,
+    get_shared_test_adapter,
+    reset_shared_test_adapter,
 )
 from backend.functions.submit_report.app import lambda_handler as submit_handler
 from backend.functions.get_recommendations.app import lambda_handler as rec_handler
 from backend.functions.get_historical.app import lambda_handler as historical_handler
+from backend.functions.admin.app import lambda_handler as admin_handler
 from backend.shared.prediction import compute_smart_recommendation
+from backend.shared.security import get_rate_limit_salt, SecurityConfigurationError
+from backend.shared.response import resolve_cors_origin
 
 
 def test_persistence_failure_fails_closed():
@@ -44,7 +60,8 @@ def test_idempotency_deduplication():
     """
     Priority 0: Verify that identical idempotency keys do not generate duplicate database entries.
     """
-    adapter = InMemoryStorageAdapter()
+    reset_shared_test_adapter()
+    adapter = get_shared_test_adapter()
     db = QueueSenseDatabase(adapter=adapter)
 
     key = "idem-unique-key-12345"
@@ -67,6 +84,55 @@ def test_idempotency_deduplication():
     assert len(db.get_recent_reports("iitb-mess-h12-14")) == 1
 
 
+def test_concurrent_idempotency_simulation():
+    """
+    Priority 0: Test concurrent execution with the identical idempotency key.
+    All concurrent requests must return the same report record and create exactly 1 persistent entry.
+    """
+    reset_shared_test_adapter()
+    adapter = get_shared_test_adapter()
+    db = QueueSenseDatabase(adapter=adapter)
+    key = "idem-concurrent-race-key-9999"
+
+    def submit_task(worker_id):
+        return db.record_report(
+            location_id="iitb-mess-h12-14",
+            reported_wait_minutes=10.0 + worker_id,
+            queue_length=15,
+            note=f"Worker {worker_id}",
+            idempotency_key=key,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(submit_task, i) for i in range(8)]
+        results = [f.result() for f in futures]
+
+    report_ids = {r["reportId"] for r in results}
+    assert len(report_ids) == 1, "Concurrent requests must resolve to the identical single reportId"
+
+    recent = db.get_recent_reports("iitb-mess-h12-14")
+    matching_reports = [r for r in recent if r["reportId"] == list(report_ids)[0]]
+    assert len(matching_reports) == 1, "Only one single report must be written in storage"
+
+
+def test_idempotency_write_failure_fails_closed():
+    """
+    Priority 0: A failure during idempotency reservation must raise DatabasePersistenceError
+    and must never silently return success.
+    """
+    adapter = InMemoryStorageAdapter()
+    adapter.set_simulate_idempotency_failure(True)
+    db = QueueSenseDatabase(adapter=adapter)
+
+    with pytest.raises(DatabasePersistenceError):
+        db.record_report(
+            location_id="iitb-mess-h12-14",
+            reported_wait_minutes=14.0,
+            queue_length=18,
+            idempotency_key="failing-idem-key-777",
+        )
+
+
 def test_client_rate_limiting_enforced():
     """
     Priority 0: Verify that submitting beyond the rate limit threshold (5 requests per window)
@@ -82,7 +148,7 @@ def test_client_rate_limiting_enforced():
         "body": json.dumps({"reportedWaitMinutes": 5.0, "queueLength": 5}),
     }
 
-    # First 5 submissions should succeed (or be processed within limit)
+    # First 5 submissions should succeed
     for i in range(5):
         event = dict(event_template)
         event["body"] = json.dumps({
@@ -105,6 +171,120 @@ def test_client_rate_limiting_enforced():
     body = json.loads(res_overflow["body"])
     assert body["success"] is False
     assert body["errorCode"] == "RATE_LIMIT_EXCEEDED"
+
+
+def test_rate_limit_storage_failure_fails_closed():
+    """
+    Priority 0: If rate limit storage check fails, must fail closed with 503 RATE_LIMIT_CHECK_FAILED.
+    Must never fail open.
+    """
+    reset_shared_test_adapter()
+    adapter = get_shared_test_adapter()
+    adapter.set_simulate_rate_limit_failure(True)
+
+    event = {
+        "pathParameters": {"id": "iitb-mess-h12-14"},
+        "headers": {"user-agent": "Tester/1.0"},
+        "requestContext": {
+            "http": {"sourceIp": "198.51.100.55"},
+            "requestId": "req_rl_failure",
+        },
+        "body": json.dumps({"reportedWaitMinutes": 10.0, "queueLength": 12}),
+    }
+
+    try:
+        res = submit_handler(event, None)
+        assert res["statusCode"] == 503
+        body = json.loads(res["body"])
+        assert body["success"] is False
+        assert body["errorCode"] == "RATE_LIMIT_CHECK_FAILED"
+    finally:
+        adapter.set_simulate_rate_limit_failure(False)
+
+
+def test_missing_rate_limit_salt_fails_closed_in_production(monkeypatch):
+    """
+    Priority 1: In production mode, missing or insecure RATE_LIMIT_SALT must raise SecurityConfigurationError
+    and return HTTP 500 SECURITY_CONFIGURATION_ERROR.
+    """
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DATA_MODE", "production")
+    monkeypatch.setenv("RATE_LIMIT_SALT", "")
+
+    with pytest.raises(SecurityConfigurationError):
+        get_rate_limit_salt()
+
+    # Short salt (< 16 chars) must also fail closed
+    monkeypatch.setenv("RATE_LIMIT_SALT", "too-short")
+    with pytest.raises(SecurityConfigurationError):
+        get_rate_limit_salt()
+
+
+def test_admin_authorization_cognito_and_production_lockdown(monkeypatch):
+    """
+    Priority 1: Verify Cognito JWT admin authorization and lockdown in production.
+    - No token -> 401 COGNITO_AUTH_REQUIRED
+    - Non-admin group -> 403 FORBIDDEN_NOT_ADMIN
+    - Valid admin group -> 200 SUCCESS
+    - Static key disabled in production -> 401 STATIC_KEY_DISABLED_IN_PROD
+    """
+    # 1. Unauthenticated request
+    unauth_event = {"headers": {}, "requestContext": {}}
+    res = admin_handler(unauth_event, None)
+    assert res["statusCode"] == 401
+    body = json.loads(res["body"])
+    assert body["errorCode"] in ("COGNITO_AUTH_REQUIRED", "UNAUTHORIZED", "UNAUTHORIZED_COGNITO_REQUIRED")
+
+    # 2. Token without Admins group
+    non_admin_event = {
+        "headers": {},
+        "requestContext": {
+            "authorizer": {
+                "jwt": {
+                    "claims": {
+                        "sub": "user-uuid-1234",
+                        "cognito:groups": ["Students"],
+                    }
+                }
+            }
+        },
+    }
+    res_non_admin = admin_handler(non_admin_event, None)
+    assert res_non_admin["statusCode"] == 403
+    body = json.loads(res_non_admin["body"])
+    assert body["errorCode"] == "FORBIDDEN_NOT_ADMIN"
+
+    # 3. Token with Admins group
+    admin_event = {
+        "headers": {},
+        "requestContext": {
+            "authorizer": {
+                "jwt": {
+                    "claims": {
+                        "sub": "admin-uuid-5678",
+                        "cognito:groups": ["Admins", "Staff"],
+                    }
+                }
+            }
+        },
+    }
+    res_admin = admin_handler(admin_event, None)
+    assert res_admin["statusCode"] == 200
+    body = json.loads(res_admin["body"])
+    assert body["success"] is True
+    assert "reports" in body["data"]
+
+    # 4. In production, static admin key is strictly rejected
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DATA_MODE", "production")
+    static_key_event = {
+        "headers": {"authorization": "Bearer any-static-key-here"},
+        "requestContext": {},
+    }
+    res_static = admin_handler(static_key_event, None)
+    assert res_static["statusCode"] == 401
+    body = json.loads(res_static["body"])
+    assert body["errorCode"] in ("STATIC_KEY_DISABLED_IN_PROD", "UNAUTHORIZED_COGNITO_REQUIRED")
 
 
 def test_cold_start_recommendation_protection():
@@ -164,17 +344,45 @@ def test_recommendation_qualifies_with_three_reports_and_high_confidence():
     assert rec["predictedWaitMinutes"] == 6.5
 
 
-def test_historical_aggregation_logic():
+def test_historical_timezone_conversion_and_cutoff():
     """
     Priority 1: Historical trends aggregation.
-    Verify hourly buckets and operating hours evaluation.
+    - Timestamp 06:30 UTC must convert to 12:00 IST (Asia/Kolkata, UTC+05:30) and bucket in hour 12.
+    - Reports older than 14 days must be excluded.
     """
-    adapter = InMemoryStorageAdapter()
+    reset_shared_test_adapter()
+    adapter = get_shared_test_adapter()
     db = QueueSenseDatabase(adapter=adapter)
 
-    # Seed observations across different hours
-    db.record_report("iitb-mess-h12-14", reported_wait_minutes=15.0, queue_length=25)
-    db.record_report("iitb-mess-h12-14", reported_wait_minutes=18.0, queue_length=30)
+    now_utc = datetime.now(timezone.utc)
+    # Report 1: 2 days ago at 06:30 UTC -> 12:00 IST (Hour 12)
+    dt_valid = (now_utc - timedelta(days=2)).replace(hour=6, minute=30, second=0, microsecond=0)
+    iso_valid = dt_valid.isoformat()
+
+    # Report 2: 16 days ago (exceeds 14-day cutoff)
+    dt_expired = now_utc - timedelta(days=16)
+    iso_expired = dt_expired.isoformat()
+
+    adapter._store["LOCATION#iitb-mess-h12-14::REPORT#valid_001"] = {
+        "PK": "LOCATION#iitb-mess-h12-14",
+        "SK": f"REPORT#{iso_valid}#rep_001",
+        "entityType": "REPORT",
+        "reportId": "rep_001",
+        "locationId": "iitb-mess-h12-14",
+        "reportedWaitMinutes": 18.0,
+        "queueLength": 25,
+        "timestamp": iso_valid,
+    }
+    adapter._store["LOCATION#iitb-mess-h12-14::REPORT#expired_002"] = {
+        "PK": "LOCATION#iitb-mess-h12-14",
+        "SK": f"REPORT#{iso_expired}#rep_002",
+        "entityType": "REPORT",
+        "reportId": "rep_002",
+        "locationId": "iitb-mess-h12-14",
+        "reportedWaitMinutes": 35.0,
+        "queueLength": 50,
+        "timestamp": iso_expired,
+    }
 
     event = {"pathParameters": {"id": "iitb-mess-h12-14"}}
     res = historical_handler(event, None)
@@ -182,6 +390,93 @@ def test_historical_aggregation_logic():
     body = json.loads(res["body"])
     assert body["success"] is True
     data = body["data"]
-    assert "hourlyTrends" in data
-    assert len(data["hourlyTrends"]) == 24
-    assert data["totalObservations"] >= 2
+
+    assert data["timezone"] == "Asia/Kolkata"
+    assert data["metricType"] == "HISTORICAL_AVERAGES"
+    # Only the 1 within-cutoff observation should be aggregated; expired one excluded
+    assert data["totalObservations"] == 1
+
+    bucket_12 = [b for b in data["hourlyTrends"] if b["hour"] == 12][0]
+    assert bucket_12["sampleCount"] == 1
+    assert bucket_12["historicalAverageWaitMinutes"] == 18.0
+
+    bucket_6 = [b for b in data["hourlyTrends"] if b["hour"] == 6][0]
+    assert bucket_6["sampleCount"] == 0, "Hour 6 UTC must NOT contain 06:30 UTC when mapped to Asia/Kolkata"
+
+
+def test_historical_insufficient_samples_suppresses_rush_hours():
+    """
+    Priority 1: Busiest/quietest hours must require at least 3 samples per hour.
+    With < 3 samples, busiestHour and quietestHour must remain None.
+    """
+    reset_shared_test_adapter()
+    adapter = get_shared_test_adapter()
+    db = QueueSenseDatabase(adapter=adapter)
+
+    # Add 2 reports at 12:00 IST (06:30 UTC)
+    now_utc = datetime.now(timezone.utc)
+    dt1 = (now_utc - timedelta(days=1)).replace(hour=6, minute=30, second=0)
+    dt2 = (now_utc - timedelta(days=2)).replace(hour=6, minute=30, second=0)
+
+    for idx, dt in enumerate([dt1, dt2]):
+        iso_ts = dt.isoformat()
+        adapter._store[f"LOCATION#iitb-mess-h12-14::REPORT#sample_{idx}"] = {
+            "PK": "LOCATION#iitb-mess-h12-14",
+            "SK": f"REPORT#{iso_ts}#rep_sub_{idx}",
+            "entityType": "REPORT",
+            "reportId": f"rep_sub_{idx}",
+            "locationId": "iitb-mess-h12-14",
+            "reportedWaitMinutes": 15.0,
+            "queueLength": 20,
+            "timestamp": iso_ts,
+        }
+
+    event = {"pathParameters": {"id": "iitb-mess-h12-14"}}
+    res = historical_handler(event, None)
+    body = json.loads(res["body"])
+    data = body["data"]
+
+    # With only 2 samples, rush hour insight must be suppressed
+    assert data["busiestHour"] is None
+    assert data["quietestHour"] is None
+
+    # Add 3rd report at 12:00 IST
+    dt3 = (now_utc - timedelta(days=3)).replace(hour=6, minute=30, second=0)
+    iso_ts3 = dt3.isoformat()
+    adapter._store["LOCATION#iitb-mess-h12-14::REPORT#sample_2"] = {
+        "PK": "LOCATION#iitb-mess-h12-14",
+        "SK": f"REPORT#{iso_ts3}#rep_sub_2",
+        "entityType": "REPORT",
+        "reportId": "rep_sub_2",
+        "locationId": "iitb-mess-h12-14",
+        "reportedWaitMinutes": 15.0,
+        "queueLength": 20,
+        "timestamp": iso_ts3,
+    }
+
+    res2 = historical_handler(event, None)
+    data2 = json.loads(res2["body"])["data"]
+    assert data2["busiestHour"] is not None
+    assert data2["busiestHour"]["hour"] == 12
+    assert data2["busiestHour"]["sampleCount"] == 3
+
+
+def test_cors_origin_production_lockdown(monkeypatch):
+    """
+    Priority 2: Strict CORS resolution in production.
+    Never defaults to wildcard or localhost when running in production.
+    """
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DATA_MODE", "production")
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://d1234abcd.cloudfront.net")
+
+    # Exact matching origin allowed
+    event_valid = {"headers": {"origin": "https://d1234abcd.cloudfront.net"}}
+    cors_valid = resolve_cors_origin(event_valid)
+    assert cors_valid == "https://d1234abcd.cloudfront.net"
+
+    # Unauthorized origin disallowed (fails closed)
+    event_invalid = {"headers": {"origin": "https://malicious-site.example.com"}}
+    cors_invalid = resolve_cors_origin(event_invalid)
+    assert cors_invalid != "*"
+    assert cors_invalid != "https://malicious-site.example.com"

@@ -13,20 +13,20 @@ export const AdminAuditModal: React.FC<AdminAuditModalProps> = ({ isOpen, onClos
   const [loading, setLoading] = useState<boolean>(true);
   const [isLive, setIsLive] = useState<boolean>(false);
   const [isUnauthorized, setIsUnauthorized] = useState<boolean>(false);
-  const [adminKey, setAdminKey] = useState<string>(() => {
+  const [adminToken, setAdminToken] = useState<string>(() => {
     return (
-      (typeof localStorage !== 'undefined' ? localStorage.getItem('queuesense_admin_key') : '') ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('queuesense_admin_token') : '') ||
       ''
     );
   });
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const fetchReports = async (keyToUse?: string) => {
+  const fetchReports = async (tokenToUse?: string) => {
     try {
       setLoading(true);
       setIsUnauthorized(false);
       setAuthError(null);
-      const res = await api.getAdminReports(keyToUse || adminKey);
+      const res = await api.getAdminReports(tokenToUse || adminToken);
       setReports(res.reports);
       setIsLive(res.isLive);
     } catch (err: any) {
@@ -40,13 +40,13 @@ export const AdminAuditModal: React.FC<AdminAuditModalProps> = ({ isOpen, onClos
     }
   };
 
-  const handleKeySubmit = (e: React.FormEvent) => {
+  const handleTokenSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!adminKey.trim()) return;
+    if (!adminToken.trim()) return;
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('queuesense_admin_key', adminKey.trim());
+      localStorage.setItem('queuesense_admin_token', adminToken.trim());
     }
-    fetchReports(adminKey.trim());
+    fetchReports(adminToken.trim());
   };
 
   useEffect(() => {
@@ -124,21 +124,21 @@ export const AdminAuditModal: React.FC<AdminAuditModalProps> = ({ isOpen, onClos
               </div>
               <div>
                 <h4 className="text-base font-bold text-white font-display">
-                  Admin Authorization Required
+                  Cognito Admin Authorization Required
                 </h4>
                 <p className="text-xs text-[#8E9E93] mt-1 leading-relaxed">
-                  The <code className="text-[#7DF9FF]">GET /admin/reports</code> endpoint is secured. Enter your admin API key to unlock the audit feed.
+                  The <code className="text-[#7DF9FF]">GET /admin/reports</code> endpoint is protected by AWS Cognito User Pool with an <code className="text-[#7DF9FF]">Admins</code> group policy. Enter your authenticated operator JWT token to unlock the live audit stream.
                 </p>
               </div>
 
-              <form onSubmit={handleKeySubmit} className="w-full space-y-3 pt-2">
+              <form onSubmit={handleTokenSubmit} className="w-full space-y-3 pt-2">
                 <div className="relative">
                   <Key className="w-4 h-4 text-[#8E9E93] absolute left-3 top-3" />
                   <input
                     type="password"
-                    placeholder="Enter Admin API Key..."
-                    value={adminKey}
-                    onChange={(e) => setAdminKey(e.target.value)}
+                    placeholder="Enter Cognito Operator Bearer Token..."
+                    value={adminToken}
+                    onChange={(e) => setAdminToken(e.target.value)}
                     className="w-full pl-9 pr-3 py-2.5 bg-black/50 border border-white/15 rounded-xl text-white font-mono text-xs focus:outline-none focus:border-[#7DF9FF]"
                   />
                 </div>
@@ -146,7 +146,7 @@ export const AdminAuditModal: React.FC<AdminAuditModalProps> = ({ isOpen, onClos
                   type="submit"
                   className="w-full py-2.5 px-4 rounded-xl bg-[#7DF9FF] text-black font-mono text-xs font-bold uppercase tracking-wider hover:bg-[#68e0e6] transition-colors shadow-[0_0_15px_rgba(125,249,255,0.3)]"
                 >
-                  Authenticate & Unlock
+                  Verify Cognito Token & Unlock
                 </button>
               </form>
             </div>

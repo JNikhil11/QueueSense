@@ -1,13 +1,16 @@
 """
 QueueSense - GET /locations/{id}/historical Lambda Handler
-Returns aggregated historical wait time and queue patterns by day-of-week and hour-of-day.
+Returns aggregated historical wait time and queue patterns by hour-of-day.
+Enforces 14-day cutoff, converts timestamps to campus timezone (Asia/Kolkata),
+requires minimum 3 samples before declaring peak/quietest hours, and clearly
+distinguishes empirical historical averages from deterministic forecasts.
 """
 
 import os
 import sys
 import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 shared_dir = os.path.abspath(os.path.join(current_dir, "..", "..", "shared"))
@@ -22,6 +25,15 @@ from validation import validate_location_id
 
 logger = logging.getLogger("queuesense.get_historical")
 logger.setLevel(logging.INFO)
+
+# Campus Timezone: Asia/Kolkata (Indian Standard Time, UTC+05:30)
+try:
+    from zoneinfo import ZoneInfo
+    CAMPUS_TIMEZONE = ZoneInfo("Asia/Kolkata")
+except Exception:
+    CAMPUS_TIMEZONE = timezone(timedelta(hours=5, minutes=30), name="Asia/Kolkata")
+
+MIN_SAMPLES_PER_HOUR = 3  # Minimum observations required to declare a representative busiest/quietest hour
 
 
 def lambda_handler(event, context):
@@ -49,10 +61,10 @@ def lambda_handler(event, context):
                 request_id=request_id,
             )
 
-        # Retrieve historical reports (up to 14 days)
+        # Retrieve historical reports (strictly enforced 14 days cutoff in DB query)
         reports = db.get_historical_reports(location_id, days=14)
 
-        # Aggregate by hour (0-23)
+        # Aggregate by hour (0-23) in campus timezone (Asia/Kolkata, UTC+05:30)
         hourly_buckets = defaultdict(lambda: {"wait_sum": 0.0, "queue_sum": 0.0, "count": 0})
 
         for r in reports:
@@ -62,7 +74,10 @@ def lambda_handler(event, context):
             try:
                 clean_ts = ts_str.replace("Z", "+00:00")
                 dt = datetime.fromisoformat(clean_ts)
-                hour = dt.hour
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                dt_campus = dt.astimezone(CAMPUS_TIMEZONE)
+                hour = dt_campus.hour
                 wait = float(r.get("reportedWaitMinutes", 0))
                 q_len = float(r.get("queueLength", 0))
 
@@ -76,32 +91,39 @@ def lambda_handler(event, context):
         hourly_trends = []
         busiest_hour = None
         highest_avg_wait = -1.0
+        busiest_count = 0
         quietest_hour = None
         lowest_avg_wait = 9999.0
+        quietest_count = 0
 
         for h in range(24):
             b = hourly_buckets[h]
-            if b["count"] > 0:
-                avg_wait = round(b["wait_sum"] / b["count"], 1)
-                avg_queue = round(b["queue_sum"] / b["count"], 1)
-                count = b["count"]
+            count = b["count"]
+            if count > 0:
+                avg_wait = round(b["wait_sum"] / count, 1)
+                avg_queue = round(b["queue_sum"] / count, 1)
 
-                # Consider operating hours (8:00 to 22:00) for busiest / quietest insights
-                if 8 <= h <= 22:
+                # Consider operating hours (8:00 to 22:00) with ADEQUATE SAMPLES (>= 3)
+                # for busiest / quietest insights
+                if 8 <= h <= 22 and count >= MIN_SAMPLES_PER_HOUR:
                     if avg_wait > highest_avg_wait:
                         highest_avg_wait = avg_wait
                         busiest_hour = h
+                        busiest_count = count
                     if avg_wait < lowest_avg_wait:
                         lowest_avg_wait = avg_wait
                         quietest_hour = h
+                        quietest_count = count
             else:
                 avg_wait = None
                 avg_queue = None
-                count = 0
 
             hourly_trends.append({
                 "hour": h,
                 "label": f"{h:02d}:00",
+                "historicalAverageWaitMinutes": avg_wait,
+                "historicalAverageQueueLength": avg_queue,
+                "sampleCount": count,
                 "averageWaitMinutes": avg_wait,
                 "averageQueueLength": avg_queue,
                 "observationCount": count,
@@ -112,7 +134,7 @@ def lambda_handler(event, context):
 
         status = "available" if has_sufficient_history else "insufficient_history"
         summary = (
-            f"Historical curve synthesized from {total_observations} verified student reports over the past 14 days."
+            f"Historical average curve aggregated from {total_observations} student-submitted observations over the past 14 days (Campus Timezone: Asia/Kolkata)."
             if has_sufficient_history
             else f"Only {total_observations} historical report(s) available. Hourly curves calibrate after 5+ observations accumulate."
         )
@@ -123,17 +145,25 @@ def lambda_handler(event, context):
                 "locationId": location_id,
                 "locationName": location.get("name"),
                 "status": status,
+                "timezone": "Asia/Kolkata",
+                "metricType": "HISTORICAL_AVERAGES",
+                "minSamplesRequiredForPeak": MIN_SAMPLES_PER_HOUR,
                 "totalObservations": total_observations,
+                "disclaimer": "Historical averages reflect empirical crowdsourced observations in Indian Standard Time (IST, UTC+05:30) and should not be treated as deterministic real-time forecasts.",
                 "hourlyTrends": hourly_trends,
                 "busiestHour": {
                     "hour": busiest_hour,
-                    "label": f"{busiest_hour:02d}:00" if busiest_hour is not None else None,
-                    "averageWaitMinutes": highest_avg_wait if highest_avg_wait >= 0 else None,
+                    "label": f"{busiest_hour:02d}:00",
+                    "historicalAverageWaitMinutes": highest_avg_wait,
+                    "averageWaitMinutes": highest_avg_wait,
+                    "sampleCount": busiest_count,
                 } if busiest_hour is not None else None,
                 "quietestHour": {
                     "hour": quietest_hour,
-                    "label": f"{quietest_hour:02d}:00" if quietest_hour is not None else None,
-                    "averageWaitMinutes": lowest_avg_wait if lowest_avg_wait < 9999 else None,
+                    "label": f"{quietest_hour:02d}:00",
+                    "historicalAverageWaitMinutes": lowest_avg_wait,
+                    "averageWaitMinutes": lowest_avg_wait,
+                    "sampleCount": quietest_count,
                 } if quietest_hour is not None else None,
                 "summary": summary,
             },

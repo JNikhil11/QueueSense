@@ -18,15 +18,10 @@ Parameters:
     Type: String
     Default: QueueSense-Main
     Description: DynamoDB single-table name
-  AllowedOrigins:
-    Type: CommaDelimitedList
-    Default: 'http://localhost:5173,http://localhost:4173'
-    Description: Allowed origins for API Gateway CORS
-  AdminApiKey:
+  CustomDomainOrigin:
     Type: String
-    NoEcho: true
-    Default: 'queuesense-admin-secret-dev-key'
-    Description: Secret key required for /admin endpoints
+    Default: ''
+    Description: Optional custom domain origin for production CORS (e.g. https://queuesense.campus.edu)
 
 Globals:
   Function:
@@ -39,7 +34,8 @@ Globals:
       Variables:
         TABLE_NAME: !Ref MainTable
         ENVIRONMENT: !Ref Environment
-        ADMIN_API_KEY: !Ref AdminApiKey
+        USER_POOL_ID: !Ref QueueSenseUserPool
+        USER_POOL_CLIENT_ID: !Ref QueueSenseUserPoolClient
 
 Resources:
   # ==========================================
@@ -70,6 +66,132 @@ Resources:
           Value: Techfest-AWS-ShipIt
 
   # ==========================================
+  # Identity: Cognito User Pool (Admin Auth)
+  # ==========================================
+  QueueSenseUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "queuesense-users-${Environment}"
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      UserPoolTags:
+        Project: QueueSense
+
+  QueueSenseUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub "queuesense-client-${Environment}"
+      UserPoolId: !Ref QueueSenseUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  QueueSenseAdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Admins
+      Description: Campus Dining Operations Administrators
+      UserPoolId: !Ref QueueSenseUserPool
+      Precedence: 1
+
+  # ==========================================
+  # Frontend Hosting: Private S3 + CloudFront OAC
+  # ==========================================
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "queuesense-frontend-${Environment}-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Project
+          Value: QueueSense
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "queuesense-oac-${Environment}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Comment: !Sub "QueueSense Frontend Distribution (${Environment})"
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          Compress: true
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+        PriceClass: PriceClass_100
+      Tags:
+        - Key: Project
+          Value: QueueSense
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipalReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
+
+  # ==========================================
   # API Gateway: HTTP API with CORS & Throttling
   # ==========================================
   QueueSenseHttpApi:
@@ -77,7 +199,8 @@ Resources:
     Properties:
       Name: !Sub "queuesense-api-${Environment}"
       CorsConfiguration:
-        AllowOrigins: !Ref AllowedOrigins
+        AllowOrigins:
+          - !Sub "https://${FrontendDistribution.DomainName}"
         AllowMethods:
           - GET
           - POST
@@ -85,10 +208,23 @@ Resources:
         AllowHeaders:
           - Content-Type
           - Authorization
-          - X-Api-Key
-          - X-Admin-Key
           - X-Idempotency-Key
         MaxAge: 600
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 100
+        ThrottlingRateLimit: 50.0
+      RouteSettings:
+        "POST /locations/{id}/reports":
+          ThrottlingBurstLimit: 20
+          ThrottlingRateLimit: 10.0
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: "$request.header.Authorization"
+            JwtConfiguration:
+              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${QueueSenseUserPool}"
+              audience:
+                - !Ref QueueSenseUserPoolClient
 
   # ==========================================
   # Lambda Functions
@@ -208,91 +344,8 @@ Resources:
             ApiId: !Ref QueueSenseHttpApi
             Path: /admin/reports
             Method: GET
-
-  # ==========================================
-  # Frontend Hosting: Private S3 + CloudFront OAC
-  # ==========================================
-  FrontendBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub "queuesense-frontend-${Environment}-${AWS::AccountId}"
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      Tags:
-        - Key: Project
-          Value: QueueSense
-
-  CloudFrontOAC:
-    Type: AWS::CloudFront::OriginAccessControl
-    Properties:
-      OriginAccessControlConfig:
-        Name: !Sub "queuesense-oac-${Environment}"
-        OriginAccessControlOriginType: s3
-        SigningBehavior: always
-        SigningProtocol: sigv4
-
-  FrontendDistribution:
-    Type: AWS::CloudFront::Distribution
-    Properties:
-      DistributionConfig:
-        Enabled: true
-        DefaultRootObject: index.html
-        Comment: !Sub "QueueSense Frontend Distribution (${Environment})"
-        Origins:
-          - Id: S3Origin
-            DomainName: !GetAtt FrontendBucket.RegionalDomainName
-            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
-            S3OriginConfig:
-              OriginAccessIdentity: ""
-        DefaultCacheBehavior:
-          TargetOriginId: S3Origin
-          ViewerProtocolPolicy: redirect-to-https
-          AllowedMethods:
-            - GET
-            - HEAD
-            - OPTIONS
-          CachedMethods:
-            - GET
-            - HEAD
-          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-          Compress: true
-        CustomErrorResponses:
-          - ErrorCode: 403
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-            ErrorCachingMinTTL: 10
-          - ErrorCode: 404
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-            ErrorCachingMinTTL: 10
-        PriceClass: PriceClass_100
-      Tags:
-        - Key: Project
-          Value: QueueSense
-
-  FrontendBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref FrontendBucket
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: AllowCloudFrontServicePrincipalReadOnly
-            Effect: Allow
-            Principal:
-              Service: cloudfront.amazonaws.com
-            Action: s3:GetObject
-            Resource: !Sub "${FrontendBucket.Arn}/*"
-            Condition:
-              StringEquals:
-                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
+            Auth:
+              Authorizer: CognitoAuthorizer
 
 Outputs:
   HttpApiUrl:
@@ -307,6 +360,12 @@ Outputs:
   FrontendBucketName:
     Description: Private S3 Bucket for Frontend Assets
     Value: !Ref FrontendBucket
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref QueueSenseUserPool
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref QueueSenseUserPoolClient
   DynamoDBTableName:
     Description: DynamoDB Single-Table Name
     Value: !Ref MainTable

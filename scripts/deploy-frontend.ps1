@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     QueueSense Frontend Deployment Script (PowerShell)
     Target AWS Region: ap-southeast-2 (Sydney)
@@ -61,3 +61,4 @@ if ($DistributionId) {
 }
 
 Write-Host "`nFrontend deployment completed successfully!" -ForegroundColor Green
+

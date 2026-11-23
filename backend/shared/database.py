@@ -1,22 +1,24 @@
 """
 QueueSense - DynamoDB Storage Access Layer
 Single-table architecture supporting:
-- Location metadata with verifiable provenance
+- Location metadata with verifiable, non-fabricated provenance
 - Time-series crowdsourced reports
 - Pre-aggregated current queue estimates
-- Atomic idempotency deduplication
-- Privacy-preserving anonymous rate-limiting records
-- Historical day/time bucketed observations
+- Atomic idempotency deduplication via TransactWriteItems
+- Privacy-preserving anonymous rate-limiting records (Fail-closed)
+- Historical 14-day cutoff query with campus timezone alignment
 - Strict separation of production DynamoDB and isolated unit test adapters.
 """
 
 from __future__ import annotations
 import os
+import sys
 import time
 import uuid
 import logging
+import threading
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger("queuesense.database")
@@ -52,8 +54,8 @@ class LocationNotFoundError(QueueSenseDatabaseError):
 
 # =========================================================================
 # Verifiable Campus Food Directories (Configurable via CAMPUS_ID)
-# Note: VerificationStatus is marked STUDENT_SOURCED unless institutional
-# signed confirmation is on file.
+# Note: VerificationStatus is strictly STUDENT_SOURCED or COMMUNITY_LISTING.
+# Precise integer seating capacities and unverified claims have been removed.
 # =========================================================================
 
 IITB_CAMPUS_LOCATIONS = [
@@ -64,69 +66,69 @@ IITB_CAMPUS_LOCATIONS = [
         "description": "Central multi-tiered student mess serving breakfast, lunch, snacks, and dinner counters.",
         "landmarkLocation": "Hostel 12-14 Complex, Lakeside Road, East Campus",
         "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Council of Student Affairs / Gymkhana Guide (Community Sourced)",
-        "openHours": "07:30 - 21:30",
-        "capacity": 650,
+        "verificationSource": "IIT Bombay Council of Student Affairs / Student Mentorship Directory",
+        "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Tiffin (16:30-18:00), Dinner (19:30-21:45)",
+        "capacityEstimate": "Large Dining Complex (~400-600 approx.)",
         "active": True,
     },
     {
         "id": "iitb-mess-h15-16",
         "name": "Hostel 15-16 Dining Hall",
         "category": "MESS",
-        "description": "Modern high-capacity hostel mess catering to senior undergraduate and postgraduate wings.",
+        "description": "Modern hostel mess catering to senior undergraduate and postgraduate wings.",
         "landmarkLocation": "Hostel 15-16 Quadrangle, North-East Campus",
         "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Student Mentor Program (SMP Guide)",
-        "openHours": "07:30 - 21:30",
-        "capacity": 550,
+        "verificationSource": "IIT Bombay Student Mentor Program (SMP) Freshers Guide",
+        "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Tiffin (16:30-18:00), Dinner (19:30-21:45)",
+        "capacityEstimate": "Large Dining Hall (~400-500 approx.)",
         "active": True,
     },
     {
         "id": "iitb-mess-h2",
         "name": "Hostel 2 Dining Hall & Mess",
         "category": "MESS",
-        "description": "Historic hostel mess renowned for South and North Indian rotating regional menus.",
+        "description": "Hostel mess renowned for rotating regional menus and dining counters.",
         "landmarkLocation": "Hostel 2 Quadrangle, near Gymkhana Grounds",
         "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Hostel 2 Council & SMP Guide",
-        "openHours": "07:30 - 21:00",
-        "capacity": 350,
+        "verificationSource": "IIT Bombay Hostel 2 Student Guide",
+        "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Tiffin (16:30-18:00), Dinner (19:30-21:30)",
+        "capacityEstimate": "Medium Dining Hall (~250-350 approx.)",
         "active": True,
     },
     {
         "id": "iitb-canteen-h3",
         "name": "Hostel 3 Canteen & Juice Centre",
         "category": "CANTEEN",
-        "description": "Beloved campus late-night staple serving fresh fruit juices, dosas, parathas, and tea.",
+        "description": "Campus late-night staple serving fresh fruit juices, dosas, parathas, and tea.",
         "landmarkLocation": "Ground Floor, Hostel 3, Main Hostel Avenue",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "IIT Bombay Gymkhana Freshers Guide",
-        "openHours": "14:00 - 02:30",
-        "capacity": 120,
+        "openHours": "14:00 - 02:00 (Late Night)",
+        "capacityEstimate": "Cafeteria Seating (~80-120 approx.)",
         "active": True,
     },
     {
         "id": "iitb-canteen-lhc",
         "name": "LHC Food Court (Lecture Hall)",
         "category": "CANTEEN",
-        "description": "High-velocity daytime cafeteria serving express lunches, coffee, sandwiches, and rolls.",
+        "description": "Daytime cafeteria serving express lunches, coffee, sandwiches, and rolls.",
         "landmarkLocation": "Ground Floor, Lecture Hall Complex (LHC), Academic Area",
         "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Academic Facilities & SMP Guide",
-        "openHours": "08:30 - 18:30",
-        "capacity": 220,
+        "verificationSource": "IIT Bombay Student Mentor Program Academic Guide",
+        "openHours": "08:30 - 18:30 (Class Hours)",
+        "capacityEstimate": "Medium Food Court (~150-220 approx.)",
         "active": True,
     },
     {
         "id": "iitb-canteen-gulmohar",
         "name": "Gulmohar Restaurant & Cafe",
         "category": "CANTEEN",
-        "description": "Multi-cuisine sit-down restaurant and faculty guest lounge serving thalis and meals.",
+        "description": "Multi-cuisine sit-down restaurant and guest lounge serving meals and thalis.",
         "landmarkLocation": "Gulmohar Building, First Floor, Opposite Main Building",
         "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Estate & Hospitality Directory",
+        "verificationSource": "IIT Bombay Campus Commercial Establishments Directory",
         "openHours": "11:00 - 22:30",
-        "capacity": 180,
+        "capacityEstimate": "Restaurant Seating (~120-180 approx.)",
         "active": True,
     },
     {
@@ -136,9 +138,9 @@ IITB_CAMPUS_LOCATIONS = [
         "description": "Quick-service eatery favored by computer science students for coffee, noodles, and wraps.",
         "landmarkLocation": "Kanwal Rekhi School of Information Technology (KReSIT)",
         "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Dept of Computer Science & Eng Guide",
+        "verificationSource": "Dept of Computer Science & Engineering Student Mentors",
         "openHours": "09:00 - 20:00",
-        "capacity": 90,
+        "capacityEstimate": "Small Express Counter (~60-90 approx.)",
         "active": True,
     },
     {
@@ -149,32 +151,32 @@ IITB_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Students Activity Centre (SAC) Grounds",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "IIT Bombay Gymkhana Cultural Affairs Guide",
-        "openHours": "16:00 - 01:00",
-        "capacity": 140,
+        "openHours": "16:00 - 01:00 (Evening / Night)",
+        "capacityEstimate": "Outdoor & Indoor SAC Area (~100-140 approx.)",
         "active": True,
     },
     {
         "id": "iitb-canteen-brewberrys",
         "name": "Brewberrys The Coffee Bar",
         "category": "CANTEEN",
-        "description": "Artisan coffee, bakery items, iced brews, and quiet tables for study sessions.",
+        "description": "Coffee, bakery items, iced brews, and tables for study sessions.",
         "landmarkLocation": "Adjacent to Central Library, Main Academic Spine",
         "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Central Library Amenities Guide",
+        "verificationSource": "Central Library Amenities Student Guide",
         "openHours": "08:00 - 23:00",
-        "capacity": 80,
+        "capacityEstimate": "Study Cafe Seating (~60-80 approx.)",
         "active": True,
     },
     {
         "id": "iitb-amul-parlour",
         "name": "Amul Ice Cream & Dairy Parlour",
         "category": "CANTEEN",
-        "description": "Exclusive dairy outlet offering ice creams, flavored milk, milkshakes, and packaged snacks.",
+        "description": "Dairy outlet offering ice creams, flavored milk, milkshakes, and packaged snacks.",
         "landmarkLocation": "Near Hostel 1 & Campus School Junction",
         "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Commercial Establishments Guide",
+        "verificationSource": "Campus Commercial Amenities Register",
         "openHours": "09:00 - 23:00",
-        "capacity": 40,
+        "capacityEstimate": "Kiosk Counter (Takeaway / Bench Seating)",
         "active": True,
     },
 ]
@@ -188,8 +190,8 @@ VITAP_CAMPUS_LOCATIONS = [
         "landmarkLocation": "North Dining Block, Near MH-1",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
-        "openHours": "07:30 - 21:30",
-        "capacity": 450,
+        "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:30)",
+        "capacityEstimate": "Large Dining Hall (~350-450 approx.)",
         "active": True,
     },
     {
@@ -200,8 +202,8 @@ VITAP_CAMPUS_LOCATIONS = [
         "landmarkLocation": "South Student Block, Near LH-1",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
-        "openHours": "07:30 - 21:00",
-        "capacity": 350,
+        "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:00)",
+        "capacityEstimate": "Medium Dining Hall (~250-350 approx.)",
         "active": True,
     },
     {
@@ -213,7 +215,7 @@ VITAP_CAMPUS_LOCATIONS = [
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
         "openHours": "10:00 - 23:00",
-        "capacity": 180,
+        "capacityEstimate": "Open Plaza Seating (~120-180 approx.)",
         "active": True,
     },
     {
@@ -224,8 +226,8 @@ VITAP_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Central Block (CB), Ground Floor",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
-        "openHours": "08:30 - 18:00",
-        "capacity": 120,
+        "openHours": "08:30 - 18:00 (Class Hours)",
+        "capacityEstimate": "Express Counter (~80-120 approx.)",
         "active": True,
     },
     {
@@ -236,13 +238,12 @@ VITAP_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Hostel Avenue Commercial Area",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
-        "openHours": "17:00 - 02:00",
-        "capacity": 150,
+        "openHours": "17:00 - 02:00 (Late Night)",
+        "capacityEstimate": "Late Night Counter (~100-150 approx.)",
         "active": True,
     },
 ]
 
-# Configurable active campus (default: iitb)
 ACTIVE_CAMPUS = os.environ.get("CAMPUS_ID", "iitb").lower()
 DEFAULT_CAMPUS_LOCATIONS = (
     VITAP_CAMPUS_LOCATIONS if ACTIVE_CAMPUS == "vitap" else IITB_CAMPUS_LOCATIONS
@@ -301,14 +302,16 @@ class BaseStorageAdapter(ABC):
 
 
 # =========================================================================
-# Production DynamoDB Storage Adapter (Fails Closed, No Silent Fallback)
+# Production DynamoDB Storage Adapter (Fails Closed, Atomic Idempotency)
 # =========================================================================
 
 class DynamoDBStorageAdapter(BaseStorageAdapter):
     """
     Production DynamoDB client.
-    Guarantees that a write is only reported successful if confirmed by DynamoDB.
-    Propagates controlled DatabasePersistenceError on AWS errors.
+    - Guarantees fail-closed durability (never returns silent success on failed writes).
+    - Uses TransactWriteItems for atomic idempotency reservation + report persistence.
+    - Fails closed on rate-limit verification errors.
+    - Enforces 14-day cutoff query bounds.
     """
 
     def __init__(self, table_name: str, region: Optional[str] = None):
@@ -342,7 +345,6 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
             )
             items = resp.get("Items", [])
             if not items:
-                # First-time seed into database
                 self.seed_locations()
                 return self.list_locations()
             return sorted(items, key=lambda x: x.get("name", ""))
@@ -371,18 +373,6 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
     ) -> Dict[str, Any]:
         self._ensure_table()
 
-        # Idempotency Check: if key provided and already registered, return cached report
-        if idempotency_key:
-            idem_pk = f"IDEMPOTENCY#{idempotency_key}"
-            idem_sk = "RECORD"
-            try:
-                existing_idem = self._table.get_item(Key={"PK": idem_pk, "SK": idem_sk}).get("Item")
-                if existing_idem and "cachedReport" in existing_idem:
-                    logger.info("Idempotent replay detected for key: %s", idempotency_key)
-                    return existing_idem["cachedReport"]
-            except Exception as e:
-                logger.warning("Idempotency lookup warning: %s", str(e))
-
         now = datetime.now(timezone.utc)
         iso_timestamp = now.isoformat()
         report_id = f"rep_{uuid.uuid4().hex[:12]}"
@@ -404,32 +394,72 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
             "ttl": epoch_ttl,
         }
 
-        from decimal import Decimal  # type: ignore
         clean_item = self._convert_floats_to_decimal(item)
 
-        try:
-            self._table.put_item(Item=clean_item)
-        except Exception as e:
-            logger.error("DynamoDB write failed for report %s: %s", report_id, str(e))
-            raise DatabasePersistenceError("Failed to persist queue observation to durable database.")
-
-        # Persist Idempotency Record (24-hour TTL)
-        if idempotency_key:
+        if not idempotency_key:
+            # Standard single-item write when no idempotency key is provided
             try:
-                idem_ttl = int(time.time()) + 86400
-                self._table.put_item(
-                    Item={
-                        "PK": f"IDEMPOTENCY#{idempotency_key}",
-                        "SK": "RECORD",
-                        "entityType": "IDEMPOTENCY",
-                        "cachedReport": clean_item,
-                        "ttl": idem_ttl,
-                    }
-                )
+                self._table.put_item(Item=clean_item)
+                return item
             except Exception as e:
-                logger.warning("Failed to record idempotency key: %s", str(e))
+                logger.error("DynamoDB write failed for report %s: %s", report_id, str(e))
+                raise DatabasePersistenceError("Failed to persist queue observation to durable database.")
 
-        return item
+        # Atomic Idempotency Transaction via TransactWriteItems
+        idem_pk = f"IDEMPOTENCY#{idempotency_key}"
+        idem_sk = "RECORD"
+        idem_ttl = int(time.time()) + 86400  # 24 hours
+
+        idem_item = {
+            "PK": idem_pk,
+            "SK": idem_sk,
+            "entityType": "IDEMPOTENCY",
+            "cachedReport": clean_item,
+            "ttl": idem_ttl,
+            "createdAt": iso_timestamp,
+        }
+
+        try:
+            from boto3.dynamodb.types import TypeSerializer  # type: ignore
+            serializer = TypeSerializer()
+            serialized_report = {k: serializer.serialize(v) for k, v in clean_item.items()}
+            serialized_idem = {k: serializer.serialize(v) for k, v in idem_item.items()}
+
+            client = self._table.meta.client
+            client.transact_write_items(
+                TransactItems=[
+                    {
+                        "Put": {
+                            "TableName": self.table_name,
+                            "Item": serialized_report,
+                        }
+                    },
+                    {
+                        "Put": {
+                            "TableName": self.table_name,
+                            "Item": serialized_idem,
+                            "ConditionExpression": "attribute_not_exists(PK)",
+                        }
+                    },
+                ]
+            )
+            return item
+
+        except Exception as e:
+            error_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            if error_code == "TransactionCanceledException":
+                # Idempotency collision: conditional check failed because key already exists
+                logger.info("Idempotent replay detected for key: %s", idempotency_key)
+                try:
+                    existing = self._table.get_item(Key={"PK": idem_pk, "SK": idem_sk}).get("Item")
+                    if existing and "cachedReport" in existing:
+                        return self._convert_decimals_to_float(existing["cachedReport"])
+                except Exception as get_err:
+                    logger.error("Failed to read existing idempotency record: %s", str(get_err))
+                raise IdempotencyConflictError(f"Idempotent submission conflict for key '{idempotency_key}'.")
+
+            logger.error("DynamoDB atomic transaction failed: %s", str(e), exc_info=True)
+            raise DatabasePersistenceError(f"Failed to atomically persist report and idempotency record: {str(e)}")
 
     def get_recent_reports(self, location_id: str, limit: int = 30) -> List[Dict[str, Any]]:
         self._ensure_table()
@@ -517,16 +547,21 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
             count = int(resp.get("Attributes", {}).get("reqCount", 1))
             return count <= max_requests
         except Exception as e:
-            logger.warning("Rate limit check warning (failing open): %s", str(e))
-            return True
+            logger.error("DynamoDB rate limit check failed: %s", str(e), exc_info=True)
+            # FAIL CLOSED: Do not return True. Raise DatabasePersistenceError to deny or return controlled error.
+            raise DatabasePersistenceError(f"Rate limit storage verification failed: {str(e)}")
 
     def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 200) -> List[Dict[str, Any]]:
         self._ensure_table()
         pk = f"LOCATION#{location_id}"
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff_iso = cutoff_dt.isoformat()
+
         try:
             from boto3.dynamodb.conditions import Key  # type: ignore
+            # Enforce 14-day cutoff at DynamoDB query index level (SK >= REPORT#{cutoff_iso})
             resp = self._table.query(
-                KeyConditionExpression=Key("PK").eq(pk) & Key("SK").begins_with("REPORT#"),
+                KeyConditionExpression=Key("PK").eq(pk) & Key("SK").gte(f"REPORT#{cutoff_iso}"),
                 ScanIndexForward=False,
                 Limit=limit,
             )
@@ -534,7 +569,7 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
             return self._convert_decimals_to_float(items)
         except Exception as e:
             logger.error("DynamoDB get_historical_reports failed: %s", str(e))
-            raise DatabasePersistenceError("Failed to retrieve historical observations.")
+            raise DatabasePersistenceError(f"Failed to query historical observations: {str(e)}")
 
     def seed_locations(self):
         self._ensure_table()
@@ -582,14 +617,16 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
 class InMemoryStorageAdapter(BaseStorageAdapter):
     """
     In-memory storage adapter for deterministic, isolated unit tests.
-    Supports controlled simulated failure toggles to verify fail-closed behavior.
+    Thread-safe implementation with configurable failure simulation toggles.
     """
 
     def __init__(self, initial_locations: Optional[List[Dict[str, Any]]] = None):
         self._store: Dict[str, Dict[str, Any]] = {}
-        self._idempotency_store: Dict[str, Dict[str, Any]] = {}
         self._rate_limits: Dict[str, int] = {}
+        self._lock = threading.Lock()
         self._simulate_failure: bool = False
+        self._simulate_idempotency_failure: bool = False
+        self._simulate_rate_limit_failure: bool = False
 
         locs = initial_locations or DEFAULT_CAMPUS_LOCATIONS
         for loc in locs:
@@ -603,8 +640,13 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
             }
 
     def set_simulate_failure(self, fail: bool):
-        """Toggle simulated persistence failure for acceptance testing."""
         self._simulate_failure = fail
+
+    def set_simulate_idempotency_failure(self, fail: bool):
+        self._simulate_idempotency_failure = fail
+
+    def set_simulate_rate_limit_failure(self, fail: bool):
+        self._simulate_rate_limit_failure = fail
 
     def list_locations(self) -> List[Dict[str, Any]]:
         if self._simulate_failure:
@@ -632,10 +674,6 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
         if self._simulate_failure:
             raise DatabasePersistenceError("Simulated database persistence failure.")
 
-        # Check Idempotency
-        if idempotency_key and idempotency_key in self._idempotency_store:
-            return self._idempotency_store[idempotency_key]
-
         now = datetime.now(timezone.utc)
         iso_timestamp = now.isoformat()
         report_id = f"rep_{uuid.uuid4().hex[:12]}"
@@ -656,11 +694,29 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
             "ttl": int(time.time()) + (7 * 86400),
         }
 
-        self._store[f"{pk}::{sk}"] = item
-        if idempotency_key:
-            self._idempotency_store[idempotency_key] = item
+        with self._lock:
+            if idempotency_key:
+                idem_key = f"IDEMPOTENCY#{idempotency_key}::RECORD"
+                if idem_key in self._store:
+                    if self._simulate_idempotency_failure:
+                        raise DatabasePersistenceError("Simulated idempotency read failure.")
+                    return self._store[idem_key]["cachedReport"]
 
-        return item
+                if self._simulate_idempotency_failure:
+                    raise DatabasePersistenceError("Simulated idempotency write failure.")
+
+                self._store[f"{pk}::{sk}"] = item
+                self._store[idem_key] = {
+                    "PK": f"IDEMPOTENCY#{idempotency_key}",
+                    "SK": "RECORD",
+                    "entityType": "IDEMPOTENCY",
+                    "cachedReport": item,
+                    "ttl": int(time.time()) + 86400,
+                }
+                return item
+
+            self._store[f"{pk}::{sk}"] = item
+            return item
 
     def get_recent_reports(self, location_id: str, limit: int = 30) -> List[Dict[str, Any]]:
         if self._simulate_failure:
@@ -703,21 +759,42 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
         return items[:limit]
 
     def check_rate_limit(self, client_hash: str, window_seconds: int = 300, max_requests: int = 5) -> bool:
+        if self._simulate_rate_limit_failure or self._simulate_failure:
+            raise DatabasePersistenceError("Simulated rate limit storage failure.")
         current_window = int(time.time()) // window_seconds
         key = f"{client_hash}::{current_window}"
-        count = self._rate_limits.get(key, 0) + 1
-        self._rate_limits[key] = count
-        return count <= max_requests
+        with self._lock:
+            count = self._rate_limits.get(key, 0) + 1
+            self._rate_limits[key] = count
+            return count <= max_requests
 
     def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 200) -> List[Dict[str, Any]]:
-        return self.get_recent_reports(location_id, limit=limit)
+        if self._simulate_failure:
+            raise DatabasePersistenceError("Simulated database failure.")
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
+        prefix = f"LOCATION#{location_id}::REPORT#"
+        reports = []
+        for k, v in self._store.items():
+            if k.startswith(prefix) and v.get("entityType") == "REPORT":
+                ts_str = v.get("timestamp")
+                if ts_str:
+                    try:
+                        clean_ts = ts_str.replace("Z", "+00:00")
+                        dt = datetime.fromisoformat(clean_ts)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        if dt >= cutoff_dt:
+                            reports.append(v)
+                    except Exception:
+                        continue
+        reports.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+        return reports[:limit]
 
 
 # =========================================================================
 # QueueSenseDatabase Public Facade
 # =========================================================================
 
-# Shared process-level test adapter for unit test testcases
 _shared_test_adapter: Optional[InMemoryStorageAdapter] = None
 
 
@@ -731,6 +808,13 @@ def get_shared_test_adapter() -> InMemoryStorageAdapter:
 def reset_shared_test_adapter() -> None:
     global _shared_test_adapter
     _shared_test_adapter = InMemoryStorageAdapter()
+
+
+# Synchronize module identity across 'database' and 'backend.shared.database'
+if __name__ == "database":
+    sys.modules["backend.shared.database"] = sys.modules["database"]
+elif __name__ == "backend.shared.database":
+    sys.modules["database"] = sys.modules["backend.shared.database"]
 
 
 class QueueSenseDatabase:
@@ -761,7 +845,6 @@ class QueueSenseDatabase:
         elif is_test_env:
             self._adapter = get_shared_test_adapter()
         else:
-            # Default to production DynamoDB adapter
             self._adapter = DynamoDBStorageAdapter(table_name=self.table_name)
 
     def list_locations(self) -> List[Dict[str, Any]]:

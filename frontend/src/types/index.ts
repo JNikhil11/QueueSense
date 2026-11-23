@@ -32,7 +32,8 @@ export interface CampusLocation {
   verificationStatus: 'STUDENT_SOURCED' | 'UNVERIFIED_LISTING' | 'COMMUNITY_LISTING' | 'VERIFIED_CAMPUS_DIRECTORY';
   verificationSource: string;
   openHours: string;
-  capacity: number;
+  capacity?: number;
+  capacityEstimate?: string;
   active: boolean;
   estimate?: QueueEstimate;
 }
@@ -72,6 +73,9 @@ export interface ReportSubmissionPayload {
 export interface HistoricalHourlyBucket {
   hour: number;
   label: string;
+  historicalAverageWaitMinutes?: number | null;
+  historicalAverageQueueLength?: number | null;
+  sampleCount?: number;
   averageWaitMinutes: number | null;
   averageQueueLength: number | null;
   observationCount: number;
@@ -81,17 +85,25 @@ export interface HistoricalData {
   locationId: string;
   locationName?: string;
   status: 'available' | 'insufficient_history';
+  timezone?: string;
+  metricType?: string;
+  minSamplesRequiredForPeak?: number;
+  disclaimer?: string;
   totalObservations: number;
   hourlyTrends: HistoricalHourlyBucket[];
   busiestHour: {
     hour: number;
     label: string;
+    historicalAverageWaitMinutes?: number;
     averageWaitMinutes: number;
+    sampleCount?: number;
   } | null;
   quietestHour: {
     hour: number;
     label: string;
+    historicalAverageWaitMinutes?: number;
     averageWaitMinutes: number;
+    sampleCount?: number;
   } | null;
   summary: string;
 }

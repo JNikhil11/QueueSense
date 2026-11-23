@@ -4,6 +4,7 @@ Validates user submission, applies server timestamp & ID, enforces rate limiting
 deduplicates retries via idempotency key, durably persists to DynamoDB,
 recomputes real-time queue estimate, and returns updated prediction.
 Never converts persistence failures into silent success.
+Fails closed when required security configurations are missing or compromised.
 """
 
 import json
@@ -19,10 +20,18 @@ if "/opt/python" not in sys.path:
     sys.path.insert(0, "/opt/python")
 
 from response import create_api_response
-from database import QueueSenseDatabase, DatabasePersistenceError
+from database import (
+    QueueSenseDatabase,
+    DatabasePersistenceError,
+    IdempotencyConflictError,
+)
 from validation import validate_location_id, validate_report_payload
 from prediction import calculate_queue_estimate
-from security import compute_anonymous_client_hash, extract_idempotency_key
+from security import (
+    compute_anonymous_client_hash,
+    extract_idempotency_key,
+    SecurityConfigurationError,
+)
 
 logger = logging.getLogger("queuesense.submit_report")
 logger.setLevel(logging.INFO)
@@ -81,8 +90,20 @@ def lambda_handler(event, context):
         db = QueueSenseDatabase()
 
         # 4. Enforce Privacy-Preserving Rate Limiting (5 reports per 5 minutes per client hash)
-        client_hash = compute_anonymous_client_hash(event)
-        is_allowed = db.check_rate_limit(client_hash=client_hash, window_seconds=300, max_requests=5)
+        try:
+            client_hash = compute_anonymous_client_hash(event)
+            is_allowed = db.check_rate_limit(client_hash=client_hash, window_seconds=300, max_requests=5)
+        except SecurityConfigurationError:
+            raise
+        except DatabasePersistenceError as db_err:
+            logger.error("Rate limit check storage failure [req=%s]: %s", request_id, str(db_err), exc_info=True)
+            return create_api_response(
+                status_code=503,
+                error="Rate limit verification service unavailable. Please retry shortly.",
+                error_code="RATE_LIMIT_CHECK_FAILED",
+                request_id=request_id,
+            )
+
         if not is_allowed:
             logger.warning("Rate limit exceeded for client hash: %s on location %s", client_hash, location_id)
             return create_api_response(
@@ -138,6 +159,22 @@ def lambda_handler(event, context):
             request_id=request_id,
         )
 
+    except SecurityConfigurationError as e:
+        logger.error("Security configuration failure [req=%s]: %s", request_id, str(e))
+        return create_api_response(
+            status_code=500,
+            error="Server security configuration error. Service unavailable.",
+            error_code="SECURITY_CONFIGURATION_ERROR",
+            request_id=request_id,
+        )
+    except IdempotencyConflictError as e:
+        logger.warning("Idempotency conflict [req=%s]: %s", request_id, str(e))
+        return create_api_response(
+            status_code=409,
+            error=str(e),
+            error_code="IDEMPOTENCY_CONFLICT",
+            request_id=request_id,
+        )
     except DatabasePersistenceError as e:
         logger.error("Database persistence failure [req=%s]: %s", request_id, str(e), exc_info=True)
         return create_api_response(
