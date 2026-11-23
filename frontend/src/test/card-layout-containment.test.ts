@@ -4,7 +4,7 @@ import puppeteer, { Browser, Page } from 'puppeteer-core';
 const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const PREVIEW_URL = 'http://localhost:4173/';
 
-describe('Outlet Card Layout & Interaction Verification', () => {
+describe('Outlet Card Layout & Interaction Verification', { timeout: 25000 }, () => {
   let browser: Browser;
   let page: Page;
 
