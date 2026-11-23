@@ -23,13 +23,13 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
       : null;
 
   return (
-    <div className="outlet-card group relative rounded-3xl glass-panel glass-card-ambient p-6 flex flex-col justify-between transition-all duration-300 hover:-translate-y-1 glass-specular-edge border-[#39FF14]/30 hover:border-[#39FF14]/60">
+    <div className="outlet-card group relative rounded-3xl glass-panel glass-card-ambient p-5 sm:p-6 flex flex-col justify-between transition-all duration-300 glass-specular-edge border-[#39FF14]/30 hover:border-[#39FF14]/60 min-w-0">
       {/* Top Meta Header */}
       <div>
         <div className="flex items-start justify-between gap-3 mb-2.5">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
             <span
-              className={`text-[10px] uppercase font-mono font-bold tracking-wider px-2.5 py-0.5 rounded-full border ${
+              className={`text-[10px] uppercase font-mono font-bold tracking-wider px-2.5 py-0.5 rounded-full border shrink-0 ${
                 location.category === 'MESS'
                   ? 'bg-[#7DF9FF]/10 text-[#7DF9FF] border-[#7DF9FF]/30'
                   : 'bg-[#39FF14]/10 text-[#39FF14] border-[#39FF14]/30'
@@ -39,16 +39,16 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
             </span>
             {location.verificationStatus === 'STUDENT_SOURCED' && (
               <span
-                className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.04] text-[#8E9E93] border border-white/10"
+                className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.04] text-[#8E9E93] border border-white/10 shrink-0"
                 title={location.verificationSource}
               >
-                <CheckCircle2 className="w-3 h-3 text-[#39FF14]" />
+                <CheckCircle2 className="w-3 h-3 text-[#39FF14] shrink-0" />
                 <span>Student Sourced</span>
               </span>
             )}
             {location.verificationStatus === 'COMMUNITY_LISTING' && (
               <span
-                className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.04] text-[#8E9E93] border border-white/10"
+                className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.04] text-[#8E9E93] border border-white/10 shrink-0"
                 title={location.verificationSource}
               >
                 <span>Community Listing</span>
@@ -56,7 +56,11 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
             )}
             {est && <FreshnessBadge state={est.freshness} />}
           </div>
-          {est && <CongestionBadge level={est.congestion} />}
+          {est && (
+            <div className="shrink-0">
+              <CongestionBadge level={est.congestion} />
+            </div>
+          )}
         </div>
 
         {/* Title & Landmark */}
@@ -150,35 +154,50 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
         </div>
       </div>
 
-      {/* Footer Specs & Actions */}
-      <div className="pt-2 flex items-center justify-between gap-3 text-xs border-t border-white/[0.04]">
-        <div className="flex items-center gap-3 text-[#8E9E93]">
-          <span className="flex items-center gap-1 text-[11px] font-mono" title={location.openHours}>
+      {/* Footer Specs & Actions: Robust Responsive Containment */}
+      <div className="pt-3 border-t border-white/[0.06] flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5">
+        {/* Left Secondary Metadata: Truncates cleanly without displacing actions */}
+        <div className="flex items-center gap-2 text-[#8E9E93] min-w-0 flex-1 basis-[150px]">
+          <span
+            className="inline-flex items-center gap-1 text-[11px] font-mono min-w-0 shrink"
+            title={location.openHours}
+          >
             <Clock className="w-3 h-3 text-[#7DF9FF] shrink-0" />
-            <span className="truncate max-w-[130px]">{location.openHours}</span>
+            <span className="truncate">{location.openHours}</span>
           </span>
-          <span className="flex items-center gap-1 text-[11px] font-mono" title={location.capacityEstimate || `${location.capacity} cap`}>
-            <Users className="w-3 h-3 text-[#5A695F] shrink-0" />
-            <span className="truncate max-w-[100px]">{location.capacityEstimate || `${location.capacity} cap`}</span>
-          </span>
+          {(location.capacityEstimate || location.capacity) && (
+            <>
+              <span className="text-[#5A695F] text-[10px] shrink-0 select-none">•</span>
+              <span
+                className="inline-flex items-center gap-1 text-[11px] font-mono min-w-0 shrink"
+                title={location.capacityEstimate || `${location.capacity} cap`}
+              >
+                <Users className="w-3 h-3 text-[#5A695F] shrink-0" />
+                <span className="truncate">{location.capacityEstimate || `${location.capacity} cap`}</span>
+              </span>
+            </>
+          )}
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Right Action Buttons: Predictable dimensions, strictly contained inside card */}
+        <div className="flex items-center gap-2 shrink-0 ml-auto">
           <button
             onClick={() => onReport(location.id)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl btn-glass hover:border-[#39FF14]/40 text-xs font-semibold"
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl btn-glass hover:border-[#39FF14]/50 hover:text-white text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#39FF14] transition-all"
             title="Submit a queue observation"
+            aria-label={`Submit observation for ${location.name}`}
           >
-            <Plus className="w-3.5 h-3.5 text-[#39FF14]" />
+            <Plus className="w-3.5 h-3.5 text-[#39FF14] shrink-0" />
             <span>Report</span>
           </button>
 
           <button
             onClick={() => onSelect(location.id)}
-            className="p-2 rounded-xl btn-glass hover:border-[#7DF9FF]/40 hover:text-[#7DF9FF] transition-colors"
+            className="inline-flex items-center justify-center w-8 h-8 rounded-xl btn-glass hover:border-[#7DF9FF]/50 hover:text-[#7DF9FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7DF9FF] transition-all shrink-0"
             title="View details and history"
+            aria-label={`View details and history for ${location.name}`}
           >
-            <ArrowUpRight className="w-4 h-4" />
+            <ArrowUpRight className="w-4 h-4 shrink-0" />
           </button>
         </div>
       </div>

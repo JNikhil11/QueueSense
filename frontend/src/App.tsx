@@ -35,32 +35,41 @@ export const App: React.FC = () => {
   // Toast notification
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-  // Container ref for subtle pointer ambient lighting
-  const containerRef = React.useRef<HTMLDivElement>(null);
+  // Dedicated ref for subtle pointer ambient lighting (zero layout thrashing, zero React re-renders)
+  const ambientRef = React.useRef<HTMLDivElement>(null);
 
-  // Subtle cursor ambient light tracking (only for fine pointer desktop, zero React re-renders)
+  // High-performance cursor ambient light tracking (only for fine pointer desktop, zero layout reflows)
   useEffect(() => {
     const isFinePointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!isFinePointer || prefersReducedMotion || !containerRef.current) return;
+    if (!isFinePointer || prefersReducedMotion) return;
 
     let rafId: number | null = null;
+    let winWidth = window.innerWidth;
+    let winHeight = window.innerHeight;
+
+    const handleResize = () => {
+      winWidth = window.innerWidth;
+      winHeight = window.innerHeight;
+    };
+
     const handlePointerMove = (e: PointerEvent) => {
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
-        if (containerRef.current) {
-          const rect = containerRef.current.getBoundingClientRect();
-          const xPercent = Math.max(0, Math.min(100, Math.round(((e.clientX - rect.left) / rect.width) * 100)));
-          const yPercent = Math.max(0, Math.min(100, Math.round(((e.clientY - rect.top) / rect.height) * 100)));
-          containerRef.current.style.setProperty('--mouse-x', `${xPercent}%`);
-          containerRef.current.style.setProperty('--mouse-y', `${yPercent}%`);
+        if (ambientRef.current) {
+          const xPercent = Math.max(0, Math.min(100, Math.round((e.clientX / (winWidth || 1)) * 100)));
+          const yPercent = Math.max(0, Math.min(100, Math.round((e.clientY / (winHeight || 1)) * 100)));
+          ambientRef.current.style.setProperty('--mouse-x', `${xPercent}%`);
+          ambientRef.current.style.setProperty('--mouse-y', `${yPercent}%`);
         }
         rafId = null;
       });
     };
 
+    window.addEventListener('resize', handleResize, { passive: true });
     window.addEventListener('pointermove', handlePointerMove, { passive: true });
     return () => {
+      window.removeEventListener('resize', handleResize);
       window.removeEventListener('pointermove', handlePointerMove);
       if (rafId) cancelAnimationFrame(rafId);
     };
@@ -179,11 +188,11 @@ export const App: React.FC = () => {
 
   return (
     <div
-      ref={containerRef}
       className="min-h-screen flex flex-col bg-[#070A08] text-[#F4F7F5] relative selection:bg-[#39FF14] selection:text-[#070A08] overflow-x-hidden"
     >
       {/* Subtle Living Pointer Ambient Field */}
       <div
+        ref={ambientRef}
         className="fixed inset-0 pointer-events-none transition-opacity duration-700"
         style={{
           background: 'radial-gradient(900px circle at var(--mouse-x, 50%) var(--mouse-y, 25%), rgba(0, 150, 255, 0.038), transparent 70%)',
@@ -363,11 +372,6 @@ export const App: React.FC = () => {
           setDetailOutletId(null);
           handleOpenReportModal(id);
         }}
-      />
-
-      <AdminAuditModal
-        isOpen={isAdminModalOpen}
-        onClose={() => setIsAdminModalOpen(false)}
       />
 
       <AdminAuditModal

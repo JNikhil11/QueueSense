@@ -81,7 +81,12 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   const selectedLoc = locations.find((l) => l.id === selectedLocationId);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="report-dialog-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in"
+    >
       <div className="w-full max-w-lg max-h-[90vh] rounded-3xl glass-panel-elevated shadow-2xl flex flex-col overflow-hidden glass-specular-edge border-[#39FF14]/25">
         {/* Header */}
         <div className="p-5 sm:p-6 border-b border-white/[0.08] flex items-center justify-between shrink-0">
@@ -89,7 +94,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#39FF14]/10 text-[#39FF14] border border-[#39FF14]/30 text-[10px] font-mono uppercase tracking-wider mb-1">
               <span>Peer Observation Stream</span>
             </div>
-            <h3 className="font-display text-xl font-extrabold text-white tracking-tight">
+            <h3 id="report-dialog-title" className="font-display text-xl font-extrabold text-white tracking-tight">
               Report Current Queue
             </h3>
             <p className="text-xs text-[#8E9E93] mt-0.5">

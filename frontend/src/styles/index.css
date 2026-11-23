@@ -27,17 +27,17 @@
 /* Base Liquid Glass Layer with Strict Neon-Green Boundary and Electric Blue Ambient Glow */
 .glass-panel {
   background: rgba(13, 20, 15, 0.75);
-  backdrop-filter: blur(24px) saturate(190%);
-  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
   border: 1px solid rgba(57, 255, 20, 0.28);
-  box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.7), 0 0 32px -6px rgba(0, 150, 255, 0.22), inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.7), 0 0 24px -6px rgba(0, 150, 255, 0.18), inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
   position: relative;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .glass-panel:hover {
   border-color: rgba(57, 255, 20, 0.65);
-  box-shadow: 0 18px 45px -10px rgba(0, 0, 0, 0.8), 0 0 48px -2px rgba(0, 150, 255, 0.42), inset 0 1px 1px 0 rgba(255, 255, 255, 0.22);
+  box-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.8), 0 0 36px -2px rgba(0, 150, 255, 0.35), inset 0 1px 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 /* Ambient Backlight Illumination (#0096FF Electric Blue) */
@@ -202,40 +202,39 @@
    ========================================================================= */
 
 @media (hover: hover) and (pointer: fine) {
-  /* Outlets Grid: Dim non-hovered cards when any card is hovered */
+  /* Outlets Grid: Dim non-hovered cards when any card is hovered (pure opacity, zero filter saturation overhead) */
   .cards-grid:has(.outlet-card:hover) .outlet-card:not(:hover) {
     opacity: 0.72;
-    filter: saturate(0.85);
-    transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), filter 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  /* Outlet Card Elevation & Subtle Depth (NO extra brightness/neon bloom) */
+  /* Outlet Card Elevation & Subtle Depth (NO extra brightness/neon bloom, NO layout-triggering scale) */
   .outlet-card {
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-                opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-                box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-                border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-                filter 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    contain: layout style;
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     will-change: transform, opacity;
   }
 
   .outlet-card:hover {
-    transform: translateY(-6px) scale(1.01);
+    transform: translateY(-4px);
     z-index: 10;
     /* Soft electric blue depth shadow, thin green boundary preserved */
-    box-shadow: 0 20px 48px -10px rgba(0, 0, 0, 0.8), 0 0 38px -6px rgba(0, 150, 255, 0.32), inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
+    box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.75), 0 0 28px -4px rgba(0, 150, 255, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
   }
 
   /* Stats Grid: Dim non-hovered stat cards */
   .stats-grid:has(.stat-card:hover) .stat-card:not(:hover) {
     opacity: 0.72;
-    transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .stat-card {
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-                opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-                border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .stat-card:hover {
@@ -245,8 +244,8 @@
 
   /* Recommendation Card Floating Elevation */
   .recommendation-card {
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-                box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .recommendation-card:hover {
@@ -276,7 +275,13 @@ html, body {
   button, input, select {
     min-height: 44px;
   }
-  /* Never dim cards on touch screens */
+  /* Never dim, scale, or lift cards on touch screens */
+  .outlet-card:hover,
+  .stat-card:hover,
+  .recommendation-card:hover {
+    transform: none !important;
+    box-shadow: none !important;
+  }
   .cards-grid:has(.outlet-card:hover) .outlet-card:not(:hover),
   .stats-grid:has(.stat-card:hover) .stat-card:not(:hover) {
     opacity: 1 !important;

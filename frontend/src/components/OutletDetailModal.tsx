@@ -76,7 +76,12 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="outlet-detail-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in"
+    >
       <div className="w-full max-w-2xl max-h-[90vh] rounded-3xl glass-panel-elevated shadow-2xl flex flex-col overflow-hidden glass-specular-edge border-[#39FF14]/30">
         {/* Header */}
         <div className="p-6 border-b border-white/[0.08] flex items-start justify-between">
