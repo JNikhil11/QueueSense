@@ -47,3 +47,4 @@ def lambda_handler(event, context):
             data=None,
             error=f"Failed to retrieve campus locations: {str(e)}",
         )
+

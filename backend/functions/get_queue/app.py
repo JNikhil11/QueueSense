@@ -77,3 +77,4 @@ def lambda_handler(event, context):
             data=None,
             error=f"Error fetching queue data: {str(e)}",
         )
+

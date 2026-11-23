@@ -162,3 +162,4 @@ Update `frontend/.env.production` with the resulting `HttpApiUrl` and build the 
 ## 8. License
 
 This project is released under the MIT Open Source License.
+

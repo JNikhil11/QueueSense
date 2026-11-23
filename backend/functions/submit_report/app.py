@@ -109,3 +109,4 @@ def lambda_handler(event, context):
             data=None,
             error=f"Internal error processing queue report: {str(e)}",
         )
+

@@ -67,3 +67,4 @@ def test_validate_report_payload_missing_required():
     is_valid, data, errors = validate_report_payload(empty_payload)
     assert is_valid is False
     assert any("reportedWaitMinutes" in err for err in errors)
+

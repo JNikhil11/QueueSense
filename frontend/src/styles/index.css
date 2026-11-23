@@ -4,47 +4,165 @@
 
 @layer base {
   body {
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: 'Geist', 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: #070A08;
+    color: #F4F7F5;
   }
 
   h1, h2, h3, h4, .font-display {
-    font-family: 'Space Grotesk', system-ui, sans-serif;
+    font-family: 'Geist', 'Inter', system-ui, sans-serif;
+    letter-spacing: -0.025em;
   }
 
   .font-mono {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: 'Geist Mono', 'IBM Plex Mono', monospace;
     font-feature-settings: "tnum" 1, "zero" 1;
   }
 }
 
-/* Custom scrollbars */
+/* =========================================================================
+   Apple Liquid Glass & Ambient Illumination Material System
+   ========================================================================= */
+
+/* Base Liquid Glass Layer */
+.glass-panel {
+  background: rgba(13, 20, 15, 0.72);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+  position: relative;
+}
+
+.glass-panel:hover {
+  border-color: rgba(57, 255, 20, 0.25);
+  box-shadow: 0 12px 36px 0 rgba(0, 0, 0, 0.55), 0 0 20px -5px rgba(57, 255, 20, 0.15), inset 0 1px 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Elevated Liquid Glass (Active modals, dropdowns, floating controls) */
+.glass-panel-elevated {
+  background: rgba(19, 28, 21, 0.85);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.65), inset 0 1px 1px 0 rgba(255, 255, 255, 0.25);
+  position: relative;
+}
+
+/* Centerpiece Liquid Glass (Recommendation Banner) */
+.glass-panel-centerpiece {
+  background: linear-gradient(135deg, rgba(20, 32, 23, 0.85) 0%, rgba(13, 20, 15, 0.8) 50%, rgba(8, 14, 10, 0.9) 100%);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(57, 255, 20, 0.35);
+  box-shadow: 0 12px 40px -10px rgba(0, 0, 0, 0.7), 0 0 35px -8px rgba(57, 255, 20, 0.28), inset 0 1px 1px 0 rgba(255, 255, 255, 0.3);
+  position: relative;
+}
+
+/* Specular Top-Edge Reflection Utility */
+.glass-specular-edge::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 5%;
+  right: 5%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), rgba(57, 255, 20, 0.4), rgba(255, 255, 255, 0.35), transparent);
+  pointer-events: none;
+}
+
+/* Pill / Capsule Glass */
+.glass-pill {
+  background: rgba(22, 34, 25, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
+}
+
+/* Electric Buttons */
+.btn-electric {
+  background-color: #39FF14;
+  color: #050806;
+  font-weight: 600;
+  border-radius: 0.75rem;
+  box-shadow: 0 0 20px -3px rgba(57, 255, 20, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.5);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-electric:hover {
+  background-color: #47ff26;
+  box-shadow: 0 0 30px -2px rgba(57, 255, 20, 0.65), inset 0 1px 1px 0 rgba(255, 255, 255, 0.7);
+  transform: translateY(-1px);
+}
+
+.btn-electric:active {
+  transform: translateY(0px) scale(0.98);
+}
+
+.btn-glass {
+  background: rgba(22, 34, 25, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #F4F7F5;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+  transition: all 0.2s ease;
+}
+
+.btn-glass:hover {
+  background: rgba(30, 46, 34, 0.75);
+  border-color: rgba(57, 255, 20, 0.3);
+  color: #FFFFFF;
+}
+
+/* Custom Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0B0F17;
+  background: #070A08;
 }
 ::-webkit-scrollbar-thumb {
-  background: #232E44;
+  background: #17221A;
   border-radius: 9999px;
+  border: 1px solid rgba(57, 255, 20, 0.15);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #39F58A;
+  background: #39FF14;
 }
 
-/* Subtle glow animations */
+/* Animations */
 @keyframes pulse-live {
   0%, 100% {
     opacity: 1;
     transform: scale(1);
+    box-shadow: 0 0 8px #39FF14;
   }
   50% {
-    opacity: 0.4;
-    transform: scale(1.15);
+    opacity: 0.35;
+    transform: scale(1.2);
+    box-shadow: 0 0 16px #39FF14;
   }
 }
 
 .animate-pulse-live {
   animation: pulse-live 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes flow-drift {
+  0% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(1deg); }
+  100% { transform: translateY(0px) rotate(0deg); }
+}
+
+.animate-flow-drift {
+  animation: flow-drift 12s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-live,
+  .animate-flow-drift {
+    animation: none !important;
+  }
 }

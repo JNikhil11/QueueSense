@@ -60,3 +60,4 @@ export interface ReportSubmissionPayload {
   queueLength: number;
   note?: string;
 }
+

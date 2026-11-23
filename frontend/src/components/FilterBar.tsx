@@ -21,65 +21,69 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   totalCount,
 }) => {
   const categories = [
-    { id: 'ALL', label: 'All Outlets' },
-    { id: 'MESS', label: 'Messes (Dining Halls)' },
-    { id: 'CANTEEN', label: 'Canteens & Bistros' },
+    { id: 'ALL', label: 'All Campus Outlets' },
+    { id: 'MESS', label: 'Dining Halls (Messes)' },
+    { id: 'CANTEEN', label: 'Canteens & Food Courts' },
   ];
 
   return (
     <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 py-4">
-      {/* Category Pills */}
-      <div className="flex items-center gap-1.5 p-1 bg-surface-card rounded-xl border border-surface-border overflow-x-auto">
-        {categories.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => onSelectCategory(c.id)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-all duration-150 ${
-              selectedCategory === c.id
-                ? 'bg-neon-green/20 text-neon-green border border-neon-green/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-surface-elevated'
-            }`}
-          >
-            {c.label}
-          </button>
-        ))}
+      {/* Category Glass Capsule Tabs */}
+      <div className="flex items-center gap-1.5 p-1 rounded-2xl glass-panel border-white/10 overflow-x-auto scrollbar-none">
+        {categories.map((c) => {
+          const isActive = selectedCategory === c.id;
+          return (
+            <button
+              key={c.id}
+              onClick={() => onSelectCategory(c.id)}
+              className={`px-4 py-2 text-xs font-mono font-medium rounded-xl whitespace-nowrap transition-all duration-200 ${
+                isActive
+                  ? 'bg-[#39FF14] text-[#070A08] font-bold shadow-[0_0_15px_rgba(57,255,20,0.4)]'
+                  : 'text-[#8E9E93] hover:text-[#F4F7F5] hover:bg-white/[0.04]'
+              }`}
+            >
+              {c.label}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Search and Sort */}
+      {/* Search and Sort Island */}
       <div className="flex items-center gap-3">
-        <span className="text-xs text-slate-500 font-mono hidden lg:inline">
-          {totalCount} {totalCount === 1 ? 'outlet' : 'outlets'}
+        <span className="text-xs text-[#5A695F] font-mono hidden lg:inline tracking-tight">
+          {totalCount} {totalCount === 1 ? 'outlet indexed' : 'outlets indexed'}
         </span>
-        {/* Search */}
+
+        {/* Smoked-Glass Search Input */}
         <div className="relative flex-1 sm:w-64">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-[#8E9E93] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search campus outlets..."
-            className="w-full pl-9 pr-3 py-1.5 text-xs sm:text-sm bg-surface-card border border-surface-border rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue transition-colors"
+            placeholder="Search dining halls & cafes..."
+            className="w-full pl-10 pr-3.5 py-2 text-xs sm:text-sm rounded-xl glass-panel text-[#F4F7F5] placeholder-[#5A695F] focus:outline-none focus:border-[#7DF9FF]/60 focus:shadow-[0_0_15px_rgba(125,249,255,0.2)] transition-all"
           />
         </div>
 
-        {/* Sort */}
-        <div className="relative shrink-0 flex items-center gap-1.5 bg-surface-card border border-surface-border rounded-xl px-2.5 py-1.5">
-          <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
+        {/* Sort Dropdown */}
+        <div className="relative shrink-0 flex items-center gap-2 rounded-xl glass-panel px-3 py-2 border-white/10">
+          <SlidersHorizontal className="w-3.5 h-3.5 text-[#7DF9FF]" />
           <select
             value={sortBy}
             onChange={(e) => onSortChange(e.target.value)}
-            className="bg-transparent text-xs text-slate-300 font-medium focus:outline-none cursor-pointer"
+            className="bg-transparent text-xs font-mono text-[#F4F7F5] focus:outline-none cursor-pointer pr-1"
           >
-            <option value="wait-asc" className="bg-surface-card text-slate-200">
+            <option value="wait-asc" className="bg-[#0D140F] text-[#F4F7F5]">
               Shortest Wait
             </option>
-            <option value="freshness" className="bg-surface-card text-slate-200">
+            <option value="freshness" className="bg-[#0D140F] text-[#F4F7F5]">
               Most Recent
             </option>
-            <option value="name-asc" className="bg-surface-card text-slate-200">
+            <option value="name-asc" className="bg-[#0D140F] text-[#F4F7F5]">
               Name (A-Z)
             </option>
-            <option value="reports-desc" className="bg-surface-card text-slate-200">
+            <option value="reports-desc" className="bg-[#0D140F] text-[#F4F7F5]">
               Most Reports
             </option>
           </select>

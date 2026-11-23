@@ -9,6 +9,7 @@ import { OutletCard } from './components/OutletCard';
 import { ReportModal } from './components/ReportModal';
 import { OutletDetailModal } from './components/OutletDetailModal';
 import { AdminAuditModal } from './components/AdminAuditModal';
+import { BrandLogo } from './components/BrandLogo';
 import { Utensils, AlertCircle, RefreshCw, CheckCircle2 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -128,16 +129,19 @@ export const App: React.FC = () => {
   const handleReportSubmit = async (locationId: string, payload: ReportSubmissionPayload) => {
     await api.submitReport(locationId, payload);
     showToast(`Recorded report: ~${payload.reportedWaitMinutes}m wait at outlet.`);
-    // Refresh to update estimates and recommendation
     await loadData(true);
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-surface-base text-slate-100">
+    <div className="min-h-screen flex flex-col bg-[#070A08] text-[#F4F7F5] relative selection:bg-[#39FF14] selection:text-[#070A08]">
+      {/* Global Ambient Glow Nodes */}
+      <div className="fixed top-0 left-1/4 w-[600px] h-[300px] bg-[#39FF14]/[0.06] rounded-full blur-[140px] pointer-events-none" />
+      <div className="fixed top-1/3 right-10 w-[500px] h-[350px] bg-[#7DF9FF]/[0.04] rounded-full blur-[160px] pointer-events-none" />
+
       {/* Toast Notification */}
       {toastMsg && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-surface-card border border-neon-green/40 shadow-glow-green text-xs font-medium text-white animate-bounce-subtle">
-          <CheckCircle2 className="w-4 h-4 text-neon-green" />
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl glass-panel-elevated border-[#39FF14]/40 shadow-[0_10px_35px_-5px_rgba(0,0,0,0.8),0_0_25px_rgba(57,255,20,0.3)] text-xs font-mono font-medium text-white animate-bounce-subtle">
+          <CheckCircle2 className="w-4 h-4 text-[#39FF14]" />
           <span>{toastMsg}</span>
         </div>
       )}
@@ -152,14 +156,14 @@ export const App: React.FC = () => {
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pb-16">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pb-20">
         {/* Hero Section */}
         <Hero locations={locations} />
 
         {/* Global Error Notice if any */}
         {errorMsg && (
-          <div className="my-4 p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
+          <div className="my-4 p-4 rounded-2xl bg-[#CC162D]/15 border border-[#CC162D]/40 text-[#FF4A60] text-xs flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 shrink-0 text-[#FF4A60]" />
             <span>{errorMsg}</span>
           </div>
         )}
@@ -184,22 +188,22 @@ export const App: React.FC = () => {
 
         {/* Outlets Grid */}
         {loading ? (
-          <div className="py-20 flex flex-col items-center justify-center text-slate-400 gap-3">
-            <RefreshCw className="w-8 h-8 animate-spin text-neon-green" />
-            <span className="text-sm font-mono tracking-wider">
-              Syncing Campus Food Queue Estimates...
+          <div className="py-24 flex flex-col items-center justify-center text-[#8E9E93] gap-3">
+            <RefreshCw className="w-8 h-8 animate-spin text-[#39FF14]" />
+            <span className="text-xs font-mono tracking-widest uppercase">
+              Synchronizing Campus Queue Intelligence...
             </span>
           </div>
         ) : filteredLocations.length === 0 ? (
-          <div className="py-20 text-center rounded-2xl bg-surface-card/40 border border-dashed border-surface-border">
-            <Utensils className="w-10 h-10 text-slate-500 mx-auto mb-2" />
-            <h3 className="text-base font-semibold text-white">No food outlets found</h3>
-            <p className="text-xs text-slate-400 mt-1">
-              Try adjusting your search query or category filters.
+          <div className="py-24 text-center rounded-3xl glass-panel border-dashed border-white/10">
+            <Utensils className="w-10 h-10 text-[#5A695F] mx-auto mb-3" />
+            <h3 className="text-base font-display font-bold text-white">No dining outlets match your query</h3>
+            <p className="text-xs text-[#8E9E93] mt-1 font-mono">
+              Try adjusting your category filter or search keywords.
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mt-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-4">
             {filteredLocations.map((loc) => (
               <OutletCard
                 key={loc.id}
@@ -213,20 +217,18 @@ export const App: React.FC = () => {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-surface-border/60 bg-surface-card/40 py-8 text-xs text-slate-400">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <span className="font-display font-bold text-white tracking-tight">
-              Queue<span className="text-neon-green">Sense</span>
-            </span>
-            <span>—</span>
-            <span>Know the queue before you join it.</span>
+      <footer className="border-t border-white/[0.08] bg-[#050806]/80 backdrop-blur-xl py-10 text-xs text-[#8E9E93]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-3">
+            <BrandLogo size="sm" showWordmark={true} />
+            <span className="text-[#5A695F]">•</span>
+            <span className="font-mono text-[11px] text-[#8E9E93]">Know the queue before you join it.</span>
           </div>
 
-          <div className="flex items-center gap-4 text-[11px] font-mono">
+          <div className="flex items-center gap-4 text-[11px] font-mono text-[#5A695F]">
             <span>Techfest, IIT Bombay × AWS ShipIt Challenge</span>
             <span>•</span>
-            <span>Built by J Nikhil</span>
+            <span className="text-[#8E9E93]">Built by J Nikhil</span>
           </div>
         </div>
       </footer>

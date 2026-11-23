@@ -63,3 +63,4 @@ def lambda_handler(event, context):
             data=None,
             error=f"Error accessing admin audit feed: {str(e)}",
         )
+

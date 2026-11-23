@@ -51,3 +51,4 @@ Every incoming submission is validated before persistence:
 - DynamoDB configured in `PAY_PER_REQUEST` on-demand billing mode to prevent provisioned capacity burn.
 - Point-In-Time-Recovery (PITR) and NAT Gateways omitted to eliminate hourly baseline charges.
 - DynamoDB TTL enabled on raw observations to prevent unbounded data accumulation.
+

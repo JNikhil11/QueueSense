@@ -82,3 +82,4 @@ The recommendation system follows an explicit safety protocol:
 4. **Ranking:** Sort remaining candidates by lowest $\hat{Q}$, breaking ties by highest confidence $C$.
 5. **Honest Fallback:** If zero outlets qualify, the engine returns `isEligible: false` with the user-facing explanation:
    > *"Not enough recent queue reports across campus to make a reliable recommendation yet."*
+

@@ -46,3 +46,4 @@ def test_database_estimate_caching():
     assert retrieved is not None
     assert retrieved["predictedWaitMinutes"] == 8.0
     assert retrieved["congestion"] == "MODERATE"
+

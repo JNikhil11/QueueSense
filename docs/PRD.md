@@ -68,3 +68,4 @@ The release covers 5 core dining locations at VIT-AP University:
 - Queue length: integer [0, 300] people.
 - Note: string [0, 140] chars, stripped of control characters and HTML tags.
 - Report ID and timestamp: generated exclusively server-side.
+

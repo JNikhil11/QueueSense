@@ -29,3 +29,4 @@
 
 - **Q: Why AWS Serverless?**  
   *A:* "Campus food queues have extreme burst patterns—zero traffic during lecture hours, and massive spikes at 12:30 PM. Serverless Lambda and DynamoDB on-demand billing scale up instantaneously during rush hours and cost zero dollars when students are in class."
+

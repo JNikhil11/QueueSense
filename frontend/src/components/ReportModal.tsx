@@ -45,9 +45,8 @@ export const ReportModal: React.FC<ReportModalProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    // Validation
     if (!selectedLocationId) {
-      setErrorMsg('Please select a campus outlet.');
+      setErrorMsg('Please select a campus dining outlet.');
       return;
     }
     if (waitMinutes < 0 || waitMinutes > 120) {
@@ -67,7 +66,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
         note: note.trim() || undefined,
       });
 
-      setSuccessMsg('Thank you! Observation recorded and queue estimate updated.');
+      setSuccessMsg('Thank you! Observation verified and queue estimate updated.');
       setTimeout(() => {
         setSuccessMsg(null);
         onClose();
@@ -82,60 +81,63 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   const selectedLoc = locations.find((l) => l.id === selectedLocationId);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-lg rounded-2xl bg-surface-card border border-surface-border shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in">
+      <div className="w-full max-w-lg rounded-3xl glass-panel-elevated shadow-2xl overflow-hidden glass-specular-edge border-[#39FF14]/25">
         {/* Header */}
-        <div className="p-5 border-b border-surface-border flex items-center justify-between">
+        <div className="p-6 border-b border-white/[0.08] flex items-center justify-between">
           <div>
-            <h3 className="font-display text-lg font-bold text-white">
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#39FF14]/10 text-[#39FF14] border border-[#39FF14]/30 text-[10px] font-mono uppercase tracking-wider mb-1">
+              <span>Peer Observation Stream</span>
+            </div>
+            <h3 className="font-display text-xl font-extrabold text-white tracking-tight">
               Report Current Queue
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Help campus peers know the wait before walking over.
+            <p className="text-xs text-[#8E9E93] mt-0.5">
+              Empower campus peers with live queue intelligence.
             </p>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-surface-elevated transition-colors"
+            className="p-2 rounded-xl text-[#8E9E93] hover:text-white hover:bg-white/[0.06] transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-5">
+        <form onSubmit={handleSubmit} className="p-6 space-y-6">
           {errorMsg && (
-            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
+            <div className="p-3.5 rounded-2xl bg-[#CC162D]/15 border border-[#CC162D]/40 text-[#FF4A60] text-xs flex items-center gap-2.5">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-[#FF4A60]" />
               <span>{errorMsg}</span>
             </div>
           )}
 
           {successMsg && (
-            <div className="p-3 rounded-xl bg-neon-green/10 border border-neon-green/30 text-neon-green text-xs flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <div className="p-3.5 rounded-2xl bg-[#39FF14]/15 border border-[#39FF14]/40 text-[#39FF14] text-xs flex items-center gap-2.5 shadow-[0_0_15px_rgba(57,255,20,0.25)]">
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-[#39FF14]" />
               <span>{successMsg}</span>
             </div>
           )}
 
           {/* Location Selector */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+            <label className="block text-xs font-mono font-semibold uppercase tracking-wider text-[#8E9E93] mb-2">
               Campus Outlet
             </label>
             <select
               value={selectedLocationId}
               onChange={(e) => setSelectedLocationId(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl bg-surface-elevated border border-surface-border text-sm text-white focus:outline-none focus:border-neon-green transition-colors"
+              className="w-full px-4 py-3 rounded-2xl bg-[#090E0B] border border-white/[0.1] text-sm text-white focus:outline-none focus:border-[#39FF14]/60 transition-colors cursor-pointer"
             >
               {locations.map((loc) => (
-                <option key={loc.id} value={loc.id} className="bg-surface-card text-white">
+                <option key={loc.id} value={loc.id} className="bg-[#090E0B] text-white">
                   {loc.name} ({loc.category})
                 </option>
               ))}
             </select>
             {selectedLoc && (
-              <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono mt-1">
+              <div className="flex items-center gap-3 text-[11px] text-[#5A695F] font-mono mt-1.5 px-1">
                 <span>{selectedLoc.openHours}</span>
                 <span>•</span>
                 <span>{selectedLoc.capacity} seating capacity</span>
@@ -145,35 +147,37 @@ export const ReportModal: React.FC<ReportModalProps> = ({
 
           {/* Observed Wait Time */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-neon-green" />
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-mono font-semibold uppercase tracking-wider text-[#8E9E93] flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-[#39FF14]" />
                 <span>Observed Wait Time</span>
               </label>
-              <span className="font-mono text-sm font-bold text-neon-green">
+              <span className="font-mono text-base font-extrabold text-[#39FF14]">
                 {waitMinutes} min
               </span>
             </div>
 
-            {/* Quick Presets */}
-            <div className="grid grid-cols-6 gap-1.5 mb-2">
-              {quickWaits.map((val) => (
-                <button
-                  type="button"
-                  key={val}
-                  onClick={() => setWaitMinutes(val)}
-                  className={`py-1.5 text-xs font-mono font-medium rounded-lg border transition-all ${
-                    waitMinutes === val
-                      ? 'bg-neon-green text-slate-950 border-neon-green font-bold shadow-sm'
-                      : 'bg-surface-elevated text-slate-300 border-surface-border hover:bg-surface-subtle'
-                  }`}
-                >
-                  {val}m
-                </button>
-              ))}
+            {/* Segmented Quick Presets */}
+            <div className="grid grid-cols-6 gap-1.5 mb-3">
+              {quickWaits.map((val) => {
+                const isSelected = waitMinutes === val;
+                return (
+                  <button
+                    type="button"
+                    key={val}
+                    onClick={() => setWaitMinutes(val)}
+                    className={`py-2 text-xs font-mono rounded-xl border transition-all ${
+                      isSelected
+                        ? 'bg-[#39FF14] text-[#070A08] border-[#39FF14] font-bold shadow-[0_0_15px_rgba(57,255,20,0.4)]'
+                        : 'bg-[#090E0B]/80 text-[#8E9E93] border-white/[0.08] hover:border-white/20 hover:text-white'
+                    }`}
+                  >
+                    {val}m
+                  </button>
+                );
+              })}
             </div>
 
-            {/* Range Slider for granular control */}
             <input
               type="range"
               min="0"
@@ -181,38 +185,41 @@ export const ReportModal: React.FC<ReportModalProps> = ({
               step="1"
               value={waitMinutes}
               onChange={(e) => setWaitMinutes(Number(e.target.value))}
-              className="w-full accent-neon-green cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+              className="w-full accent-[#39FF14] cursor-pointer h-1.5 bg-[#17221A] rounded-lg"
             />
           </div>
 
-          {/* Queue Length */}
+          {/* Queue Length Ahead */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5 text-neon-blue" />
-                <span>Approximate People Ahead</span>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-mono font-semibold uppercase tracking-wider text-[#8E9E93] flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-[#7DF9FF]" />
+                <span>People in Line Ahead</span>
               </label>
-              <span className="font-mono text-sm font-bold text-neon-blue">
+              <span className="font-mono text-base font-bold text-[#7DF9FF]">
                 {queueLength} {queueLength === 1 ? 'person' : 'people'}
               </span>
             </div>
 
-            {/* Quick Presets */}
-            <div className="grid grid-cols-6 gap-1.5 mb-2">
-              {quickQueues.map((val) => (
-                <button
-                  type="button"
-                  key={val}
-                  onClick={() => setQueueLength(val)}
-                  className={`py-1.5 text-xs font-mono font-medium rounded-lg border transition-all ${
-                    queueLength === val
-                      ? 'bg-neon-blue text-slate-950 border-neon-blue font-bold shadow-sm'
-                      : 'bg-surface-elevated text-slate-300 border-surface-border hover:bg-surface-subtle'
-                  }`}
-                >
-                  {val}
-                </button>
-              ))}
+            {/* Segmented Quick Presets */}
+            <div className="grid grid-cols-6 gap-1.5 mb-3">
+              {quickQueues.map((val) => {
+                const isSelected = queueLength === val;
+                return (
+                  <button
+                    type="button"
+                    key={val}
+                    onClick={() => setQueueLength(val)}
+                    className={`py-2 text-xs font-mono rounded-xl border transition-all ${
+                      isSelected
+                        ? 'bg-[#7DF9FF] text-[#070A08] border-[#7DF9FF] font-bold shadow-[0_0_15px_rgba(125,249,255,0.4)]'
+                        : 'bg-[#090E0B]/80 text-[#8E9E93] border-white/[0.08] hover:border-white/20 hover:text-white'
+                    }`}
+                  >
+                    {val}
+                  </button>
+                );
+              })}
             </div>
 
             <input
@@ -222,17 +229,17 @@ export const ReportModal: React.FC<ReportModalProps> = ({
               step="1"
               value={queueLength}
               onChange={(e) => setQueueLength(Number(e.target.value))}
-              className="w-full accent-neon-blue cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+              className="w-full accent-[#7DF9FF] cursor-pointer h-1.5 bg-[#17221A] rounded-lg"
             />
           </div>
 
-          {/* Optional Note */}
+          {/* Optional Short Note */}
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                Optional Note
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-mono font-semibold uppercase tracking-wider text-[#8E9E93]">
+                Operational Note (Optional)
               </label>
-              <span className="text-[10px] font-mono text-slate-500">
+              <span className="text-[10px] font-mono text-[#5A695F]">
                 {note.length}/140
               </span>
             </div>
@@ -241,25 +248,25 @@ export const ReportModal: React.FC<ReportModalProps> = ({
               maxLength={140}
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g. Counter 2 is fast, veg meal line moving quick"
-              className="w-full px-3 py-2 rounded-xl bg-surface-elevated border border-surface-border text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-neon-green transition-colors"
+              placeholder="e.g. Counter 2 moving briskly, main line surging"
+              className="w-full px-4 py-2.5 rounded-2xl bg-[#090E0B] border border-white/[0.08] text-xs sm:text-sm text-[#F4F7F5] placeholder-[#5A695F] focus:outline-none focus:border-[#39FF14]/60 transition-colors"
             />
           </div>
 
-          {/* Submit Action */}
-          <div className="pt-2 flex items-center justify-end gap-3">
+          {/* Actions */}
+          <div className="pt-2 flex items-center justify-end gap-3 border-t border-white/[0.06]">
             <button
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-4 py-2 text-xs font-medium rounded-xl border border-surface-border text-slate-300 hover:text-white hover:bg-surface-elevated transition-colors"
+              className="px-5 py-2.5 text-xs font-mono uppercase tracking-wider rounded-xl btn-glass"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex items-center gap-2 px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl bg-neon-green hover:bg-[#2fe07c] text-slate-950 shadow-glow-green transition-all disabled:opacity-50"
+              className="flex items-center gap-2 px-6 py-2.5 text-xs sm:text-sm btn-electric disabled:opacity-50"
             >
               <Send className="w-4 h-4" />
               <span>{isSubmitting ? 'Recording...' : 'Submit Observation'}</span>

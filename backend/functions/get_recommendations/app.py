@@ -55,3 +55,4 @@ def lambda_handler(event, context):
             data=None,
             error=f"Error computing recommendations: {str(e)}",
         )
+

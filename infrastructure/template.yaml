@@ -192,3 +192,4 @@ Outputs:
   AwsRegion:
     Description: AWS Target Region
     Value: !Ref "AWS::Region"
+

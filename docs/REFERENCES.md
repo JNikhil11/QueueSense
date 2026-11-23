@@ -48,3 +48,4 @@
 - **Linear & Raycast:** Restrained technical palettes, monospace metrics, micro-interaction feedback.
 - **FlightAware & Citymapper:** Real-time freshness indicators (`LIVE` vs `RECENT`), explicit data staleness disclaimers.
 - **Google Maps Popular Times:** Transparent congestion bands (`LOW`, `MODERATE`, `HIGH`, `VERY HIGH`) without false precision.
+

@@ -65,3 +65,4 @@ QueueSense rejects generic, low-contrast AI SaaS dashboard tropes (such as rando
 - **Small Mobile (360px – 480px):** Single-column vertical stream, sticky header, full-width touch-friendly report sliders.
 - **Tablet (768px – 1024px):** Two-column card grid, expanded recommendation card with side-by-side evidence metrics.
 - **Desktop (1024px – 1440px):** Three-column card grid, comprehensive hero metrics ribbon, modal audit trays.
+

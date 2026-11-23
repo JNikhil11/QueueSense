@@ -86,3 +86,4 @@ def validate_report_payload(body: Dict[str, Any]) -> Tuple[bool, Dict[str, Any],
     sanitized["note"] = sanitize_note(raw_note)
 
     return (len(errors) == 0, sanitized, errors)
+

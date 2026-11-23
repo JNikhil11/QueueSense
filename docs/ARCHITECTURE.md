@@ -82,3 +82,4 @@ QueueSense employs a cloud-native, serverless architecture that minimizes cloud 
 ### 2.5 Observability: Amazon CloudWatch
 - Centralized log streams per Lambda function.
 - Structured JSON log entries without exposing student identifiers or authorization credentials.
+

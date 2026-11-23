@@ -87,3 +87,4 @@ def test_admin_reports_handler():
     body = json.loads(res["body"])
     assert body["success"] is True
     assert "reports" in body["data"]
+

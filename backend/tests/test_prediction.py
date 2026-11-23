@@ -215,3 +215,4 @@ def test_smart_recommendation_when_all_stale():
     assert rec["isEligible"] is False
     assert rec["recommendedLocationId"] is None
     assert "Not enough recent queue reports" in rec["reason"]
+

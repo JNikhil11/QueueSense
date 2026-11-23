@@ -371,3 +371,4 @@ def compute_smart_recommendation(
         "candidateCount": len(locations_with_estimates),
         "eligibleCount": len(eligible),
     }
+

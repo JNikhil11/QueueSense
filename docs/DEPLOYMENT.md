@@ -90,3 +90,4 @@ cd frontend
 npm run dev
 ```
 Open `http://localhost:3000` in your browser. The UI indicates `OFFLINE SIMULATION • DEMO FIXTURES` with full report-submission and real-time calculation functionality.
+

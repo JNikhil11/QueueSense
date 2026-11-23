@@ -55,3 +55,4 @@ describe('Client-Side Queue Estimation Logic', () => {
     expect(est.freshness).toBe('NO RECENT DATA');
   });
 });
+

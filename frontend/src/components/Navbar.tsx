@@ -1,5 +1,6 @@
 import React from 'react';
-import { RefreshCw, PlusCircle, ShieldAlert, Wifi, Database } from 'lucide-react';
+import { RefreshCw, Plus, ShieldCheck, Wifi, Database } from 'lucide-react';
+import { BrandLogo } from './BrandLogo';
 
 interface NavbarProps {
   isLiveApi: boolean;
@@ -17,52 +18,33 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAdminModal,
 }) => {
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-surface-border/80 bg-surface-base/90 backdrop-blur-md">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <header className="sticky top-0 z-40 w-full pt-3 px-4 sm:px-6 lg:px-8">
+      {/* Floating Liquid-Glass Island Control Surface */}
+      <div className="max-w-7xl mx-auto h-16 rounded-2xl glass-panel-elevated px-4 sm:px-6 flex items-center justify-between transition-all duration-300">
+        {/* Specular Top Reflection Ridge */}
+        <div className="absolute inset-x-6 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/35 to-transparent pointer-events-none" />
+
         {/* Brand Lockup */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-neon-green/20 via-neon-blue/10 to-surface-card border border-neon-green/40 flex items-center justify-center shadow-glow-green/30">
-            <svg
-              className="w-5 h-5 text-neon-green"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-display font-bold text-xl tracking-tight text-white">
-                Queue<span className="text-neon-green">Sense</span>
-              </span>
-              <span className="hidden sm:inline-block text-[10px] uppercase font-mono tracking-wider px-2 py-0.5 rounded bg-surface-elevated border border-surface-border text-slate-300">
-                v1.0 • AWS
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 hidden sm:block">Campus Queue Intelligence</p>
-          </div>
+          <BrandLogo size="md" showWordmark={true} />
+          <span className="hidden xl:inline-block text-[10px] uppercase font-mono tracking-wider px-2 py-0.5 rounded-full bg-white/[0.05] border border-white/10 text-[#8E9E93]">
+            v2.0 • AWS Sydney
+          </span>
         </div>
 
-        {/* Center / Cloud Status Pill */}
-        <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-surface-card border border-surface-border text-xs">
+        {/* Environment State Indicator (Pill Island) */}
+        <div className="hidden md:flex items-center gap-2 px-3.5 py-1.5 rounded-full glass-pill text-xs border border-white/10">
           {isLiveApi ? (
             <>
-              <Wifi className="w-3.5 h-3.5 text-neon-green" />
-              <span className="text-slate-300 font-medium">AWS API Gateway</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-neon-green animate-pulse-live" />
+              <Wifi className="w-3.5 h-3.5 text-[#39FF14]" />
+              <span className="text-[#F4F7F5] font-medium tracking-tight">AWS API Gateway</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-[#39FF14] animate-pulse-live ml-1" />
             </>
           ) : (
             <>
-              <Database className="w-3.5 h-3.5 text-amber-400" />
-              <span className="text-slate-300 font-medium">Offline Simulation</span>
-              <span className="text-[10px] text-amber-400 uppercase font-mono tracking-wide px-1.5 py-0.2 bg-amber-950/60 rounded border border-amber-500/30">
+              <Database className="w-3.5 h-3.5 text-[#FFA028]" />
+              <span className="text-[#F4F7F5] font-medium tracking-tight">Offline Simulation</span>
+              <span className="text-[10px] text-[#FFA028] uppercase font-mono tracking-wider font-semibold px-2 py-0.5 bg-[#FFA028]/15 rounded-full border border-[#FFA028]/35 ml-1">
                 Demo Fixtures
               </span>
             </>
@@ -71,30 +53,35 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Refresh Action */}
           <button
             onClick={onRefresh}
             disabled={isRefreshing}
-            title="Refresh queue observations"
-            className="p-2 rounded-lg bg-surface-card hover:bg-surface-elevated border border-surface-border text-slate-300 hover:text-white transition-all duration-150 disabled:opacity-50"
+            title="Refresh queue estimates"
+            className="p-2.5 rounded-xl btn-glass flex items-center justify-center disabled:opacity-50 transition-transform active:scale-95"
             aria-label="Refresh data"
           >
-            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-neon-blue' : ''}`} />
+            <RefreshCw
+              className={`w-4 h-4 text-[#7DF9FF] ${isRefreshing ? 'animate-spin' : ''}`}
+            />
           </button>
 
+          {/* Audit Feed Modal Trigger */}
           <button
             onClick={onOpenAdminModal}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg bg-surface-card hover:bg-surface-elevated border border-surface-border text-slate-300 hover:text-white transition-colors"
+            className="hidden sm:flex items-center gap-2 px-3.5 py-2 text-xs font-mono uppercase tracking-wider rounded-xl btn-glass hover:border-[#7DF9FF]/40 transition-colors"
           >
-            <ShieldAlert className="w-3.5 h-3.5 text-neon-blue" />
-            <span>Audit Feed</span>
+            <ShieldCheck className="w-3.5 h-3.5 text-[#7DF9FF]" />
+            <span className="text-[#F4F7F5]">Audit Stream</span>
           </button>
 
+          {/* Primary Report CTA */}
           <button
             onClick={onOpenReportModal}
-            className="flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg bg-neon-green hover:bg-[#2fe07c] text-slate-950 shadow-glow-green transition-all duration-150 hover:shadow-lg active:scale-95"
+            className="flex items-center gap-2 px-4 sm:px-5 py-2.5 text-xs sm:text-sm btn-electric"
           >
-            <PlusCircle className="w-4 h-4" />
-            <span>Report Queue</span>
+            <Plus className="w-4 h-4 stroke-[2.5]" />
+            <span className="font-semibold tracking-tight">Report Queue</span>
           </button>
         </div>
       </div>
