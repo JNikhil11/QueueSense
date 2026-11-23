@@ -31,9 +31,10 @@ def test_get_locations_handler():
 
 
 def test_submit_report_and_get_queue():
-    # Submit report
+    # Submit report to authentic IIT Bombay outlet
+    target_id = "iitb-mess-h12-14"
     event = {
-        "pathParameters": {"id": "mess-a-central"},
+        "pathParameters": {"id": target_id},
         "body": json.dumps({
             "reportedWaitMinutes": 7.5,
             "queueLength": 12,
@@ -48,13 +49,13 @@ def test_submit_report_and_get_queue():
 
     # Check queue endpoint
     q_event = {
-        "pathParameters": {"id": "mess-a-central"},
+        "pathParameters": {"id": target_id},
     }
     res_q = queue_handler(q_event, None)
     assert res_q["statusCode"] == 200
     body_q = json.loads(res_q["body"])
     assert body_q["success"] is True
-    assert body_q["data"]["location"]["id"] == "mess-a-central"
+    assert body_q["data"]["location"]["id"] == target_id
     assert len(body_q["data"]["reports"]) >= 1
 
 

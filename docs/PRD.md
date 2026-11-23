@@ -11,7 +11,7 @@
 ## 1. Executive Summary & Problem Statement
 
 ### 1.1 The Campus Problem
-At university campuses (such as VIT-AP University), thousands of students congregate around dining halls (messes) and food courts (canteens) during short meal intervals (12:00 PM – 2:00 PM and 7:00 PM – 9:00 PM). Students walk across campus without knowing whether an outlet has a 2-minute line or a 25-minute bottleneck. This leads to wasted time, overcrowding, dining hall congestion, and mealtime frustration.
+At university campuses (such as IIT Bombay), thousands of students congregate around dining halls (messes) and food courts (canteens) during short meal intervals (12:00 PM – 2:00 PM and 7:00 PM – 9:30 PM). Students walk across campus without knowing whether an outlet has a 2-minute line or a 25-minute bottleneck. This leads to wasted time, overcrowding, dining hall congestion, and mealtime frustration.
 
 ### 1.2 The Solution
 **QueueSense** is a lightweight, mobile-first campus food-queue intelligence system powered by AWS serverless technologies. It collects crowdsourced queue observations from students, applies mathematical time-decay weighting and outlier rejection, provides transparent confidence scores, and computes real-time recommendations to redirect foot traffic to less crowded outlets.
@@ -50,12 +50,17 @@ At university campuses (such as VIT-AP University), thousands of students congre
 ## 4. Feature Specifications
 
 ### 4.1 Campus Food Outlets
-The release covers 5 core dining locations at VIT-AP University:
-1. `Central Mess A (North Dining)`: 450 capacity multi-counter dining hall.
-2. `South Mess B (Annex Dining)`: 350 capacity dining hall with dedicated veg counters.
-3. `Rock Plaza Food Court`: 180 capacity open-air plaza.
-4. `CB Academic Bistro`: 120 capacity fast-counter canteen.
-5. `Midnight Fuel Canteen`: 150 capacity evening cafeteria.
+The release covers 10 verified dining locations at IIT Bombay:
+1. `Hostel 12-13-14 Dining Complex`: 650 capacity central multi-tiered dining hall.
+2. `Hostel 15-16 Dining Hall`: 550 capacity modern student mess.
+3. `Hostel 2 Dining Hall & Mess`: 350 capacity heritage mess with regional counters.
+4. `Hostel 3 Canteen & Juice Centre`: 120 capacity late-night juice & snacks hub.
+5. `LHC Food Court (Lecture Hall Complex)`: 220 capacity high-speed cafeteria.
+6. `Gulmohar Restaurant & Cafe`: 180 capacity multi-cuisine sit-down restaurant.
+7. `KReSIT IT Canteen (CSE Dept)`: 90 capacity computer science cafe.
+8. `Cafe 92 (SAC Hangout)`: 140 capacity students activity centre hub.
+9. `Brewberrys The Coffee Bar`: 80 capacity library-adjacent study coffee bar.
+10. `Amul Ice Cream & Dairy Parlour`: 40 capacity campus dairy outlet.
 
 ### 4.2 Recommendation Algorithm
 - Evaluates active outlets.

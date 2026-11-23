@@ -12,6 +12,7 @@ export default {
           green: '#39FF14', // Electric Neon Green (Primary)
           cyan: '#7DF9FF',  // Electric Cyan (Secondary Accent)
           red: '#CC162D',   // Signal Red (Accents & High Congestion)
+          blue: '#0096FF',  // Electric Blue (Primary Ambient Illumination)
         },
         surface: {
           base: '#070A08',     // Deep charcoal with slight green undertone
@@ -39,6 +40,7 @@ export default {
         'glass-specular': 'inset 0 1px 1px 0 rgba(255, 255, 255, 0.2), 0 12px 35px -8px rgba(0, 0, 0, 0.55)',
         'glow-green': '0 0 30px -5px rgba(57, 255, 20, 0.4)',
         'glow-cyan': '0 0 25px -5px rgba(125, 249, 255, 0.35)',
+        'glow-blue': '0 0 45px -5px rgba(0, 150, 255, 0.38)',
         'glow-red': '0 0 25px -5px rgba(204, 22, 45, 0.35)',
       },
       backgroundImage: {

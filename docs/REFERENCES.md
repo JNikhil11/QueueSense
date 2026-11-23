@@ -10,7 +10,7 @@
 
 - **Event:** Techfest, IIT Bombay × AWS ShipIt Challenge 2026.
 - **Problem Statement:** Solve a tangible, real-world campus operational challenge using AWS serverless cloud infrastructure and Free Tier services.
-- **Campus Target:** VIT-AP University student messes and canteens.
+- **Campus Target:** IIT Bombay student messes and canteens.
 
 ---
 

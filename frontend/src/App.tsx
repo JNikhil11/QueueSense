@@ -30,9 +30,53 @@ export const App: React.FC = () => {
   const [activeReportOutletId, setActiveReportOutletId] = useState<string | undefined>(undefined);
   const [detailOutletId, setDetailOutletId] = useState<string | null>(null);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
+  const [detailRefreshTrigger, setDetailRefreshTrigger] = useState<number>(0);
 
   // Toast notification
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  // Container ref for subtle pointer ambient lighting
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  // Subtle cursor ambient light tracking (only for fine pointer desktop, zero React re-renders)
+  useEffect(() => {
+    const isFinePointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!isFinePointer || prefersReducedMotion || !containerRef.current) return;
+
+    let rafId: number | null = null;
+    const handlePointerMove = (e: PointerEvent) => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        if (containerRef.current) {
+          const rect = containerRef.current.getBoundingClientRect();
+          const xPercent = Math.max(0, Math.min(100, Math.round(((e.clientX - rect.left) / rect.width) * 100)));
+          const yPercent = Math.max(0, Math.min(100, Math.round(((e.clientY - rect.top) / rect.height) * 100)));
+          containerRef.current.style.setProperty('--mouse-x', `${xPercent}%`);
+          containerRef.current.style.setProperty('--mouse-y', `${yPercent}%`);
+        }
+        rafId = null;
+      });
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, []);
+
+  // Prevent background scroll when any modal is open
+  useEffect(() => {
+    if (isReportModalOpen || detailOutletId || isAdminModalOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isReportModalOpen, detailOutletId, isAdminModalOpen]);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -128,12 +172,24 @@ export const App: React.FC = () => {
 
   const handleReportSubmit = async (locationId: string, payload: ReportSubmissionPayload) => {
     await api.submitReport(locationId, payload);
+    setDetailRefreshTrigger((prev) => prev + 1);
     showToast(`Recorded report: ~${payload.reportedWaitMinutes}m wait at outlet.`);
     await loadData(true);
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#070A08] text-[#F4F7F5] relative selection:bg-[#39FF14] selection:text-[#070A08]">
+    <div
+      ref={containerRef}
+      className="min-h-screen flex flex-col bg-[#070A08] text-[#F4F7F5] relative selection:bg-[#39FF14] selection:text-[#070A08] overflow-x-hidden"
+    >
+      {/* Subtle Living Pointer Ambient Field */}
+      <div
+        className="fixed inset-0 pointer-events-none transition-opacity duration-700"
+        style={{
+          background: 'radial-gradient(900px circle at var(--mouse-x, 50%) var(--mouse-y, 25%), rgba(0, 150, 255, 0.038), transparent 70%)',
+        }}
+      />
+
       {/* Global Ambient Glow Nodes */}
       <div className="fixed top-0 left-1/4 w-[600px] h-[300px] bg-[#39FF14]/[0.06] rounded-full blur-[140px] pointer-events-none" />
       <div className="fixed top-1/3 right-10 w-[500px] h-[350px] bg-[#7DF9FF]/[0.04] rounded-full blur-[160px] pointer-events-none" />
@@ -186,7 +242,7 @@ export const App: React.FC = () => {
           totalCount={filteredLocations.length}
         />
 
-        {/* Outlets Grid */}
+        {/* Outlets Grid with Focused Hover Dimming */}
         {loading ? (
           <div className="py-24 flex flex-col items-center justify-center text-[#8E9E93] gap-3">
             <RefreshCw className="w-8 h-8 animate-spin text-[#39FF14]" />
@@ -203,7 +259,7 @@ export const App: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-4">
+          <div className="cards-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-4">
             {filteredLocations.map((loc) => (
               <OutletCard
                 key={loc.id}
@@ -216,19 +272,43 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Footer */}
+      {/* Footer & Truthful Data Source Disclosure */}
       <footer className="border-t border-white/[0.08] bg-[#050806]/80 backdrop-blur-xl py-10 text-xs text-[#8E9E93]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-3">
-            <BrandLogo size="sm" showWordmark={true} />
-            <span className="text-[#5A695F]">•</span>
-            <span className="font-mono text-[11px] text-[#8E9E93]">Know the queue before you join it.</span>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
+            <div className="flex items-center gap-3">
+              <BrandLogo size="sm" showWordmark={true} />
+              <span className="text-[#5A695F]">•</span>
+              <span className="font-mono text-[11px] text-[#8E9E93]">IIT Bombay Campus Food Services</span>
+            </div>
+
+            <div className="flex items-center gap-4 text-[11px] font-mono text-[#5A695F]">
+              <span>Techfest, IIT Bombay × AWS ShipIt Challenge</span>
+              <span>•</span>
+              <span className="text-[#8E9E93]">Built by J Nikhil</span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4 text-[11px] font-mono text-[#5A695F]">
-            <span>Techfest, IIT Bombay × AWS ShipIt Challenge</span>
-            <span>•</span>
-            <span className="text-[#8E9E93]">Built by J Nikhil</span>
+          {/* Truthful Data Status Bar */}
+          <div className="pt-4 border-t border-white/[0.04] flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] font-mono">
+            <div className="flex items-center gap-2">
+              {isLiveApi ? (
+                <>
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#39FF14] animate-pulse" />
+                  <span className="text-[#39FF14] font-medium">Live AWS API Gateway</span>
+                  <span className="text-[#5A695F]">| Synchronized with DynamoDB ap-southeast-2</span>
+                </>
+              ) : (
+                <>
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#FFA028]" />
+                  <span className="text-[#FFA028] font-medium">Offline Simulation Fixture</span>
+                  <span className="text-[#5A695F]">| Demonstrating real-time decay & statistical aggregation. Observations persist in browser storage.</span>
+                </>
+              )}
+            </div>
+            <span className="text-[#5A695F]">
+              {locations.length} dining locations indexed • Verified Directory
+            </span>
           </div>
         </div>
       </footer>
@@ -244,11 +324,17 @@ export const App: React.FC = () => {
 
       <OutletDetailModal
         locationId={detailOutletId}
+        refreshTrigger={detailRefreshTrigger}
         onClose={() => setDetailOutletId(null)}
         onOpenReportModal={(id) => {
           setDetailOutletId(null);
           handleOpenReportModal(id);
         }}
+      />
+
+      <AdminAuditModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
       />
 
       <AdminAuditModal

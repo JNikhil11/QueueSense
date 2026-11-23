@@ -23,6 +23,18 @@ async function capture() {
   await page.screenshot({ path: path.join(screenshotDir, 'desktop_redesign.png'), fullPage: false });
   console.log('Saved desktop_redesign.png');
 
+  // 1b. Card Hover Focus & Dimming Screenshot
+  const cards = await page.$$('.outlet-card');
+  if (cards.length > 1) {
+    await cards[1].hover();
+    await new Promise(r => setTimeout(r, 500));
+    await page.screenshot({ path: path.join(screenshotDir, 'card_hover_dimming.png'), fullPage: false });
+    console.log('Saved card_hover_dimming.png');
+    // Move cursor away
+    await page.mouse.move(0, 0);
+    await new Promise(r => setTimeout(r, 400));
+  }
+
   // 2. Open Detail Modal
   const detailBtns = await page.$$("button[title='View details and history']");
   if (detailBtns.length > 0) {
@@ -49,12 +61,19 @@ async function capture() {
     }
   }
 
-  // 4. Mobile Screenshot
-  await page.setViewport({ width: 390, height: 844, isMobile: true });
+  // 4. Mobile Screenshot (390x844 iPhone 14/15)
+  await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
   await page.goto('http://localhost:4173/', { waitUntil: 'networkidle0' });
   await new Promise(r => setTimeout(r, 800));
   await page.screenshot({ path: path.join(screenshotDir, 'mobile_redesign.png'), fullPage: false });
   console.log('Saved mobile_redesign.png');
+
+  // 5. Narrow Mobile Screenshot (360x740 Android / Small Viewport)
+  await page.setViewport({ width: 360, height: 740, isMobile: true, hasTouch: true });
+  await page.goto('http://localhost:4173/', { waitUntil: 'networkidle0' });
+  await new Promise(r => setTimeout(r, 800));
+  await page.screenshot({ path: path.join(screenshotDir, 'mobile_narrow.png'), fullPage: false });
+  console.log('Saved mobile_narrow.png');
 
   await browser.close();
   console.log('Screenshot capture completed successfully.');

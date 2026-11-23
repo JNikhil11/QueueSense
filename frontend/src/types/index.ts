@@ -26,6 +26,9 @@ export interface CampusLocation {
   name: string;
   category: 'MESS' | 'CANTEEN';
   description: string;
+  landmarkLocation: string;
+  verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY' | 'COMMUNITY_LISTING';
+  verificationSource: string;
   openHours: string;
   capacity: number;
   active: boolean;

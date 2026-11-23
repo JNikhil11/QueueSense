@@ -81,10 +81,10 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   const selectedLoc = locations.find((l) => l.id === selectedLocationId);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in">
-      <div className="w-full max-w-lg rounded-3xl glass-panel-elevated shadow-2xl overflow-hidden glass-specular-edge border-[#39FF14]/25">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in">
+      <div className="w-full max-w-lg max-h-[90vh] rounded-3xl glass-panel-elevated shadow-2xl flex flex-col overflow-hidden glass-specular-edge border-[#39FF14]/25">
         {/* Header */}
-        <div className="p-6 border-b border-white/[0.08] flex items-center justify-between">
+        <div className="p-5 sm:p-6 border-b border-white/[0.08] flex items-center justify-between shrink-0">
           <div>
             <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#39FF14]/10 text-[#39FF14] border border-[#39FF14]/30 text-[10px] font-mono uppercase tracking-wider mb-1">
               <span>Peer Observation Stream</span>
@@ -98,14 +98,15 @@ export const ReportModal: React.FC<ReportModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-[#8E9E93] hover:text-white hover:bg-white/[0.06] transition-colors"
+            className="p-2.5 rounded-xl text-[#8E9E93] hover:text-white hover:bg-white/[0.06] transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+            aria-label="Close dialog"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+        {/* Form Body with internal scrolling */}
+        <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1">
           {errorMsg && (
             <div className="p-3.5 rounded-2xl bg-[#CC162D]/15 border border-[#CC162D]/40 text-[#FF4A60] text-xs flex items-center gap-2.5">
               <AlertTriangle className="w-4 h-4 shrink-0 text-[#FF4A60]" />
@@ -128,7 +129,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             <select
               value={selectedLocationId}
               onChange={(e) => setSelectedLocationId(e.target.value)}
-              className="w-full px-4 py-3 rounded-2xl bg-[#090E0B] border border-white/[0.1] text-sm text-white focus:outline-none focus:border-[#39FF14]/60 transition-colors cursor-pointer"
+              className="w-full px-4 py-3 rounded-2xl bg-[#090E0B] border border-white/[0.1] text-base sm:text-sm text-white focus:outline-none focus:border-[#39FF14]/60 transition-colors cursor-pointer min-h-[44px]"
             >
               {locations.map((loc) => (
                 <option key={loc.id} value={loc.id} className="bg-[#090E0B] text-white">
@@ -166,7 +167,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                     type="button"
                     key={val}
                     onClick={() => setWaitMinutes(val)}
-                    className={`py-2 text-xs font-mono rounded-xl border transition-all ${
+                    className={`py-2 text-xs font-mono rounded-xl border transition-all min-h-[40px] flex items-center justify-center ${
                       isSelected
                         ? 'bg-[#39FF14] text-[#070A08] border-[#39FF14] font-bold shadow-[0_0_15px_rgba(57,255,20,0.4)]'
                         : 'bg-[#090E0B]/80 text-[#8E9E93] border-white/[0.08] hover:border-white/20 hover:text-white'
@@ -185,7 +186,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
               step="1"
               value={waitMinutes}
               onChange={(e) => setWaitMinutes(Number(e.target.value))}
-              className="w-full accent-[#39FF14] cursor-pointer h-1.5 bg-[#17221A] rounded-lg"
+              className="w-full accent-[#39FF14] cursor-pointer h-2 bg-[#17221A] rounded-lg"
             />
           </div>
 
@@ -210,7 +211,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                     type="button"
                     key={val}
                     onClick={() => setQueueLength(val)}
-                    className={`py-2 text-xs font-mono rounded-xl border transition-all ${
+                    className={`py-2 text-xs font-mono rounded-xl border transition-all min-h-[40px] flex items-center justify-center ${
                       isSelected
                         ? 'bg-[#7DF9FF] text-[#070A08] border-[#7DF9FF] font-bold shadow-[0_0_15px_rgba(125,249,255,0.4)]'
                         : 'bg-[#090E0B]/80 text-[#8E9E93] border-white/[0.08] hover:border-white/20 hover:text-white'
@@ -229,7 +230,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
               step="1"
               value={queueLength}
               onChange={(e) => setQueueLength(Number(e.target.value))}
-              className="w-full accent-[#7DF9FF] cursor-pointer h-1.5 bg-[#17221A] rounded-lg"
+              className="w-full accent-[#7DF9FF] cursor-pointer h-2 bg-[#17221A] rounded-lg"
             />
           </div>
 
@@ -249,24 +250,24 @@ export const ReportModal: React.FC<ReportModalProps> = ({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="e.g. Counter 2 moving briskly, main line surging"
-              className="w-full px-4 py-2.5 rounded-2xl bg-[#090E0B] border border-white/[0.08] text-xs sm:text-sm text-[#F4F7F5] placeholder-[#5A695F] focus:outline-none focus:border-[#39FF14]/60 transition-colors"
+              className="w-full px-4 py-3 rounded-2xl bg-[#090E0B] border border-white/[0.08] text-base sm:text-sm text-[#F4F7F5] placeholder-[#5A695F] focus:outline-none focus:border-[#39FF14]/60 transition-colors min-h-[44px]"
             />
           </div>
 
           {/* Actions */}
-          <div className="pt-2 flex items-center justify-end gap-3 border-t border-white/[0.06]">
+          <div className="pt-3 flex items-center justify-end gap-3 border-t border-white/[0.06] shrink-0">
             <button
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-5 py-2.5 text-xs font-mono uppercase tracking-wider rounded-xl btn-glass"
+              className="px-5 py-2.5 text-xs font-mono uppercase tracking-wider rounded-xl btn-glass min-h-[44px]"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex items-center gap-2 px-6 py-2.5 text-xs sm:text-sm btn-electric disabled:opacity-50"
+              className="flex items-center justify-center gap-2 px-6 py-2.5 text-xs sm:text-sm btn-electric disabled:opacity-50 min-h-[44px]"
             >
               <Send className="w-4 h-4" />
               <span>{isSubmitting ? 'Recording...' : 'Submit Observation'}</span>

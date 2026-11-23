@@ -216,3 +216,56 @@ def test_smart_recommendation_when_all_stale():
     assert rec["recommendedLocationId"] is None
     assert "Not enough recent queue reports" in rec["reason"]
 
+
+def test_exact_20m_submission_scenario_regression():
+    """
+    Priority 1 Regression Test:
+    Reproduction scenario:
+    - Outlet had prior observations of 5m (2m ago) and 6m (8m ago).
+    - User submits: 20 min wait, 40 people queue, note: "Heavy rush" at time now.
+    - Verified:
+      1. filter_outliers preserves the 20m report (it is not discarded as an outlier).
+      2. calculate_queue_estimate computes time-decayed aggregate (~11.3m wait, ~20 people queue).
+      3. Congestion status transitions from MODERATE to HIGH.
+      4. Individual observation values (20m, 40 queue) are preserved in reports list.
+    """
+    now = datetime(2026, 11, 23, 12, 30, 0, tzinfo=timezone.utc)
+    reports = [
+        {
+            "reportId": "rep_user_rush_01",
+            "reportedWaitMinutes": 20.0,
+            "queueLength": 40,
+            "note": "Heavy rush",
+            "timestamp": now.isoformat(),  # 0m ago (Just now)
+        },
+        {
+            "reportId": "rep_seed_04",
+            "reportedWaitMinutes": 5.0,
+            "queueLength": 6,
+            "note": "Very short queue",
+            "timestamp": (now - timedelta(minutes=2)).isoformat(),  # 2m ago
+        },
+        {
+            "reportId": "rep_seed_05",
+            "reportedWaitMinutes": 6.0,
+            "queueLength": 8,
+            "note": "Smooth flow",
+            "timestamp": (now - timedelta(minutes=8)).isoformat(),  # 8m ago
+        },
+    ]
+
+    valid, outliers = filter_outliers(reports)
+    assert len(valid) == 3, "20m report must not be discarded as an outlier"
+    assert len(outliers) == 0
+
+    est = calculate_queue_estimate(reports, now=now)
+    # Total weight = 1.0 + exp(-2/15) + exp(-8/15) = 1.0 + 0.875 + 0.586 = 2.461
+    # Weighted wait = (20*1.0 + 5*0.875 + 6*0.586) / 2.461 = 27.89 / 2.461 = 11.3m
+    assert pytest.approx(est["predictedWaitMinutes"], abs=0.5) == 11.3
+    assert est["predictedQueueLength"] in (19, 20)
+    assert est["congestion"] == "HIGH"
+    assert est["freshness"] == "LIVE"
+    assert est["newestReportAgeMinutes"] == 0.0
+    assert est["reportCount"] == 3
+
+

@@ -100,13 +100,16 @@ def filter_outliers(
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Separate valid reports from outliers.
-    For small sample sizes (N < 4), use boundary thresholding and deviation from median.
-    For larger sample sizes (N >= 4), use Median Absolute Deviation (MAD).
+    For small sample sizes (N < 5), preserve all reports within physical bounds
+    and operational rush limits. A 20-minute wait during lunch rush is physically
+    valid and must not be rejected merely because earlier reports were 5 minutes.
+    For larger sample sizes (N >= 5), use Median Absolute Deviation (MAD) with
+    rush-tolerant deviation bounds (min deviation threshold >= 25.0 minutes).
     """
     valid: List[Dict[str, Any]] = []
     outliers: List[Dict[str, Any]] = []
 
-    # First pass: basic plausibility boundaries
+    # First pass: basic plausibility boundaries (0-120 min wait, 0-300 queue)
     plausible: List[Dict[str, Any]] = []
     for r in reports:
         wait = float(r.get("reportedWaitMinutes", 0))
@@ -119,8 +122,9 @@ def filter_outliers(
         else:
             outliers.append(r)
 
-    if len(plausible) < 3:
-        # Not enough samples to detect statistical outliers safely
+    # For sample sizes under 5, do not discard plausible rush-hour observations.
+    # Meal rush transitions (e.g. from 5 mins to 20 mins) are common in campus dining.
+    if len(plausible) < 5:
         return plausible, outliers
 
     # Compute median of reported wait minutes
@@ -136,13 +140,13 @@ def filter_outliers(
         else (abs_deviations[n // 2 - 1] + abs_deviations[n // 2]) / 2.0
     )
 
-    # If MAD is very small (all reports agree closely), use minimal threshold of 4.0 mins
-    effective_mad = max(mad, 4.0)
+    # Campus dining waits experience rapid meal-hour spikes.
+    # Use rush-tolerant cutoff: effective threshold is at least 25.0 minutes deviation.
+    cutoff = max(3.5 * mad, 25.0)
 
     for r in plausible:
         wait = float(r["reportedWaitMinutes"])
-        # If wait deviates by more than 3.0 * effective_mad from median, flag as outlier
-        if abs(wait - median_wait) > 3.0 * effective_mad:
+        if abs(wait - median_wait) > cutoff:
             outliers.append(r)
         else:
             valid.append(r)

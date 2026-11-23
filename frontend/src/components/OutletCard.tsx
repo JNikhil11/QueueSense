@@ -1,7 +1,7 @@
 import React from 'react';
 import { CampusLocation } from '../types';
 import { CongestionBadge, FreshnessBadge, ConfidenceMeter } from './StatusBadge';
-import { Clock, Users, ArrowUpRight, Plus, AlertCircle } from 'lucide-react';
+import { Clock, Users, ArrowUpRight, Plus, AlertCircle, MapPin, CheckCircle2 } from 'lucide-react';
 
 interface OutletCardProps {
   location: CampusLocation;
@@ -14,11 +14,19 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
   const hasWait = est?.predictedWaitMinutes !== null && est?.predictedWaitMinutes !== undefined;
   const isNoData = !est || est.freshness === 'NO RECENT DATA' || !hasWait;
 
+  const newestAge = est?.newestReportAgeMinutes;
+  const newestAgeStr =
+    newestAge !== null && newestAge !== undefined
+      ? newestAge <= 1
+        ? 'just now'
+        : `${Math.round(newestAge)}m ago`
+      : null;
+
   return (
-    <div className="group relative rounded-3xl glass-panel p-6 flex flex-col justify-between transition-all duration-300 hover:-translate-y-1 glass-specular-edge hover:border-[#39FF14]/40 hover:shadow-[0_16px_40px_-10px_rgba(0,0,0,0.7),0_0_25px_-5px_rgba(57,255,20,0.2)]">
+    <div className="outlet-card group relative rounded-3xl glass-panel glass-card-ambient p-6 flex flex-col justify-between transition-all duration-300 hover:-translate-y-1 glass-specular-edge border-[#39FF14]/30 hover:border-[#39FF14]/60">
       {/* Top Meta Header */}
       <div>
-        <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex items-start justify-between gap-3 mb-2.5">
           <div className="flex items-center gap-2 flex-wrap">
             <span
               className={`text-[10px] uppercase font-mono font-bold tracking-wider px-2.5 py-0.5 rounded-full border ${
@@ -29,33 +37,46 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
             >
               {location.category}
             </span>
+            {location.verificationStatus === 'VERIFIED_CAMPUS_DIRECTORY' && (
+              <span className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.04] text-[#8E9E93] border border-white/10" title={location.verificationSource}>
+                <CheckCircle2 className="w-3 h-3 text-[#39FF14]" />
+                <span>Verified</span>
+              </span>
+            )}
             {est && <FreshnessBadge state={est.freshness} />}
           </div>
           {est && <CongestionBadge level={est.congestion} />}
         </div>
 
-        {/* Title & Description */}
+        {/* Title & Landmark */}
         <h3 className="font-display text-xl font-bold text-white group-hover:text-[#39FF14] transition-colors tracking-tight line-clamp-1">
           {location.name}
         </h3>
+        {location.landmarkLocation && (
+          <div className="flex items-center gap-1.5 text-[11px] text-[#7DF9FF]/80 font-mono mt-1">
+            <MapPin className="w-3 h-3 text-[#7DF9FF] shrink-0" />
+            <span className="line-clamp-1">{location.landmarkLocation}</span>
+          </div>
+        )}
         <p className="text-xs text-[#8E9E93] mt-1.5 line-clamp-2 leading-relaxed">
           {location.description}
         </p>
       </div>
 
-      {/* Main Wait Time & Queue Status Box */}
-      <div className="my-5 p-4 rounded-2xl bg-[#090E0B]/60 border border-white/[0.06] backdrop-blur-md">
+      {/* Main Aggregated Estimate Box */}
+      <div className="my-5 p-4 rounded-2xl bg-[#090E0B]/70 border border-white/[0.06] backdrop-blur-md">
         <div className="flex items-baseline justify-between">
           <div>
-            <div className="text-[10px] uppercase font-mono tracking-widest text-[#8E9E93]">
-              Estimated Wait
+            <div className="text-[10px] uppercase font-mono tracking-widest text-[#8E9E93] flex items-center gap-1.5">
+              <span>Aggregated Wait</span>
+              <span className="text-[9px] text-[#5A695F] font-normal">(time-decayed)</span>
             </div>
             <div className="flex items-baseline gap-1 mt-1">
               {isNoData ? (
                 <div className="font-mono text-2xl font-bold text-[#5A695F]">
                   --
                   <span className="text-xs font-sans text-[#5A695F] ml-1.5 font-normal">
-                    (insufficient data)
+                    (awaiting reports)
                   </span>
                 </div>
               ) : (
@@ -89,22 +110,30 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
           </div>
         </div>
 
-        {/* Evidence & Rationale */}
+        {/* Evidence & Latest Observation Indicator */}
         <div className="mt-3.5 pt-3 border-t border-white/[0.06]">
           {est && est.confidence > 0 ? (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-[11px]">
-                <span className="text-[#8E9E93] font-mono text-[10px] uppercase">Evidence Index</span>
+                <span className="text-[#8E9E93] font-mono text-[10px] uppercase">
+                  Evidence ({est.recentReportCount} obs)
+                </span>
                 <ConfidenceMeter confidence={est.confidence} label={est.confidenceLabel} />
               </div>
               <p className="text-[11px] text-[#8E9E93] line-clamp-1 italic">
                 {est.evidenceExplanation}
               </p>
+              {newestAgeStr && (
+                <div className="text-[10px] font-mono text-[#7DF9FF]/80 flex items-center justify-between pt-1">
+                  <span>Latest observation recorded:</span>
+                  <span className="text-white font-semibold">{newestAgeStr}</span>
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-[11px] text-[#8E9E93]">
               <AlertCircle className="w-3.5 h-3.5 text-[#5A695F] shrink-0" />
-              <span>No observations in 60m. First report needed.</span>
+              <span>No observations in 60m. Community report needed.</span>
             </div>
           )}
         </div>

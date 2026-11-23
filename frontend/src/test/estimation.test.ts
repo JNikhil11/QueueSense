@@ -54,5 +54,44 @@ describe('Client-Side Queue Estimation Logic', () => {
     expect(est.predictedWaitMinutes).toBeNull();
     expect(est.freshness).toBe('NO RECENT DATA');
   });
+
+  it('correctly aggregates newly submitted 20m/40queue meal rush report alongside 5m/6m reports', () => {
+    const now = Date.now();
+    const reports: QueueReport[] = [
+      {
+        reportId: 'rep_rush_new',
+        locationId: 'iitb-mess-h15-16',
+        reportedWaitMinutes: 20,
+        queueLength: 40,
+        note: 'Heavy rush',
+        timestamp: new Date(now).toISOString(), // 0m ago (Just now)
+      },
+      {
+        reportId: 'rep_prior_1',
+        locationId: 'iitb-mess-h15-16',
+        reportedWaitMinutes: 5,
+        queueLength: 6,
+        timestamp: new Date(now - 2 * 60 * 1000).toISOString(), // 2m ago
+      },
+      {
+        reportId: 'rep_prior_2',
+        locationId: 'iitb-mess-h15-16',
+        reportedWaitMinutes: 6,
+        queueLength: 8,
+        timestamp: new Date(now - 8 * 60 * 1000).toISOString(), // 8m ago
+      },
+    ];
+
+    const est = computeClientEstimate(reports);
+    // Weighted average: (20*1.0 + 5*0.875 + 6*0.586) / (1.0 + 0.875 + 0.586) = ~11.3m
+    expect(est.predictedWaitMinutes).toBeGreaterThanOrEqual(10.5);
+    expect(est.predictedWaitMinutes).toBeLessThanOrEqual(12.5);
+    expect(est.predictedQueueLength).toBeGreaterThanOrEqual(18);
+    expect(est.predictedQueueLength).toBeLessThanOrEqual(22);
+    expect(est.congestion).toBe('HIGH');
+    expect(est.freshness).toBe('LIVE');
+    expect(est.reportCount).toBe(3);
+    expect(est.recentReportCount).toBe(3);
+  });
 });
 

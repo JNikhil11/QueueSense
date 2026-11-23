@@ -9,13 +9,13 @@ def test_database_initialization_and_listing():
     db = QueueSenseDatabase(table_name="TestTable")
     locations = db.list_locations()
     assert len(locations) == len(DEFAULT_CAMPUS_LOCATIONS)
-    assert any(loc["id"] == "mess-a-central" for loc in locations)
+    assert any(loc["id"] == "iitb-mess-h12-14" for loc in locations)
 
 
 def test_database_record_report():
     db = QueueSenseDatabase(table_name="TestTable")
     report = db.record_report(
-        location_id="mess-a-central",
+        location_id="iitb-mess-h12-14",
         reported_wait_minutes=10.5,
         queue_length=15,
         note="Normal pace",
@@ -27,7 +27,7 @@ def test_database_record_report():
     assert report["ttl"] > 0
 
     # Retrieve recent reports
-    recents = db.get_recent_reports("mess-a-central")
+    recents = db.get_recent_reports("iitb-mess-h12-14")
     assert len(recents) >= 1
     assert recents[0]["reportId"] == report["reportId"]
 

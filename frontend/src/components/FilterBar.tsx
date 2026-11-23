@@ -54,7 +54,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           {totalCount} {totalCount === 1 ? 'outlet indexed' : 'outlets indexed'}
         </span>
 
-        {/* Smoked-Glass Search Input */}
+        {/* Smoked-Glass Search Input (16px on mobile prevents iOS Safari zoom) */}
         <div className="relative flex-1 sm:w-64">
           <Search className="w-4 h-4 text-[#8E9E93] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
@@ -62,17 +62,17 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search dining halls & cafes..."
-            className="w-full pl-10 pr-3.5 py-2 text-xs sm:text-sm rounded-xl glass-panel text-[#F4F7F5] placeholder-[#5A695F] focus:outline-none focus:border-[#7DF9FF]/60 focus:shadow-[0_0_15px_rgba(125,249,255,0.2)] transition-all"
+            className="w-full pl-10 pr-3.5 py-2.5 text-base sm:text-sm rounded-xl glass-panel text-[#F4F7F5] placeholder-[#5A695F] focus:outline-none focus:border-[#7DF9FF]/60 focus:shadow-[0_0_15px_rgba(125,249,255,0.2)] transition-all min-h-[44px] sm:min-h-0"
           />
         </div>
 
         {/* Sort Dropdown */}
-        <div className="relative shrink-0 flex items-center gap-2 rounded-xl glass-panel px-3 py-2 border-white/10">
+        <div className="relative shrink-0 flex items-center gap-2 rounded-xl glass-panel px-3 py-2 border-white/10 min-h-[44px] sm:min-h-0">
           <SlidersHorizontal className="w-3.5 h-3.5 text-[#7DF9FF]" />
           <select
             value={sortBy}
             onChange={(e) => onSortChange(e.target.value)}
-            className="bg-transparent text-xs font-mono text-[#F4F7F5] focus:outline-none cursor-pointer pr-1"
+            className="bg-transparent text-base sm:text-xs font-mono text-[#F4F7F5] focus:outline-none cursor-pointer pr-1"
           >
             <option value="wait-asc" className="bg-[#0D140F] text-[#F4F7F5]">
               Shortest Wait

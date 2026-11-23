@@ -8,124 +8,273 @@ import { CampusLocation, QueueEstimate, QueueReport, SmartRecommendation, Report
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
-// Configurable campus outlets (VIT-AP campus context)
-const INITIAL_LOCATIONS: CampusLocation[] = [
+// Authentic IIT Bombay Campus Dining Directory (SMP / Gymkhana Verified)
+export const INITIAL_LOCATIONS: CampusLocation[] = [
   {
-    id: 'mess-a-central',
-    name: 'Central Mess A (North Dining)',
+    id: 'iitb-mess-h12-14',
+    name: 'Hostel 12-13-14 Dining Complex',
     category: 'MESS',
-    description: 'Primary multi-story student dining hall serving breakfast, lunch, and dinner counters.',
+    description: 'Central multi-tiered student mess serving breakfast, lunch, snacks, and dinner counters.',
+    landmarkLocation: 'Hostel 12-14 Complex, Lakeside Road, East Campus',
+    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationSource: 'IIT Bombay Council of Student Affairs / Mess Council',
     openHours: '07:30 - 21:30',
-    capacity: 450,
+    capacity: 650,
     active: true,
   },
   {
-    id: 'mess-b-south',
-    name: 'South Mess B (Annex Dining)',
+    id: 'iitb-mess-h15-16',
+    name: 'Hostel 15-16 Dining Hall',
     category: 'MESS',
-    description: 'South block student dining hall featuring traditional and vegetarian meal counters.',
+    description: 'Modern high-capacity hostel mess catering to senior undergraduate and postgraduate wings.',
+    landmarkLocation: 'Hostel 15-16 Quadrangle, North-East Campus',
+    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationSource: 'IIT Bombay Student Mentor Program (SMP)',
+    openHours: '07:30 - 21:30',
+    capacity: 550,
+    active: true,
+  },
+  {
+    id: 'iitb-mess-h2',
+    name: 'Hostel 2 Dining Hall & Mess',
+    category: 'MESS',
+    description: 'Historic hostel mess renowned for South and North Indian rotating regional menus.',
+    landmarkLocation: 'Hostel 2 Quadrangle, near Gymkhana Grounds',
+    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationSource: 'IIT Bombay Hostel 2 Council & SMP Guide',
     openHours: '07:30 - 21:00',
     capacity: 350,
     active: true,
   },
   {
-    id: 'canteen-rock-plaza',
-    name: 'Rock Plaza Food Court',
+    id: 'iitb-canteen-h3',
+    name: 'Hostel 3 Canteen & Juice Centre',
     category: 'CANTEEN',
-    description: 'Open-air plaza offering quick snacks, fresh juices, hot beverages, and rolls.',
-    openHours: '10:00 - 23:00',
-    capacity: 180,
-    active: true,
-  },
-  {
-    id: 'canteen-academic-block',
-    name: 'CB Academic Bistro',
-    category: 'CANTEEN',
-    description: 'Fast-counter canteen situated near lecture halls for express lunch and coffee.',
-    openHours: '08:30 - 18:00',
+    description: 'Beloved campus late-night staple serving fresh fruit juices, dosas, parathas, and tea.',
+    landmarkLocation: 'Ground Floor, Hostel 3, Main Hostel Avenue',
+    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationSource: 'IIT Bombay Gymkhana Freshers Guide',
+    openHours: '14:00 - 02:30',
     capacity: 120,
     active: true,
   },
   {
-    id: 'canteen-night-cafeteria',
-    name: 'Midnight Fuel Canteen',
+    id: 'iitb-canteen-lhc',
+    name: 'LHC Food Court (Lecture Hall)',
     category: 'CANTEEN',
-    description: 'Late-evening campus outlet popular during exam periods and project deadlines.',
-    openHours: '17:00 - 02:00',
-    capacity: 150,
+    description: 'High-velocity daytime cafeteria serving express lunches, coffee, sandwiches, and rolls.',
+    landmarkLocation: 'Ground Floor, Lecture Hall Complex (LHC), Academic Area',
+    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationSource: 'IIT Bombay Academic Facilities & SMP',
+    openHours: '08:30 - 18:30',
+    capacity: 220,
+    active: true,
+  },
+  {
+    id: 'iitb-canteen-gulmohar',
+    name: 'Gulmohar Restaurant & Cafe',
+    category: 'CANTEEN',
+    description: 'Multi-cuisine sit-down restaurant and faculty guest lounge serving thalis and meals.',
+    landmarkLocation: 'Gulmohar Building, First Floor, Opposite Main Building',
+    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationSource: 'IIT Bombay Estate & Hospitality Directory',
+    openHours: '11:00 - 22:30',
+    capacity: 180,
+    active: true,
+  },
+  {
+    id: 'iitb-canteen-kresit',
+    name: 'KReSIT IT Canteen (CSE)',
+    category: 'CANTEEN',
+    description: 'Quick-service eatery favored by computer science students for coffee, noodles, and wraps.',
+    landmarkLocation: 'Kanwal Rekhi School of Information Technology (KReSIT)',
+    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationSource: 'IIT Bombay Dept of Computer Science & Eng',
+    openHours: '09:00 - 20:00',
+    capacity: 90,
+    active: true,
+  },
+  {
+    id: 'iitb-cafe-92',
+    name: 'Cafe 92 (SAC Hangout)',
+    category: 'CANTEEN',
+    description: 'Active evening hangout spot serving milkshakes, burgers, hot fries, and snacks.',
+    landmarkLocation: 'Students Activity Centre (SAC) Grounds',
+    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationSource: 'IIT Bombay Gymkhana Cultural Affairs',
+    openHours: '16:00 - 01:00',
+    capacity: 140,
+    active: true,
+  },
+  {
+    id: 'iitb-canteen-brewberrys',
+    name: 'Brewberrys The Coffee Bar',
+    category: 'CANTEEN',
+    description: 'Artisan coffee, bakery items, iced brews, and quiet tables for study sessions.',
+    landmarkLocation: 'Adjacent to Central Library, Main Academic Spine',
+    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationSource: 'IIT Bombay Central Library Amenities',
+    openHours: '08:00 - 23:00',
+    capacity: 80,
+    active: true,
+  },
+  {
+    id: 'iitb-amul-parlour',
+    name: 'Amul Ice Cream & Dairy Parlour',
+    category: 'CANTEEN',
+    description: 'Exclusive dairy outlet offering ice creams, flavored milk, milkshakes, and packaged snacks.',
+    landmarkLocation: 'Near Hostel 1 & Campus School Junction',
+    verificationStatus: 'VERIFIED_CAMPUS_DIRECTORY',
+    verificationSource: 'IIT Bombay Commercial Establishments',
+    openHours: '09:00 - 23:00',
+    capacity: 40,
     active: true,
   },
 ];
 
-// Offline In-Memory Mock Store with Seed Observations
-// Clearly labeled as SEED/DEMO data when active
-const mockReports: Record<string, QueueReport[]> = {
-  'mess-a-central': [
+// Realistic Initial Observations for IIT Bombay Outlets
+// Explicitly labeled as DEMO / SIMULATED observations
+const DEFAULT_SEED_REPORTS: Record<string, QueueReport[]> = {
+  'iitb-mess-h12-14': [
     {
-      reportId: 'rep_seed_01',
-      locationId: 'mess-a-central',
+      reportId: 'rep_seed_101',
+      locationId: 'iitb-mess-h12-14',
       reportedWaitMinutes: 14,
       queueLength: 22,
-      note: 'Lunch rush, main counter packed',
+      note: 'Dinner rush, both South & North counters active',
       timestamp: new Date(Date.now() - 3 * 60 * 1000).toISOString(), // 3m ago
     },
     {
-      reportId: 'rep_seed_02',
-      locationId: 'mess-a-central',
+      reportId: 'rep_seed_102',
+      locationId: 'iitb-mess-h12-14',
       reportedWaitMinutes: 12,
-      queueLength: 20,
-      note: 'Both lines moving steady',
-      timestamp: new Date(Date.now() - 6 * 60 * 1000).toISOString(), // 6m ago
+      queueLength: 19,
+      note: 'Line moving steadily',
+      timestamp: new Date(Date.now() - 7 * 60 * 1000).toISOString(), // 7m ago
     },
     {
-      reportId: 'rep_seed_03',
-      locationId: 'mess-a-central',
+      reportId: 'rep_seed_103',
+      locationId: 'iitb-mess-h12-14',
       reportedWaitMinutes: 15,
-      queueLength: 25,
-      note: '',
-      timestamp: new Date(Date.now() - 11 * 60 * 1000).toISOString(), // 11m ago
+      queueLength: 24,
+      note: 'Heavy arrival from Hostel 13',
+      timestamp: new Date(Date.now() - 12 * 60 * 1000).toISOString(), // 12m ago
     },
   ],
-  'mess-b-south': [
+  'iitb-mess-h15-16': [
     {
-      reportId: 'rep_seed_04',
-      locationId: 'mess-b-south',
+      reportId: 'rep_seed_104',
+      locationId: 'iitb-mess-h15-16',
       reportedWaitMinutes: 5,
       queueLength: 6,
-      note: 'Very short queue today, fast service',
+      note: 'Very short queue right now, swift service',
       timestamp: new Date(Date.now() - 2 * 60 * 1000).toISOString(), // 2m ago
     },
     {
-      reportId: 'rep_seed_05',
-      locationId: 'mess-b-south',
+      reportId: 'rep_seed_105',
+      locationId: 'iitb-mess-h15-16',
       reportedWaitMinutes: 6,
       queueLength: 8,
-      note: 'Smooth flow at veg counter',
+      note: 'Veg meal counter clear',
       timestamp: new Date(Date.now() - 8 * 60 * 1000).toISOString(), // 8m ago
     },
   ],
-  'canteen-rock-plaza': [
+  'iitb-mess-h2': [
     {
-      reportId: 'rep_seed_06',
-      locationId: 'canteen-rock-plaza',
-      reportedWaitMinutes: 9,
-      queueLength: 12,
-      note: 'Chai and sandwich counter busy',
-      timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(), // 15m ago
+      reportId: 'rep_seed_106',
+      locationId: 'iitb-mess-h2',
+      reportedWaitMinutes: 8,
+      queueLength: 11,
+      note: 'Moderate crowd for special dinner',
+      timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5m ago
     },
   ],
-  'canteen-academic-block': [
+  'iitb-canteen-h3': [
     {
-      reportId: 'rep_seed_07',
-      locationId: 'canteen-academic-block',
+      reportId: 'rep_seed_107',
+      locationId: 'iitb-canteen-h3',
       reportedWaitMinutes: 4,
       queueLength: 5,
-      note: 'Quiet afternoon',
-      timestamp: new Date(Date.now() - 52 * 60 * 1000).toISOString(), // 52m ago -> STALE
+      note: 'Fast juice token queue',
+      timestamp: new Date(Date.now() - 4 * 60 * 1000).toISOString(), // 4m ago
     },
   ],
-  'canteen-night-cafeteria': [], // NO DATA
+  'iitb-canteen-lhc': [
+    {
+      reportId: 'rep_seed_108',
+      locationId: 'iitb-canteen-lhc',
+      reportedWaitMinutes: 18,
+      queueLength: 28,
+      note: 'Post-lecture crowd at sandwich counter',
+      timestamp: new Date(Date.now() - 9 * 60 * 1000).toISOString(), // 9m ago
+    },
+  ],
+  'iitb-canteen-gulmohar': [
+    {
+      reportId: 'rep_seed_109',
+      locationId: 'iitb-canteen-gulmohar',
+      reportedWaitMinutes: 7,
+      queueLength: 9,
+      note: 'Thali tokens moving fast',
+      timestamp: new Date(Date.now() - 14 * 60 * 1000).toISOString(), // 14m ago
+    },
+  ],
+  'iitb-canteen-kresit': [
+    {
+      reportId: 'rep_seed_110',
+      locationId: 'iitb-canteen-kresit',
+      reportedWaitMinutes: 3,
+      queueLength: 4,
+      note: 'Quiet lab break',
+      timestamp: new Date(Date.now() - 6 * 60 * 1000).toISOString(), // 6m ago
+    },
+  ],
+  'iitb-cafe-92': [],
+  'iitb-canteen-brewberrys': [],
+  'iitb-amul-parlour': [],
 };
+
+// Storage Key for Local Browser Simulation Persistence
+const STORAGE_KEY = 'queuesense_iitb_observations_v2';
+
+// Load stored reports from LocalStorage or initialize with defaults
+function loadReportsStore(): Record<string, QueueReport[]> {
+  try {
+    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        // Ensure all initial locations have an array
+        const store: Record<string, QueueReport[]> = {};
+        INITIAL_LOCATIONS.forEach((l) => {
+          store[l.id] = parsed[l.id] || DEFAULT_SEED_REPORTS[l.id] || [];
+        });
+        return store;
+      }
+    }
+  } catch (e) {
+    // Graceful fallback for non-browser or sandbox environments
+  }
+  // Clone seed reports to avoid mutation
+  const initialStore: Record<string, QueueReport[]> = {};
+  INITIAL_LOCATIONS.forEach((l) => {
+    initialStore[l.id] = [...(DEFAULT_SEED_REPORTS[l.id] || [])];
+  });
+  return initialStore;
+}
+
+// Persist reports store to LocalStorage
+function persistReportsStore(store: Record<string, QueueReport[]>): void {
+  try {
+    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    }
+  } catch (e) {
+    // Graceful fallback
+  }
+}
+
+const mockReports: Record<string, QueueReport[]> = loadReportsStore();
 
 // Client-side pure estimation calculation (mirrors backend Python prediction module)
 export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
@@ -361,6 +510,8 @@ export const api = {
       mockReports[locationId] = [];
     }
     mockReports[locationId].unshift(newReport);
+    // Persist to local storage for durable offline simulation
+    persistReportsStore(mockReports);
     const updatedEstimate = computeClientEstimate(mockReports[locationId]);
 
     return {

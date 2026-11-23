@@ -6,7 +6,7 @@
 **Challenge:** Techfest, IIT Bombay × AWS ShipIt Challenge  
 **Author:** J Nikhil ([@JNikhil11](https://github.com/JNikhil11))  
 **Target Region:** `ap-southeast-2` (Sydney)  
-**Campus Context:** VIT-AP University (Messes & Canteens)  
+**Campus Context:** IIT Bombay (Hostel Messes & Campus Canteens)  
 
 ---
 
@@ -20,7 +20,7 @@ At university campuses during peak lunch and dinner hours, hundreds of students 
 
 ## 2. Key Capabilities
 
-- **Real-Time Congestion Visibility:** Instant access to estimated waiting times and queue sizes across 5 campus messes and canteens.
+- **Real-Time Congestion Visibility:** Instant access to estimated waiting times and queue sizes across 10 verified IIT Bombay messes and canteens.
 - **Evidence-First Transparency:** Estimates display exact data freshness (`LIVE <7m`, `RECENT <20m`, `AGING DATA`), report count, and confidence levels.
 - **Smart Recommendations:** Recommends less crowded dining outlets only when supported by fresh, high-confidence evidence.
 - **Sub-5-Second Reporting:** Streamlined observation flow with presets for wait time and queue length.

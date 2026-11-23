@@ -51,7 +51,7 @@ export const RecommendationBanner: React.FC<RecommendationBannerProps> = ({
 
   // Active Centerpiece Recommendation
   return (
-    <div className="relative rounded-3xl overflow-hidden glass-panel-centerpiece p-6 sm:p-8 my-6 transition-all duration-300 hover:shadow-[0_16px_50px_-10px_rgba(0,0,0,0.8),0_0_40px_-5px_rgba(57,255,20,0.35)]">
+    <div className="recommendation-card relative rounded-3xl overflow-hidden glass-panel-centerpiece p-6 sm:p-8 my-6 transition-all duration-300">
       {/* Specular Top Reflection Accent Line */}
       <div className="absolute inset-x-8 top-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#39FF14]/70 to-transparent pointer-events-none" />
 
