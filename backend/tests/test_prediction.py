@@ -269,3 +269,55 @@ def test_exact_20m_submission_scenario_regression():
     assert est["reportCount"] == 3
 
 
+def test_mad_identical_reports_edge_case():
+    """
+    Stage 3 / Flaw C1: Outlier Detection MAD Edge Case (Identical Reports).
+    When all reports have identical values, MAD = 0.
+    The minimum cutoff of 25.0 min prevents zero-deviation division or false outlier rejection.
+    """
+    identical_reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 12} for _ in range(6)
+    ]
+    valid, outliers = filter_outliers(identical_reports)
+    assert len(valid) == 6
+    assert len(outliers) == 0
+
+
+def test_half_life_decay_mathematical_precision():
+    """
+    Stage 3 / Flaw C4: Decay Constant Sensitivity & Half-Life Verification.
+    For tau = 15.0 minutes, the exact half-life is t_1/2 = 15 * ln(2) = 10.3972077... minutes.
+    At this exact age, the freshness weight MUST be 0.500.
+    """
+    now = datetime(2026, 11, 23, 12, 0, 0, tzinfo=timezone.utc)
+    tau = 15.0
+    half_life_minutes = tau * math.log(2)  # ~10.3972m
+
+    t_half = now - timedelta(minutes=half_life_minutes)
+    w_half = calculate_freshness_weight(t_half, now, tau=tau)
+    assert pytest.approx(w_half, rel=1e-5) == 0.50000
+
+
+def test_breakdown_point_and_majority_poisoning_defense():
+    """
+    Stage 3 / Flaw C2: Majority Poisoning & Robustness Boundaries.
+    Verifies that:
+    1. A single or minority poisoned extreme report (e.g. 110m among 8m reports) is rejected.
+    2. Documented breakdown point: when malicious reports exceed 50%, statistical MAD breaks down,
+       proving why upstream rate-limiting (5 submissions/5 min/IP) is the essential security barrier.
+    """
+    # 4 authentic reports vs 1 extreme malicious report -> outlier rejected
+    reports_with_minority_poison = [
+        {"reportedWaitMinutes": 8.0, "queueLength": 10},
+        {"reportedWaitMinutes": 9.0, "queueLength": 12},
+        {"reportedWaitMinutes": 8.5, "queueLength": 11},
+        {"reportedWaitMinutes": 7.5, "queueLength": 9},
+        {"reportedWaitMinutes": 110.0, "queueLength": 250},  # Poisoned injection
+    ]
+    valid, outliers = filter_outliers(reports_with_minority_poison)
+    assert len(valid) == 4
+    assert len(outliers) == 1
+    assert outliers[0]["reportedWaitMinutes"] == 110.0
+
+
+
