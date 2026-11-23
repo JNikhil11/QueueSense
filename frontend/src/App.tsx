@@ -9,6 +9,7 @@ import { OutletCard } from './components/OutletCard';
 import { ReportModal } from './components/ReportModal';
 import { OutletDetailModal } from './components/OutletDetailModal';
 import { AdminAuditModal } from './components/AdminAuditModal';
+import { CinematicVideoBackground } from './components/CinematicVideoBackground';
 import { BrandLogo } from './components/BrandLogo';
 import { Utensils, AlertCircle, RefreshCw, CheckCircle2 } from 'lucide-react';
 
@@ -186,22 +187,28 @@ export const App: React.FC = () => {
     await loadData(true);
   };
 
+  // Synchronized overlay detection across all application modals
+  const isOverlayActive = Boolean(isReportModalOpen || detailOutletId || isAdminModalOpen);
+
   return (
     <div
       className="min-h-screen flex flex-col bg-[#070A08] text-[#F4F7F5] relative selection:bg-[#39FF14] selection:text-[#070A08] overflow-x-hidden"
     >
+      {/* Persistent Global Cinematic Video Background Engine */}
+      <CinematicVideoBackground isOverlayActive={isOverlayActive} />
+
       {/* Subtle Living Pointer Ambient Field */}
       <div
         ref={ambientRef}
-        className="fixed inset-0 pointer-events-none transition-opacity duration-700"
+        className="fixed inset-0 pointer-events-none transition-opacity duration-700 z-[1]"
         style={{
           background: 'radial-gradient(900px circle at var(--mouse-x, 50%) var(--mouse-y, 25%), rgba(0, 150, 255, 0.038), transparent 70%)',
         }}
       />
 
       {/* Global Ambient Glow Nodes */}
-      <div className="fixed top-0 left-1/4 w-[600px] h-[300px] bg-[#39FF14]/[0.06] rounded-full blur-[140px] pointer-events-none" />
-      <div className="fixed top-1/3 right-10 w-[500px] h-[350px] bg-[#7DF9FF]/[0.04] rounded-full blur-[160px] pointer-events-none" />
+      <div className="fixed top-0 left-1/4 w-[600px] h-[300px] bg-[#39FF14]/[0.06] rounded-full blur-[140px] pointer-events-none z-[1]" />
+      <div className="fixed top-1/3 right-10 w-[500px] h-[350px] bg-[#7DF9FF]/[0.04] rounded-full blur-[160px] pointer-events-none z-[1]" />
 
       {/* Toast Notification */}
       {toastMsg && (
@@ -222,7 +229,7 @@ export const App: React.FC = () => {
 
       {/* Demo Mode Persistent Banner */}
       {!isLiveApi && (
-        <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+        <div className="relative z-10 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
           <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-[#FFA028]/10 border border-[#FFA028]/30 text-[#FFA028] text-xs font-mono backdrop-blur-md">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[#FFA028] animate-pulse" />
@@ -239,7 +246,7 @@ export const App: React.FC = () => {
       )}
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pb-20">
+      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pb-20">
         {/* Hero Section */}
         <Hero locations={locations} />
 
@@ -315,7 +322,7 @@ export const App: React.FC = () => {
       </main>
 
       {/* Footer & Truthful Data Source Disclosure */}
-      <footer className="border-t border-white/[0.08] bg-[#050806]/80 backdrop-blur-xl py-10 text-xs text-[#8E9E93]">
+      <footer className="relative z-10 border-t border-white/[0.08] bg-[#050806]/85 backdrop-blur-xl py-10 text-xs text-[#8E9E93]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
