@@ -504,364 +504,389 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
   };
 }
 
-export const api = {
-  isLiveApiConfigured(): boolean {
-    return Boolean(API_BASE_URL && API_BASE_URL.startsWith('http'));
-  },
+export interface ApiClientConfig {
+  apiBaseUrl?: string;
+  dataMode?: DataMode;
+}
 
-  getDataMode(): DataMode {
-    return DATA_MODE;
-  },
+export function createApiClient(config: ApiClientConfig = {}) {
+  const getBaseUrl = () => (config.apiBaseUrl !== undefined ? config.apiBaseUrl : API_BASE_URL);
+  const getDataMode = () => (config.dataMode !== undefined ? config.dataMode : DATA_MODE);
 
-  async getLocations(): Promise<{ data: CampusLocation[]; isLive: boolean }> {
-    if (this.isLiveApiConfigured()) {
-      try {
-        const res = await fetch(`${API_BASE_URL}/locations`);
-        if (res.ok) {
-          const json = await res.json();
-          return { data: json.data, isLive: true };
+  return {
+    isLiveApiConfigured(): boolean {
+      const url = getBaseUrl();
+      return Boolean(url && url.startsWith('http'));
+    },
+
+    getDataMode(): DataMode {
+      return getDataMode();
+    },
+
+    async getLocations(): Promise<{ data: CampusLocation[]; isLive: boolean }> {
+      const mode = getDataMode();
+      const baseUrl = getBaseUrl();
+      if (this.isLiveApiConfigured()) {
+        try {
+          const res = await fetch(`${baseUrl}/locations`);
+          if (res.ok) {
+            const json = await res.json();
+            return { data: json.data, isLive: true };
+          }
+          if (mode === 'production') {
+            throw new Error(`API returned status ${res.status}`);
+          }
+        } catch (err: any) {
+          if (mode === 'production') {
+            throw new Error(`Live data temporarily unavailable: ${err.message || 'API unreachable'}`);
+          }
+          console.warn('API Gateway unreachable, falling back to demo fixtures:', err);
         }
-        if (DATA_MODE === 'production') {
-          throw new Error(`API returned status ${res.status}`);
-        }
-      } catch (err: any) {
-        if (DATA_MODE === 'production') {
-          throw new Error(`Live data temporarily unavailable: ${err.message || 'API unreachable'}`);
-        }
-        console.warn('API Gateway unreachable, falling back to demo fixtures:', err);
+      } else if (mode === 'production') {
+        throw new Error('Production mode active: Live API URL (VITE_API_URL) is not configured.');
       }
-    } else if (DATA_MODE === 'production') {
-      throw new Error('Production mode active: Live API URL (VITE_API_URL) is not configured.');
-    }
 
-    // Demo Mode Fixtures
-    const locationsWithEstimates = INITIAL_LOCATIONS.map((loc) => ({
-      ...loc,
-      estimate: computeClientEstimate(mockReports[loc.id] || []),
-    }));
+      // Demo Mode Fixtures
+      const locationsWithEstimates = INITIAL_LOCATIONS.map((loc) => ({
+        ...loc,
+        estimate: computeClientEstimate(mockReports[loc.id] || []),
+      }));
 
-    return { data: locationsWithEstimates, isLive: false };
-  },
+      return { data: locationsWithEstimates, isLive: false };
+    },
 
-  async getLocationQueue(locationId: string): Promise<{
-    location: CampusLocation;
-    estimate: QueueEstimate;
-    reports: QueueReport[];
-    isLive: boolean;
-  }> {
-    if (this.isLiveApiConfigured()) {
-      try {
-        const res = await fetch(`${API_BASE_URL}/locations/${locationId}/queue`);
-        if (res.ok) {
-          const json = await res.json();
-          return { ...json.data, isLive: true };
+    async getLocationQueue(locationId: string): Promise<{
+      location: CampusLocation;
+      estimate: QueueEstimate;
+      reports: QueueReport[];
+      isLive: boolean;
+    }> {
+      const mode = getDataMode();
+      const baseUrl = getBaseUrl();
+      if (this.isLiveApiConfigured()) {
+        try {
+          const res = await fetch(`${baseUrl}/locations/${locationId}/queue`);
+          if (res.ok) {
+            const json = await res.json();
+            return { ...json.data, isLive: true };
+          }
+          if (mode === 'production') {
+            throw new Error(`API returned status ${res.status}`);
+          }
+        } catch (err: any) {
+          if (mode === 'production') {
+            throw new Error(`Live queue data temporarily unavailable: ${err.message || 'API unreachable'}`);
+          }
+          console.warn('API Gateway unreachable, falling back to demo fixtures:', err);
         }
-        if (DATA_MODE === 'production') {
-          throw new Error(`API returned status ${res.status}`);
-        }
-      } catch (err: any) {
-        if (DATA_MODE === 'production') {
-          throw new Error(`Live queue data temporarily unavailable: ${err.message || 'API unreachable'}`);
-        }
-        console.warn('API Gateway unreachable, falling back to demo fixtures:', err);
+      } else if (mode === 'production') {
+        throw new Error('Production mode active: Live API URL is not configured.');
       }
-    } else if (DATA_MODE === 'production') {
-      throw new Error('Production mode active: Live API URL is not configured.');
-    }
 
-    const loc = INITIAL_LOCATIONS.find((l) => l.id === locationId) || INITIAL_LOCATIONS[0];
-    const reports = [...(mockReports[locationId] || [])].sort(
-      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
-    const estimate = computeClientEstimate(reports);
+      const loc = INITIAL_LOCATIONS.find((l) => l.id === locationId) || INITIAL_LOCATIONS[0];
+      const reports = [...(mockReports[locationId] || [])].sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+      const estimate = computeClientEstimate(reports);
 
-    return {
-      location: loc,
-      estimate,
-      reports,
-      isLive: false,
-    };
-  },
+      return {
+        location: loc,
+        estimate,
+        reports,
+        isLive: false,
+      };
+    },
 
-  async submitReport(
-    locationId: string,
-    payload: ReportSubmissionPayload
-  ): Promise<{ report: QueueReport; updatedEstimate: QueueEstimate; isLive: boolean }> {
-    // Generate server-side idempotency key
-    const idempotencyKey =
-      payload.idempotencyKey ||
-      'idem_' +
-        (typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`);
+    async submitReport(
+      locationId: string,
+      payload: ReportSubmissionPayload
+    ): Promise<{ report: QueueReport; updatedEstimate: QueueEstimate; isLive: boolean }> {
+      const mode = getDataMode();
+      const baseUrl = getBaseUrl();
+      // Generate server-side idempotency key
+      const idempotencyKey =
+        payload.idempotencyKey ||
+        'idem_' +
+          (typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`);
 
-    if (this.isLiveApiConfigured()) {
-      try {
-        const res = await fetch(`${API_BASE_URL}/locations/${locationId}/reports`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Idempotency-Key': idempotencyKey,
+      if (this.isLiveApiConfigured()) {
+        try {
+          const res = await fetch(`${baseUrl}/locations/${locationId}/reports`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Idempotency-Key': idempotencyKey,
+            },
+            body: JSON.stringify({ ...payload, idempotencyKey }),
+          });
+
+          if (res.status === 200 || res.status === 201) {
+            const json = await res.json();
+            return { ...json.data, isLive: true };
+          }
+
+          const errJson = await res.json().catch(() => ({}));
+          if (res.status === 429) {
+            throw new Error(
+              errJson.error || 'Submission rate limit reached. Please wait a few minutes before reporting again.'
+            );
+          }
+          if (res.status === 500 && errJson.errorCode === 'PERSISTENCE_FAILED') {
+            throw new Error('Database persistence failed. Observation could not be durably recorded. Please retry.');
+          }
+          throw new Error(errJson.error || `Server rejected report with status ${res.status}`);
+        } catch (err: any) {
+          if (mode === 'production') {
+            throw err;
+          }
+          console.warn('API Gateway unreachable, storing report locally (demo mode):', err);
+        }
+      } else if (mode === 'production') {
+        throw new Error('Production mode active: Cannot submit observation without configured live API endpoint.');
+      }
+
+      // Demo fallback submission
+      const newReport: QueueReport = {
+        reportId: `rep_local_${Date.now()}`,
+        locationId,
+        reportedWaitMinutes: payload.reportedWaitMinutes,
+        queueLength: payload.queueLength,
+        note: payload.note,
+        timestamp: new Date().toISOString(),
+      };
+
+      if (!mockReports[locationId]) {
+        mockReports[locationId] = [];
+      }
+      mockReports[locationId].unshift(newReport);
+      persistReportsStore(mockReports);
+      const updatedEstimate = computeClientEstimate(mockReports[locationId]);
+
+      return {
+        report: newReport,
+        updatedEstimate,
+        isLive: false,
+      };
+    },
+
+    async getRecommendations(): Promise<{ data: SmartRecommendation; isLive: boolean }> {
+      const mode = getDataMode();
+      const baseUrl = getBaseUrl();
+      if (this.isLiveApiConfigured()) {
+        try {
+          const res = await fetch(`${baseUrl}/recommendations`);
+          if (res.ok) {
+            const json = await res.json();
+            return { data: json.data, isLive: true };
+          }
+          if (mode === 'production') {
+            throw new Error(`API returned status ${res.status}`);
+          }
+        } catch (err: any) {
+          if (mode === 'production') {
+            throw new Error(`Live recommendations temporarily unavailable: ${err.message || 'API unreachable'}`);
+          }
+          console.warn('API Gateway unreachable, calculating recommendations locally:', err);
+        }
+      } else if (mode === 'production') {
+        throw new Error('Production mode active: Live API URL is not configured.');
+      }
+
+      // Cold-Start Protected Demo Recommendation Calculation
+      const candidates = INITIAL_LOCATIONS.map((loc) => ({
+        ...loc,
+        estimate: computeClientEstimate(mockReports[loc.id] || []),
+      }));
+
+      // Must have at least 3 fresh reports and >= 50% confidence
+      const eligible = candidates.filter(
+        (c) =>
+          c.estimate &&
+          c.estimate.predictedWaitMinutes !== null &&
+          ['LIVE', 'RECENT'].includes(c.estimate.freshness) &&
+          c.estimate.recentReportCount >= 3 &&
+          c.estimate.confidence >= 0.50
+      );
+
+      if (eligible.length === 0) {
+        return {
+          data: {
+            recommendedLocationId: null,
+            recommendedLocationName: null,
+            reason:
+              'Not enough recent queue reports across campus to make a reliable recommendation yet. At least 3 fresh observations and 50%+ confidence required.',
+            isEligible: false,
+            state: 'insufficient_data',
+            minReportsRequired: 3,
+            candidateCount: candidates.length,
+            eligibleCount: 0,
           },
-          body: JSON.stringify({ ...payload, idempotencyKey }),
-        });
-
-        if (res.status === 200 || res.status === 201) {
-          const json = await res.json();
-          return { ...json.data, isLive: true };
-        }
-
-        const errJson = await res.json().catch(() => ({}));
-        if (res.status === 429) {
-          throw new Error(
-            errJson.error || 'Submission rate limit reached. Please wait a few minutes before reporting again.'
-          );
-        }
-        if (res.status === 500 && errJson.errorCode === 'PERSISTENCE_FAILED') {
-          throw new Error('Database persistence failed. Observation could not be durably recorded. Please retry.');
-        }
-        throw new Error(errJson.error || `Server rejected report with status ${res.status}`);
-      } catch (err: any) {
-        if (DATA_MODE === 'production') {
-          throw err;
-        }
-        console.warn('API Gateway unreachable, storing report locally (demo mode):', err);
+          isLive: false,
+        };
       }
-    } else if (DATA_MODE === 'production') {
-      throw new Error('Production mode active: Cannot submit observation without configured live API endpoint.');
-    }
 
-    // Demo fallback submission
-    const newReport: QueueReport = {
-      reportId: `rep_local_${Date.now()}`,
-      locationId,
-      reportedWaitMinutes: payload.reportedWaitMinutes,
-      queueLength: payload.queueLength,
-      note: payload.note,
-      timestamp: new Date().toISOString(),
-    };
+      eligible.sort((a, b) => {
+        const waitA = a.estimate!.predictedWaitMinutes!;
+        const waitB = b.estimate!.predictedWaitMinutes!;
+        if (waitA !== waitB) return waitA - waitB;
+        return b.estimate!.confidence - a.estimate!.confidence;
+      });
 
-    if (!mockReports[locationId]) {
-      mockReports[locationId] = [];
-    }
-    mockReports[locationId].unshift(newReport);
-    persistReportsStore(mockReports);
-    const updatedEstimate = computeClientEstimate(mockReports[locationId]);
+      const winner = eligible[0];
+      const wEst = winner.estimate!;
+      const ageText =
+        wEst.newestReportAgeMinutes && wEst.newestReportAgeMinutes >= 1
+          ? `${Math.round(wEst.newestReportAgeMinutes)}m ago`
+          : 'just now';
 
-    return {
-      report: newReport,
-      updatedEstimate,
-      isLive: false,
-    };
-  },
-
-  async getRecommendations(): Promise<{ data: SmartRecommendation; isLive: boolean }> {
-    if (this.isLiveApiConfigured()) {
-      try {
-        const res = await fetch(`${API_BASE_URL}/recommendations`);
-        if (res.ok) {
-          const json = await res.json();
-          return { data: json.data, isLive: true };
-        }
-        if (DATA_MODE === 'production') {
-          throw new Error(`API returned status ${res.status}`);
-        }
-      } catch (err: any) {
-        if (DATA_MODE === 'production') {
-          throw new Error(`Live recommendations temporarily unavailable: ${err.message || 'API unreachable'}`);
-        }
-        console.warn('API Gateway unreachable, calculating recommendations locally:', err);
-      }
-    } else if (DATA_MODE === 'production') {
-      throw new Error('Production mode active: Live API URL is not configured.');
-    }
-
-    // Cold-Start Protected Demo Recommendation Calculation
-    const candidates = INITIAL_LOCATIONS.map((loc) => ({
-      ...loc,
-      estimate: computeClientEstimate(mockReports[loc.id] || []),
-    }));
-
-    // Must have at least 3 fresh reports and >= 50% confidence
-    const eligible = candidates.filter(
-      (c) =>
-        c.estimate &&
-        c.estimate.predictedWaitMinutes !== null &&
-        ['LIVE', 'RECENT'].includes(c.estimate.freshness) &&
-        c.estimate.recentReportCount >= 3 &&
-        c.estimate.confidence >= 0.50
-    );
-
-    if (eligible.length === 0) {
       return {
         data: {
-          recommendedLocationId: null,
-          recommendedLocationName: null,
-          reason:
-            'Not enough recent queue reports across campus to make a reliable recommendation yet. At least 3 fresh observations and 50%+ confidence required.',
-          isEligible: false,
-          state: 'insufficient_data',
-          minReportsRequired: 3,
+          recommendedLocationId: winner.id,
+          recommendedLocationName: winner.name,
+          predictedWaitMinutes: wEst.predictedWaitMinutes!,
+          congestion: wEst.congestion,
+          confidence: wEst.confidence,
+          confidenceLabel: wEst.confidenceLabel,
+          reason: `Shortest estimated wait (~${wEst.predictedWaitMinutes} min) with ${wEst.confidenceLabel.toLowerCase()} evidence; verified by ${wEst.recentReportCount} fresh reports updated ${ageText}.`,
+          isEligible: true,
+          state: 'recommended',
           candidateCount: candidates.length,
-          eligibleCount: 0,
+          eligibleCount: eligible.length,
         },
         isLive: false,
       };
-    }
+    },
 
-    eligible.sort((a, b) => {
-      const waitA = a.estimate!.predictedWaitMinutes!;
-      const waitB = b.estimate!.predictedWaitMinutes!;
-      if (waitA !== waitB) return waitA - waitB;
-      return b.estimate!.confidence - a.estimate!.confidence;
-    });
-
-    const winner = eligible[0];
-    const wEst = winner.estimate!;
-    const ageText =
-      wEst.newestReportAgeMinutes && wEst.newestReportAgeMinutes >= 1
-        ? `${Math.round(wEst.newestReportAgeMinutes)}m ago`
-        : 'just now';
-
-    return {
-      data: {
-        recommendedLocationId: winner.id,
-        recommendedLocationName: winner.name,
-        predictedWaitMinutes: wEst.predictedWaitMinutes!,
-        congestion: wEst.congestion,
-        confidence: wEst.confidence,
-        confidenceLabel: wEst.confidenceLabel,
-        reason: `Shortest estimated wait (~${wEst.predictedWaitMinutes} min) with ${wEst.confidenceLabel.toLowerCase()} evidence; verified by ${wEst.recentReportCount} fresh reports updated ${ageText}.`,
-        isEligible: true,
-        state: 'recommended',
-        candidateCount: candidates.length,
-        eligibleCount: eligible.length,
-      },
-      isLive: false,
-    };
-  },
-
-  async getHistorical(locationId: string): Promise<{ data: HistoricalData; isLive: boolean }> {
-    if (this.isLiveApiConfigured()) {
-      try {
-        const res = await fetch(`${API_BASE_URL}/locations/${locationId}/historical`);
-        if (res.ok) {
-          const json = await res.json();
-          return { data: json.data, isLive: true };
+    async getHistorical(locationId: string): Promise<{ data: HistoricalData; isLive: boolean }> {
+      const mode = getDataMode();
+      const baseUrl = getBaseUrl();
+      if (this.isLiveApiConfigured()) {
+        try {
+          const res = await fetch(`${baseUrl}/locations/${locationId}/historical`);
+          if (res.ok) {
+            const json = await res.json();
+            return { data: json.data, isLive: true };
+          }
+          if (mode === 'production') {
+            throw new Error(`Historical API returned status ${res.status}`);
+          }
+        } catch (err: any) {
+          if (mode === 'production') {
+            throw new Error(`Historical queue patterns temporarily unavailable: ${err.message || 'API unreachable'}`);
+          }
         }
-        if (DATA_MODE === 'production') {
-          throw new Error(`Historical API returned status ${res.status}`);
-        }
-      } catch (err: any) {
-        if (DATA_MODE === 'production') {
-          throw new Error(`Historical queue patterns temporarily unavailable: ${err.message || 'API unreachable'}`);
-        }
+      } else if (mode === 'production') {
+        throw new Error('Production mode active: Live API URL is not configured.');
       }
-    } else if (DATA_MODE === 'production') {
-      throw new Error('Production mode active: Live API URL is not configured.');
-    }
 
-    // Demo Mode Simulated Historical Curve
-    const hourlyTrends = Array.from({ length: 24 }, (_, h) => {
-      // Meal rush simulation: lunch (12-14) and dinner (19-21)
-      let avgWait: number | null = null;
-      let count = 0;
-      if (h >= 8 && h <= 22) {
-        if (h >= 12 && h <= 14) {
-          avgWait = Math.round((14 + Math.sin(h) * 4) * 10) / 10;
-          count = 12;
-        } else if (h >= 19 && h <= 21) {
-          avgWait = Math.round((16 + Math.cos(h) * 5) * 10) / 10;
-          count = 16;
-        } else {
-          avgWait = Math.round((4 + (h % 3)) * 10) / 10;
-          count = 6;
+      // Demo Mode Simulated Historical Curve
+      const hourlyTrends = Array.from({ length: 24 }, (_, h) => {
+        // Meal rush simulation: lunch (12-14) and dinner (19-21)
+        let avgWait: number | null = null;
+        let count = 0;
+        if (h >= 8 && h <= 22) {
+          if (h >= 12 && h <= 14) {
+            avgWait = Math.round((14 + Math.sin(h) * 4) * 10) / 10;
+            count = 12;
+          } else if (h >= 19 && h <= 21) {
+            avgWait = Math.round((16 + Math.cos(h) * 5) * 10) / 10;
+            count = 16;
+          } else {
+            avgWait = Math.round((4 + (h % 3)) * 10) / 10;
+            count = 6;
+          }
         }
-      }
+        return {
+          hour: h,
+          label: `${h.toString().padStart(2, '0')}:00`,
+          historicalAverageWaitMinutes: avgWait,
+          historicalAverageQueueLength: avgWait ? Math.round(avgWait * 1.5) : null,
+          sampleCount: count,
+          averageWaitMinutes: avgWait,
+          averageQueueLength: avgWait ? Math.round(avgWait * 1.5) : null,
+          observationCount: count,
+        };
+      });
+
       return {
-        hour: h,
-        label: `${h.toString().padStart(2, '0')}:00`,
-        historicalAverageWaitMinutes: avgWait,
-        historicalAverageQueueLength: avgWait ? Math.round(avgWait * 1.5) : null,
-        sampleCount: count,
-        averageWaitMinutes: avgWait,
-        averageQueueLength: avgWait ? Math.round(avgWait * 1.5) : null,
-        observationCount: count,
-      };
-    });
-
-    return {
-      data: {
-        locationId,
-        status: 'available',
-        timezone: 'Asia/Kolkata',
-        metricType: 'HISTORICAL_AVERAGES',
-        minSamplesRequiredForPeak: 3,
-        totalObservations: 42,
-        disclaimer: 'Historical averages reflect empirical crowdsourced observations in Indian Standard Time (IST, UTC+05:30) and should not be treated as deterministic real-time forecasts.',
-        hourlyTrends,
-        busiestHour: {
-          hour: 20,
-          label: '20:00',
-          historicalAverageWaitMinutes: 18.5,
-          averageWaitMinutes: 18.5,
-          sampleCount: 16,
-        },
-        quietestHour: {
-          hour: 16,
-          label: '16:00',
-          historicalAverageWaitMinutes: 3.5,
-          averageWaitMinutes: 3.5,
-          sampleCount: 6,
-        },
-        summary: 'Demo historical average curve aggregated from 42 campus observations over past 14 days (Campus Timezone: Asia/Kolkata).',
-      },
-      isLive: false,
-    };
-  },
-
-  async getAdminReports(bearerToken?: string): Promise<{ reports: QueueReport[]; isLive: boolean }> {
-    const token =
-      bearerToken ||
-      (typeof localStorage !== 'undefined' ? localStorage.getItem('queuesense_admin_token') : null) ||
-      '';
-
-    if (this.isLiveApiConfigured()) {
-      if (!token || !token.trim()) {
-        throw new Error('UNAUTHORIZED');
-      }
-      try {
-        const res = await fetch(`${API_BASE_URL}/admin/reports`, {
-          headers: {
-            Authorization: `Bearer ${token.trim()}`,
+        data: {
+          locationId,
+          status: 'available',
+          timezone: 'Asia/Kolkata',
+          metricType: 'HISTORICAL_AVERAGES',
+          minSamplesRequiredForPeak: 3,
+          totalObservations: 42,
+          disclaimer: 'Historical averages reflect empirical crowdsourced observations in Indian Standard Time (IST, UTC+05:30) and should not be treated as deterministic real-time forecasts.',
+          hourlyTrends,
+          busiestHour: {
+            hour: 20,
+            label: '20:00',
+            historicalAverageWaitMinutes: 18.5,
+            averageWaitMinutes: 18.5,
+            sampleCount: 16,
           },
-        });
-        if (res.ok) {
-          const json = await res.json();
-          return { reports: json.data.reports, isLive: true };
-        }
-        if (res.status === 401 || res.status === 403) {
+          quietestHour: {
+            hour: 16,
+            label: '16:00',
+            historicalAverageWaitMinutes: 3.5,
+            averageWaitMinutes: 3.5,
+            sampleCount: 6,
+          },
+          summary: 'Demo historical average curve aggregated from 42 campus observations over past 14 days (Campus Timezone: Asia/Kolkata).',
+        },
+        isLive: false,
+      };
+    },
+
+    async getAdminReports(bearerToken?: string): Promise<{ reports: QueueReport[]; isLive: boolean }> {
+      const mode = getDataMode();
+      const baseUrl = getBaseUrl();
+      const token =
+        bearerToken ||
+        (typeof localStorage !== 'undefined' ? localStorage.getItem('queuesense_admin_token') : null) ||
+        '';
+
+      if (this.isLiveApiConfigured()) {
+        if (!token || !token.trim()) {
           throw new Error('UNAUTHORIZED');
         }
-        if (DATA_MODE === 'production') {
-          throw new Error(`Admin audit API returned status ${res.status}`);
+        try {
+          const res = await fetch(`${baseUrl}/admin/reports`, {
+            headers: {
+              Authorization: `Bearer ${token.trim()}`,
+            },
+          });
+          if (res.ok) {
+            const json = await res.json();
+            return { reports: json.data.reports, isLive: true };
+          }
+          if (res.status === 401 || res.status === 403) {
+            throw new Error('UNAUTHORIZED');
+          }
+          if (mode === 'production') {
+            throw new Error(`Admin audit API returned status ${res.status}`);
+          }
+        } catch (err: any) {
+          if (err.message === 'UNAUTHORIZED' || mode === 'production') {
+            throw err;
+          }
+          console.warn('API Gateway unreachable, returning demo admin audit feed:', err);
         }
-      } catch (err: any) {
-        if (err.message === 'UNAUTHORIZED' || DATA_MODE === 'production') {
-          throw err;
-        }
-        console.warn('API Gateway unreachable, returning demo admin audit feed:', err);
+      } else if (mode === 'production') {
+        throw new Error('Production mode active: Live API URL is not configured.');
       }
-    } else if (DATA_MODE === 'production') {
-      throw new Error('Production mode active: Live API URL is not configured.');
-    }
 
-    const allReports: QueueReport[] = [];
-    Object.values(mockReports).forEach((reps) => {
-      allReports.push(...reps);
-    });
-    allReports.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      const allReports: QueueReport[] = [];
+      Object.values(mockReports).forEach((reps) => {
+        allReports.push(...reps);
+      });
+      allReports.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-    return { reports: allReports, isLive: false };
-  },
-};
+      return { reports: allReports, isLive: false };
+    },
+  };
+}
+
+export const api = createApiClient();
