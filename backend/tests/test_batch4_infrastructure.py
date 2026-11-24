@@ -5,7 +5,7 @@ Validates:
 - P1.18: Observability, CloudWatch log groups, 30-day retention, privacy-preserving API access logging, and operational alarms with SNS wiring.
 - P1.19: Data persistence, DynamoDB PITR, deletion protection, encryption, S3 versioning, lifecycle expiration, and retain policies.
 - P1.20: Cost controls, denial-of-wallet resilience, reserved concurrency ceilings, API throttling, on-demand billing.
-- IAM least privilege, KMS encryption context scoping, and DynamoDB permissions.
+- IAM least privilege, action and resource scoping, KMS encryption context scoping, and DynamoDB permissions.
 - Cognito User Pool admin lockdown, mandatory TOTP MFA ("ON"), password policy, and user enumeration defense.
 - CloudFront SPA routing via CloudFront Function, elimination of global 403/404 rewrites, and strict response security headers.
 
@@ -327,7 +327,13 @@ def validate_submit_report_kms_least_privilege(tmpl: dict):
 
 
 def validate_iam_no_wildcards_in_any_policy(tmpl: dict):
-    """Validates that no Lambda execution role grants wildcard actions or dangerous administrative permissions."""
+    """Validates that Lambda execution roles follow least-privilege principles across actions and resources:
+    1. Action Scoping: Strictly forbids wildcard actions (e.g., '*', 'dynamodb:*', 'ssm:*', 'kms:*', 's3:*')
+       and destructive table/database administration actions.
+    2. Resource Scoping: Explicitly distinguishes genuinely necessary wildcard resource permissions
+       (such as kms:Decrypt with strict encryption context conditions) from unnecessarily broad grants.
+       Forbids broad 'Resource: *' for DynamoDB data plane operations, SSM parameters, and S3 objects.
+    """
     resources = tmpl.get("Resources", {})
 
     forbidden_action_patterns = [
@@ -335,8 +341,28 @@ def validate_iam_no_wildcards_in_any_policy(tmpl: dict):
         r"^ssm:\*$",
         r"^kms:\*$",
         r"^s3:\*$",
+        r"^iam:\*$",
+        r"^\*$",
         r"^dynamodb:DeleteTable$",
         r"^dynamodb:DropTable$",
+    ]
+
+    # Data plane actions that must NEVER be granted with Resource: "*"
+    scoped_action_prefixes = [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:BatchGetItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:TransactGetItems",
+        "dynamodb:TransactWriteItems",
+        "ssm:GetParameter",
+        "ssm:GetParameters",
+        "s3:GetObject",
+        "s3:PutObject",
     ]
 
     for res_name, res_val in resources.items():
@@ -348,11 +374,29 @@ def validate_iam_no_wildcards_in_any_policy(tmpl: dict):
                         actions = stmt.get("Action", [])
                         if isinstance(actions, str):
                             actions = [actions]
+
+                        # Check actions for forbidden wildcards or administrative operations
                         for act in actions:
                             for pat in forbidden_action_patterns:
                                 assert not re.match(pat, act, re.IGNORECASE), (
                                     f"Forbidden action '{act}' found in {res_name}"
                                 )
+
+                        # Check resources for unjustified broad wildcards
+                        resources_val = stmt.get("Resource", [])
+                        if isinstance(resources_val, (str, dict)):
+                            resources_val = [resources_val]
+
+                        for res_entry in resources_val:
+                            is_bare_star = (res_entry == "*")
+                            if is_bare_star:
+                                for act in actions:
+                                    for scoped_prefix in scoped_action_prefixes:
+                                        if act.lower() == scoped_prefix.lower():
+                                            assert False, (
+                                                f"Unjustifiably broad Resource '*' found for action '{act}' in {res_name}. "
+                                                f"DynamoDB actions must be scoped to specific table/index ARNs."
+                                            )
 
 
 def validate_cognito_mfa_and_admin_security(tmpl: dict):
@@ -562,7 +606,7 @@ def test_negative_mutation_raw_ip_in_access_log_rejected(template):
         validate_api_gateway_access_logging_privacy(mutated)
 
 
-def test_negative_mutation_wildcard_iam_policy_rejected(template):
+def test_negative_mutation_wildcard_iam_action_rejected(template):
     """Negative Mutation Test: Adding a wildcard action (dynamodb:*) to a Lambda policy in a deep copy causes validate_iam_no_wildcards_in_any_policy to fail."""
     mutated = copy.deepcopy(template)
     mutated["Resources"]["SubmitReportFunction"]["Properties"]["Policies"][0]["Statement"].append({
@@ -571,6 +615,21 @@ def test_negative_mutation_wildcard_iam_policy_rejected(template):
         "Resource": "*"
     })
     with pytest.raises(AssertionError, match=r"Forbidden action 'dynamodb:\*' found in SubmitReportFunction"):
+        validate_iam_no_wildcards_in_any_policy(mutated)
+
+
+def test_negative_mutation_broad_iam_resource_wildcard_rejected(template):
+    """Negative Mutation Test: Adding an otherwise permitted action (dynamodb:GetItem) with an unjustifiably broad Resource: '*' causes validate_iam_no_wildcards_in_any_policy to fail."""
+    mutated = copy.deepcopy(template)
+    mutated["Resources"]["GetLocationsFunction"]["Properties"]["Policies"][0]["Statement"].append({
+        "Effect": "Allow",
+        "Action": ["dynamodb:GetItem"],
+        "Resource": "*"
+    })
+    with pytest.raises(
+        AssertionError,
+        match=r"Unjustifiably broad Resource '\*' found for action 'dynamodb:GetItem' in GetLocationsFunction"
+    ):
         validate_iam_no_wildcards_in_any_policy(mutated)
 
 
