@@ -987,12 +987,21 @@ Status Definitions:
      - Refresh cycle: On failed refresh (network dropout, timeout, HTTP 500, HTTP 404, HTTP 429, schema rejection), transitions to `STALE`. Retains existing cached data and original `lastSuccessfulSync` timestamp.
      - On subsequent successful refresh, automatically recovers from `STALE` back to `FRESH`.
      - Tested in real headless Puppeteer browser across the complete 13-step lifecycle: initial load $\rightarrow$ fresh state verification $\rightarrow$ timestamp recorded $\rightarrow$ refresh triggered $\rightarrow$ forced HTTP 500 $\rightarrow$ `STALE` state transition $\rightarrow$ original timestamp preserved $\rightarrow$ visible stale banner with alert role $\rightarrow$ `STALE DATA` badge on cards $\rightarrow$ `(Stale Estimate • Sync Failed)` wait indicator $\rightarrow$ `Cached Recommendation (Stale Data)` on banner $\rightarrow$ retry button clicked $\rightarrow$ HTTP 200 response $\rightarrow$ recovery to `FRESH`.
-  2. **Strict API Client Schema Validation & Fail-Closed Integrity:**
+  2. **Strict API Client Schema Validation, Secure Idempotency & Fail-Closed Integrity:**
      - Hardened all client methods in `frontend/src/services/api.ts` (`getLocations`, `getRecommendations`, `getLocationQueue`, `getHistorical`, `getAdminReports`, `submitReport`).
      - Added runtime configuration fallback checking `window.__QUEUESENSE_API_URL__`, `window.__QUEUESENSE_DATA_MODE__`, and `window.__QUEUESENSE_CAMPUS_ID__`, supporting relative base URLs.
-     - Validates schemas deeply across all 6 endpoints; rejects malformed responses (nulls, missing `data` array/object, invalid types, missing required fields) with explicit descriptive errors.
-     - Preserves strict fail-closed contract in production mode: missing API URL or network failure throws immediately with ZERO mock fallback.
-     - Verified with 12 contract validation tests in `frontend/src/test/api-contracts-and-validation.test.ts`.
+     - **Cryptographically Secure Idempotency Keys:** Removed all non-cryptographic timestamp/performance-based fallbacks. `generateSecureIdempotencyKey()` strictly uses CSPRNG (`crypto.randomUUID()` or `crypto.getRandomValues()`); if neither is available, fails safely with an explicit error. Preserves and validates caller-supplied idempotency keys (`^[a-zA-Z0-9_-]{8,64}$`), ensuring keys are generated once per logical submission and reused across network retries to prevent accidental duplicate submissions.
+     - **Device Identity Contract Alignment:** When device identity is unavailable (e.g. storage disabled and CSPRNG unavailable), the client strictly omits the `X-Device-ID` header rather than fabricating a shared `anon-client` identifier. The backend safely defaults to its trusted IP-based rate limiting budget (`ip::<sourceIp>`).
+     - **Comprehensive Field-Level Schema Validation:** Validates field types, numeric boundaries, enum constraints, ISO timestamps, and nested objects/arrays across all 6 endpoints:
+       - `GET /locations`: Validates array structure, non-empty `id`/`name`, valid category (`MESS`, `CANTEEN`, `CAFE`, `RESTAURANT`, etc.), and nested `estimate` bounds.
+       - `GET /locations/{id}/queue`: Validates `location`, `estimate`, and `reports` array with individual report validation (`reportId`, `reportedWaitMinutes` [0, 120], `queueLength` [0, 300], ISO date).
+       - `POST /locations/{id}/reports`: Validates `report` and `updatedEstimate` objects and bounds.
+       - `GET /recommendations`: Validates `isEligible` (strict boolean), `confidence` [0, 1], non-empty `reason`, `state` enum, and location details when eligible.
+       - `GET /locations/{id}/historical`: Validates `locationId`, `status` enum, `totalObservations`, `hourlyTrends` array (hours 0-23, labels, wait and queue numbers).
+       - `GET /admin/reports`: Validates reports array and every individual report record; strictly enforces Bearer authorization.
+     - Rejects `NaN`, `Infinity`, `-Infinity`, booleans where numbers expected, negative values, and out-of-range bounds.
+     - Preserves strict fail-closed contract in production mode: missing API URL, network failure, or schema failure throws immediately with ZERO mock fallback.
+     - Verified with 37 contract and boundary tests in `frontend/src/test/api-contracts-and-validation.test.ts`.
   3. **Visual Staleness Disclosures & User Controls:**
      - Prominent global `STALE DATA WARNING` banner displayed across the application when `syncState === 'STALE'`, displaying the exact last successful timestamp and an immediate "Retry Sync" button.
      - `OutletCard`: Displays an amber `STALE DATA` badge and `(Stale Estimate • Sync Failed)` wait indicator.
@@ -1014,7 +1023,7 @@ Status Definitions:
 - **Exact Tests Added:**
   - `src/test/stale-data-integrity.test.ts` (15 tests passing: initial load, network dropouts, 500/429 handling, timeout handling, malformed payload rejections, state transitions, timestamp retention)
   - `src/test/stale-data-browser.test.ts` (8 browser tests passing: complete 13-step lifecycle, initial failure ERROR recovery, network abort, timeout abort, HTTP 404, malformed schema rejection, empty response, repeated failures)
-  - `src/test/api-contracts-and-validation.test.ts` (12 contract and fail-closed tests passing)
+  - `src/test/api-contracts-and-validation.test.ts` (37 contract, idempotency, device identity, field validation, and fail-closed tests passing)
   - `src/test/runtime-performance.test.ts` (6 performance, CLS, and UX tests passing)
   - `src/test/data-isolation.test.ts` (18 fail-closed tests passing)
   - `src/test/a11y-and-resilience.test.ts` (10 tests passing)

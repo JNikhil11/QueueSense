@@ -157,13 +157,14 @@ describe('P1.10: Client Device Identity & Fairness Integration', () => {
       reportedWaitMinutes: 10,
       queueLength: 5,
       note: 'Fallback test without device ID',
+      idempotencyKey: 'idem_caller_supplied_fallback_key',
     });
 
     expect(result.isLive).toBe(true);
-    // X-Device-ID header must NOT be attached
+    // X-Device-ID header must NOT be attached (no fabricated anon-client or fake ID)
     expect(capturedHeaders['X-Device-ID']).toBeUndefined();
     expect(capturedHeaders['Content-Type']).toBe('application/json');
-    expect(capturedHeaders['X-Idempotency-Key']).toBeTruthy();
+    expect(capturedHeaders['X-Idempotency-Key']).toBe('idem_caller_supplied_fallback_key');
     expect(capturedBody.reportedWaitMinutes).toBe(10);
   });
 

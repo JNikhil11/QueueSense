@@ -707,6 +707,175 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
   };
 }
 
+// =========================================================================
+// Strict Field-Level API Validation Helpers
+// =========================================================================
+
+export function isNonEmptyString(val: unknown): val is string {
+  return typeof val === 'string' && val.trim().length > 0;
+}
+
+export function isValidNumber(val: unknown, min = -Infinity, max = Infinity): val is number {
+  return typeof val === 'number' && Number.isFinite(val) && !Number.isNaN(val) && val >= min && val <= max;
+}
+
+export function isValidInteger(val: unknown, min = -Infinity, max = Infinity): val is number {
+  return isValidNumber(val, min, max) && Number.isInteger(val);
+}
+
+export function isValidIsoDate(val: unknown): boolean {
+  if (typeof val !== 'string' || !val.trim()) return false;
+  const d = new Date(val);
+  return !Number.isNaN(d.getTime());
+}
+
+export const VALID_CONGESTION_LEVELS = new Set(['LOW', 'MODERATE', 'HIGH', 'VERY_HIGH', 'SURGE', 'UNKNOWN']);
+export const VALID_FRESHNESS_STATES = new Set(['LIVE', 'RECENT', 'STALE', 'NO RECENT DATA', 'INSUFFICIENT DATA']);
+export const VALID_LOCATION_CATEGORIES = new Set([
+  'MESS',
+  'CANTEEN',
+  'CAFE',
+  'RESTAURANT',
+  'HOSTEL_MESS',
+  'mess',
+  'canteen',
+  'cafe',
+  'restaurant',
+  'hostel_mess',
+]);
+export const VALID_RECOMMENDATION_STATES = new Set(['recommended', 'insufficient_data', 'stale_data', 'no_active_outlets']);
+export const VALID_HISTORICAL_STATUSES = new Set(['available', 'insufficient_history']);
+
+/**
+ * Validates a QueueEstimate object with strict type and boundary checking.
+ */
+export function validateQueueEstimate(est: unknown, context = 'estimate'): QueueEstimate {
+  if (!est || typeof est !== 'object' || Array.isArray(est)) {
+    throw new Error(`Malformed API response: ${context} must be an object`);
+  }
+  const e = est as Record<string, any>;
+
+  // confidence: number [0, 1]
+  if (!isValidNumber(e.confidence, 0, 1)) {
+    throw new Error(`Malformed API response: ${context}.confidence must be a number between 0 and 1, got ${e.confidence}`);
+  }
+
+  // congestion: valid enum
+  if (typeof e.congestion !== 'string' || !VALID_CONGESTION_LEVELS.has(e.congestion)) {
+    throw new Error(`Malformed API response: ${context}.congestion has invalid value '${e.congestion}'`);
+  }
+
+  // freshness: non-empty string
+  if (typeof e.freshness !== 'string' || !e.freshness.trim()) {
+    throw new Error(`Malformed API response: ${context}.freshness must be a non-empty string`);
+  }
+
+  // predictedWaitMinutes: null or number [0, 120]
+  if (e.predictedWaitMinutes !== null && e.predictedWaitMinutes !== undefined && !isValidNumber(e.predictedWaitMinutes, 0, 120)) {
+    throw new Error(`Malformed API response: ${context}.predictedWaitMinutes must be null or number between 0 and 120, got ${e.predictedWaitMinutes}`);
+  }
+
+  // predictedQueueLength: null or integer [0, 300]
+  if (e.predictedQueueLength !== null && e.predictedQueueLength !== undefined && !isValidInteger(e.predictedQueueLength, 0, 300)) {
+    throw new Error(`Malformed API response: ${context}.predictedQueueLength must be null or integer between 0 and 300, got ${e.predictedQueueLength}`);
+  }
+
+  // Optional counts
+  if (e.reportCount !== undefined && !isValidInteger(e.reportCount, 0)) {
+    throw new Error(`Malformed API response: ${context}.reportCount must be a non-negative integer`);
+  }
+  if (e.recentReportCount !== undefined && !isValidInteger(e.recentReportCount, 0)) {
+    throw new Error(`Malformed API response: ${context}.recentReportCount must be a non-negative integer`);
+  }
+
+  return e as QueueEstimate;
+}
+
+/**
+ * Validates a CampusLocation object with strict field-level checking.
+ */
+export function validateCampusLocation(loc: unknown, context = 'location'): CampusLocation {
+  if (!loc || typeof loc !== 'object' || Array.isArray(loc)) {
+    throw new Error(`Malformed API response: ${context} must be an object`);
+  }
+  const l = loc as Record<string, any>;
+
+  if (!isNonEmptyString(l.id)) {
+    throw new Error(`Malformed API response: ${context}.id must be a non-empty string`);
+  }
+  if (!isNonEmptyString(l.name)) {
+    throw new Error(`Malformed API response: ${context}.name must be a non-empty string`);
+  }
+  if (!isNonEmptyString(l.category) || (!VALID_LOCATION_CATEGORIES.has(l.category) && !VALID_LOCATION_CATEGORIES.has(l.category.toUpperCase()))) {
+    throw new Error(`Malformed API response: ${context}.category has invalid value '${l.category}'`);
+  }
+
+  if (l.estimate !== undefined && l.estimate !== null) {
+    validateQueueEstimate(l.estimate, `${context}.estimate`);
+  }
+
+  return l as CampusLocation;
+}
+
+/**
+ * Validates a QueueReport object with strict field-level and boundary checking.
+ */
+export function validateQueueReport(rep: unknown, context = 'report'): QueueReport {
+  if (!rep || typeof rep !== 'object' || Array.isArray(rep)) {
+    throw new Error(`Malformed API response: ${context} must be an object`);
+  }
+  const r = rep as Record<string, any>;
+
+  if (!isNonEmptyString(r.reportId) && !isNonEmptyString(r.id)) {
+    throw new Error(`Malformed API response: ${context}.reportId must be a non-empty string`);
+  }
+  // Standardize reportId
+  if (!r.reportId && r.id) {
+    r.reportId = r.id;
+  }
+
+  if (!isValidNumber(r.reportedWaitMinutes, 0, 120)) {
+    throw new Error(`Malformed API response: ${context}.reportedWaitMinutes must be a number between 0 and 120, got ${r.reportedWaitMinutes}`);
+  }
+  if (!isValidInteger(r.queueLength, 0, 300)) {
+    throw new Error(`Malformed API response: ${context}.queueLength must be an integer between 0 and 300, got ${r.queueLength}`);
+  }
+  if (!isValidIsoDate(r.timestamp)) {
+    throw new Error(`Malformed API response: ${context}.timestamp must be a valid ISO date string, got '${r.timestamp}'`);
+  }
+
+  return r as QueueReport;
+}
+
+/**
+ * Generates a cryptographically secure random idempotency key.
+ * Strictly uses crypto.randomUUID() or crypto.getRandomValues().
+ * If neither CSPRNG API is available, throws an explicit Error.
+ * NEVER falls back to Math.random(), timestamps, or performance.now().
+ */
+export function generateSecureIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined') {
+    if (typeof crypto.randomUUID === 'function') {
+      try {
+        return 'idem_' + crypto.randomUUID();
+      } catch {
+        // Fall through to getRandomValues
+      }
+    }
+    if (typeof crypto.getRandomValues === 'function') {
+      try {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+        return 'idem_' + hex;
+      } catch {
+        // Fall through to error throw
+      }
+    }
+  }
+  throw new Error('Cryptographically secure randomness is unavailable. Cannot generate a secure idempotency key.');
+}
+
 export interface ApiClientConfig {
   apiBaseUrl?: string;
   dataMode?: DataMode;
@@ -751,18 +920,8 @@ export function createApiClient(config: ApiClientConfig = {}) {
               throw new Error('Malformed API response: expected locations array');
             }
             // Strict field and type validation on every location item
-            for (const item of json.data) {
-              if (
-                !item ||
-                typeof item !== 'object' ||
-                typeof item.id !== 'string' ||
-                !item.id.trim() ||
-                typeof item.name !== 'string' ||
-                !item.name.trim() ||
-                typeof item.category !== 'string'
-              ) {
-                throw new Error('Malformed API response: invalid location entry in locations array');
-              }
+            for (let i = 0; i < json.data.length; i++) {
+              validateCampusLocation(json.data[i], `locations[${i}]`);
             }
             return { data: json.data, isLive: true };
           }
@@ -806,13 +965,17 @@ export function createApiClient(config: ApiClientConfig = {}) {
               typeof json !== 'object' ||
               !json.data ||
               typeof json.data !== 'object' ||
+              Array.isArray(json.data) ||
               !json.data.location ||
-              typeof json.data.location !== 'object' ||
               !json.data.estimate ||
-              typeof json.data.estimate !== 'object' ||
               !Array.isArray(json.data.reports)
             ) {
               throw new Error('Malformed API response: expected queue data object with location, estimate, and reports');
+            }
+            validateCampusLocation(json.data.location, 'queue.location');
+            validateQueueEstimate(json.data.estimate, 'queue.estimate');
+            for (let i = 0; i < json.data.reports.length; i++) {
+              validateQueueReport(json.data.reports[i], `queue.reports[${i}]`);
             }
             return { ...json.data, isLive: true };
           }
@@ -849,18 +1012,18 @@ export function createApiClient(config: ApiClientConfig = {}) {
     ): Promise<{ report: QueueReport; updatedEstimate: QueueEstimate; isLive: boolean }> {
       const mode = getDataMode();
       const baseUrl = getBaseUrl();
-      // Generate client-side idempotency key using CSPRNG
+
+      // Secure Idempotency Key Handling
+      // 1. Caller-supplied key: validated against safe format and reused
+      // 2. Auto-generated key: generated strictly using CSPRNG; fails safely if crypto is unavailable
       let idempotencyKey = payload.idempotencyKey;
       if (!idempotencyKey) {
-        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-          idempotencyKey = 'idem_' + crypto.randomUUID();
-        } else if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-          const bytes = new Uint8Array(16);
-          crypto.getRandomValues(bytes);
-          idempotencyKey = 'idem_' + Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
-        } else {
-          idempotencyKey = `idem_${Date.now()}_${performance.now().toString(36).replace('.', '')}`;
+        idempotencyKey = generateSecureIdempotencyKey();
+      } else {
+        if (typeof idempotencyKey !== 'string' || !/^[a-zA-Z0-9_-]{8,64}$/.test(idempotencyKey.trim())) {
+          throw new Error('Invalid idempotency key format: must be 8-64 alphanumeric, hyphen, or underscore characters.');
         }
+        idempotencyKey = idempotencyKey.trim();
       }
 
       if (this.isLiveApiConfigured()) {
@@ -870,6 +1033,9 @@ export function createApiClient(config: ApiClientConfig = {}) {
             'Content-Type': 'application/json',
             'X-Idempotency-Key': idempotencyKey,
           };
+          // Only attach X-Device-ID if a valid, non-fabricated device ID was returned.
+          // When null (e.g. storage disabled and crypto unavailable), header is strictly omitted
+          // allowing the backend to fall back gracefully to IP-level rate limiting.
           if (deviceId) {
             headers['X-Device-ID'] = deviceId;
           }
@@ -887,11 +1053,14 @@ export function createApiClient(config: ApiClientConfig = {}) {
               typeof json !== 'object' ||
               !json.data ||
               typeof json.data !== 'object' ||
+              Array.isArray(json.data) ||
               !json.data.report ||
               !json.data.updatedEstimate
             ) {
               throw new Error('Malformed API response: expected report and updatedEstimate');
             }
+            validateQueueReport(json.data.report, 'submitReport.report');
+            validateQueueEstimate(json.data.updatedEstimate, 'submitReport.updatedEstimate');
             return { ...json.data, isLive: true };
           }
 
@@ -955,11 +1124,40 @@ export function createApiClient(config: ApiClientConfig = {}) {
               Array.isArray(json.data) ||
               typeof json.data.isEligible !== 'boolean' ||
               typeof json.data.reason !== 'string' ||
-              typeof json.data.confidence !== 'number'
+              !isNonEmptyString(json.data.reason) ||
+              !isValidNumber(json.data.confidence, 0, 1)
             ) {
               throw new Error('Malformed API response: expected recommendation object with isEligible, reason, and confidence');
             }
-            return { data: json.data, isLive: true };
+
+            const rec = json.data;
+            if (typeof rec.state !== 'string' || !VALID_RECOMMENDATION_STATES.has(rec.state)) {
+              throw new Error(`Malformed API response: recommendations.state has invalid value '${rec.state}'`);
+            }
+
+            if (rec.isEligible === true) {
+              if (!isNonEmptyString(rec.recommendedLocationId)) {
+                throw new Error('Malformed API response: eligible recommendation must have non-empty recommendedLocationId');
+              }
+              if (!isNonEmptyString(rec.recommendedLocationName)) {
+                throw new Error('Malformed API response: eligible recommendation must have non-empty recommendedLocationName');
+              }
+              if (!isValidNumber(rec.predictedWaitMinutes, 0, 120)) {
+                throw new Error(`Malformed API response: eligible recommendation predictedWaitMinutes must be between 0 and 120, got ${rec.predictedWaitMinutes}`);
+              }
+              if (typeof rec.congestion !== 'string' || !VALID_CONGESTION_LEVELS.has(rec.congestion)) {
+                throw new Error(`Malformed API response: eligible recommendation congestion has invalid value '${rec.congestion}'`);
+              }
+            } else {
+              if (rec.recommendedLocationId !== null && rec.recommendedLocationId !== undefined && !isNonEmptyString(rec.recommendedLocationId)) {
+                throw new Error('Malformed API response: ineligible recommendation recommendedLocationId must be null or non-empty string');
+              }
+              if (rec.predictedWaitMinutes !== null && rec.predictedWaitMinutes !== undefined && !isValidNumber(rec.predictedWaitMinutes, 0, 120)) {
+                throw new Error(`Malformed API response: ineligible recommendation predictedWaitMinutes must be null or number between 0 and 120, got ${rec.predictedWaitMinutes}`);
+              }
+            }
+
+            return { data: rec, isLive: true };
           }
           if (mode === 'production') {
             throw new Error(`API returned status ${res.status}`);
@@ -1079,10 +1277,41 @@ export function createApiClient(config: ApiClientConfig = {}) {
               typeof json !== 'object' ||
               !json.data ||
               typeof json.data !== 'object' ||
-              (!Array.isArray(json.data.hourlyTrends) && typeof json.data.historicalAverageWaitMinutes !== 'number')
+              Array.isArray(json.data) ||
+              !isNonEmptyString(json.data.locationId) ||
+              typeof json.data.status !== 'string' ||
+              !VALID_HISTORICAL_STATUSES.has(json.data.status) ||
+              !Array.isArray(json.data.hourlyTrends)
             ) {
               throw new Error('Malformed API response: expected historical data object with hourly trends');
             }
+
+            const hData = json.data;
+            if (!isValidInteger(hData.totalObservations, 0)) {
+              throw new Error('Malformed API response: historical totalObservations must be a non-negative integer');
+            }
+
+            for (let i = 0; i < hData.hourlyTrends.length; i++) {
+              const trend = hData.hourlyTrends[i];
+              if (!trend || typeof trend !== 'object' || Array.isArray(trend)) {
+                throw new Error(`Malformed API response: hourlyTrends[${i}] must be an object`);
+              }
+              if (!isValidInteger(trend.hour, 0, 23)) {
+                throw new Error(`Malformed API response: hourlyTrends[${i}].hour must be an integer between 0 and 23, got ${trend.hour}`);
+              }
+              if (!isNonEmptyString(trend.label)) {
+                throw new Error(`Malformed API response: hourlyTrends[${i}].label must be a non-empty string`);
+              }
+              const wait = trend.averageWaitMinutes !== undefined ? trend.averageWaitMinutes : trend.historicalAverageWaitMinutes;
+              if (wait !== null && wait !== undefined && !isValidNumber(wait, 0, 120)) {
+                throw new Error(`Malformed API response: hourlyTrends[${i}].averageWaitMinutes must be null or number between 0 and 120, got ${wait}`);
+              }
+              const count = trend.observationCount !== undefined ? trend.observationCount : trend.sampleCount;
+              if (count !== undefined && !isValidInteger(count, 0)) {
+                throw new Error(`Malformed API response: hourlyTrends[${i}].observationCount must be a non-negative integer`);
+              }
+            }
+
             return { data: json.data, isLive: true };
           }
           if (mode === 'production') {
@@ -1187,9 +1416,13 @@ export function createApiClient(config: ApiClientConfig = {}) {
               typeof json !== 'object' ||
               !json.data ||
               typeof json.data !== 'object' ||
+              Array.isArray(json.data) ||
               !Array.isArray(json.data.reports)
             ) {
               throw new Error('Malformed API response: expected admin reports array');
+            }
+            for (let i = 0; i < json.data.reports.length; i++) {
+              validateQueueReport(json.data.reports[i], `adminReports[${i}]`);
             }
             return { reports: json.data.reports, isLive: true };
           }

@@ -97,6 +97,9 @@ export interface HistoricalData {
   minSamplesRequiredForPeak?: number;
   disclaimer?: string;
   totalObservations: number;
+  isCapped?: boolean;
+  maxObservationCap?: number;
+  coverageStatus?: string;
   hourlyTrends: HistoricalHourlyBucket[];
   busiestHour: {
     hour: number;
