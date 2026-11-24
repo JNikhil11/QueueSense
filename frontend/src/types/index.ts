@@ -31,8 +31,10 @@ export interface CampusLocation {
   category: 'MESS' | 'CANTEEN';
   description: string;
   landmarkLocation: string;
-  verificationStatus: 'STUDENT_SOURCED' | 'UNVERIFIED_LISTING' | 'COMMUNITY_LISTING' | 'VERIFIED_CAMPUS_DIRECTORY';
-  verificationSource: string;
+  verificationStatus: 'VERIFIED' | 'VERIFIED_CAMPUS_DIRECTORY' | 'UNVERIFIED' | string;
+  sourceType?: string;
+  sourceAttribution?: string;
+  verificationSource?: string;
   openHours: string;
   capacity?: number;
   capacityEstimate?: string;

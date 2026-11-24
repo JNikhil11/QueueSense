@@ -349,7 +349,7 @@ def test_p1_16_qualifies_with_three_distinct_device_reports():
             "id": "mess-a",
             "name": "Mess A",
             "active": True,
-            "verificationStatus": "STUDENT_SOURCED",
+            "verificationStatus": "VERIFIED",
             "estimate": {
                 "predictedWaitMinutes": 6.5,
                 "confidence": 0.75,
@@ -375,7 +375,7 @@ def test_p1_16_disqualifies_single_device_repeated_submissions():
             "id": "mess-spam",
             "name": "Mess Spam",
             "active": True,
-            "verificationStatus": "STUDENT_SOURCED",
+            "verificationStatus": "VERIFIED",
             "estimate": {
                 "predictedWaitMinutes": 5.0,
                 "confidence": 0.80,
@@ -395,13 +395,13 @@ def test_p1_16_disqualifies_single_device_repeated_submissions():
 
 
 def test_p1_16_disqualifies_unverified_and_inactive_outlets():
-    """Unverified or inactive outlets must never receive a recommendation."""
+    """Unverified, provenance-only, or inactive outlets must never receive a recommendation."""
     locations = [
         {
             "id": "mess-inactive",
             "name": "Mess Inactive",
             "active": False,
-            "verificationStatus": "STUDENT_SOURCED",
+            "verificationStatus": "VERIFIED",
             "estimate": {
                 "predictedWaitMinutes": 2.0,
                 "confidence": 0.90,
@@ -423,6 +423,32 @@ def test_p1_16_disqualifies_unverified_and_inactive_outlets():
                 "distinctDevicesCount": 4,
             },
         },
+        {
+            "id": "mess-student-sourced",
+            "name": "Mess Student Sourced",
+            "active": True,
+            "verificationStatus": "STUDENT_SOURCED",
+            "estimate": {
+                "predictedWaitMinutes": 2.8,
+                "confidence": 0.90,
+                "freshness": "LIVE",
+                "recentReportCount": 4,
+                "distinctDevicesCount": 4,
+            },
+        },
+        {
+            "id": "mess-community",
+            "name": "Mess Community Listing",
+            "active": True,
+            "verificationStatus": "COMMUNITY_LISTING",
+            "estimate": {
+                "predictedWaitMinutes": 2.2,
+                "confidence": 0.90,
+                "freshness": "LIVE",
+                "recentReportCount": 4,
+                "distinctDevicesCount": 4,
+            },
+        },
     ]
     rec = compute_smart_recommendation(locations)
     assert rec["isEligible"] is False
@@ -436,7 +462,7 @@ def test_p1_16_stale_data_state_transition():
             "id": "mess-stale",
             "name": "Mess Stale",
             "active": True,
-            "verificationStatus": "STUDENT_SOURCED",
+            "verificationStatus": "VERIFIED",
             "estimate": {
                 "predictedWaitMinutes": 5.0,
                 "confidence": 0.30,
@@ -715,33 +741,35 @@ def test_p1_16_fail_closed_verification_status_policy():
     }
 
     # 1. Recognized verified status -> qualifies
-    for v_status in ["VERIFIED", "VERIFIED_CAMPUS_DIRECTORY", "STUDENT_SOURCED", "COMMUNITY_LISTING", "COMMUNITY_DIRECTORY"]:
+    for v_status in ["VERIFIED", "VERIFIED_CAMPUS_DIRECTORY"]:
         locs = [{"id": "loc-1", "name": "Campus Mess", "active": True, "verificationStatus": v_status, "estimate": qualifying_est}]
         rec = compute_smart_recommendation(locs)
         assert rec["isEligible"] is True
         assert rec["recommendedLocationId"] == "loc-1"
 
-    # 2. Explicitly UNVERIFIED -> disqualified
-    locs_unverified = [{"id": "loc-2", "name": "Unverified Stall", "active": True, "verificationStatus": "UNVERIFIED", "estimate": qualifying_est}]
-    rec_unverified = compute_smart_recommendation(locs_unverified)
-    assert rec_unverified["isEligible"] is False
+    # 2. Provenance labels (STUDENT_SOURCED, COMMUNITY_LISTING) and UNVERIFIED -> disqualified
+    disqualified_statuses = [
+        "STUDENT_SOURCED",
+        "COMMUNITY_LISTING",
+        "COMMUNITY_SOURCED",
+        "COMMUNITY_DIRECTORY",
+        "UNVERIFIED",
+        "UNVERIFIED_LISTING",
+        None,
+        "",
+        "RANDOM_EXTERNAL_STATUS",
+    ]
+    for bad_status in disqualified_statuses:
+        locs_bad = [{"id": "loc-bad", "name": "Unverified Stall", "active": True, "verificationStatus": bad_status, "estimate": qualifying_est}]
+        rec_bad = compute_smart_recommendation(locs_bad)
+        assert rec_bad["isEligible"] is False, f"Status {bad_status} must fail closed"
 
-    # 3. Missing verificationStatus (None) -> disqualified
-    locs_none = [{"id": "loc-3", "name": "No Status Stall", "active": True, "verificationStatus": None, "estimate": qualifying_est}]
-    rec_none = compute_smart_recommendation(locs_none)
-    assert rec_none["isEligible"] is False
-
-    # 4. Unknown verificationStatus -> disqualified
-    locs_unknown = [{"id": "loc-4", "name": "Unknown Stall", "active": True, "verificationStatus": "RANDOM_STATUS", "estimate": qualifying_est}]
-    rec_unknown = compute_smart_recommendation(locs_unknown)
-    assert rec_unknown["isEligible"] is False
-
-    # 5. Inactive outlet -> disqualified
-    locs_inactive = [{"id": "loc-5", "name": "Inactive Stall", "active": False, "verificationStatus": "STUDENT_SOURCED", "estimate": qualifying_est}]
+    # 3. Inactive outlet -> disqualified
+    locs_inactive = [{"id": "loc-5", "name": "Inactive Stall", "active": False, "verificationStatus": "VERIFIED", "estimate": qualifying_est}]
     rec_inactive = compute_smart_recommendation(locs_inactive)
     assert rec_inactive["isEligible"] is False
 
-    # 6. Verified outlet with higher wait wins against unverified outlet with lower wait
+    # 4. Verified outlet with higher wait wins against unverified outlet with lower wait
     competing_locs = [
         {
             "id": "unverified-low-wait",
@@ -754,7 +782,7 @@ def test_p1_16_fail_closed_verification_status_policy():
             "id": "verified-standard-wait",
             "name": "Verified Reliable Mess",
             "active": True,
-            "verificationStatus": "STUDENT_SOURCED",
+            "verificationStatus": "VERIFIED",
             "estimate": {**qualifying_est, "predictedWaitMinutes": 12.0},
         },
     ]
@@ -762,3 +790,192 @@ def test_p1_16_fail_closed_verification_status_policy():
     assert rec_comp["isEligible"] is True
     assert rec_comp["recommendedLocationId"] == "verified-standard-wait"
     assert rec_comp["predictedWaitMinutes"] == 12.0
+
+
+def test_p1_16_distinct_devices_validation_fail_closed():
+    """
+    Requirement 1: Missing, None, malformed, negative, or invalid distinctDevicesCount
+    must strictly fail independent-evidence requirement and never infer independence.
+    """
+    qualifying_est_base = {
+        "predictedWaitMinutes": 6.0,
+        "freshness": "LIVE",
+        "recentReportCount": 4,  # >= 3 reports
+        "confidence": 0.75,
+        "confidenceLabel": "HIGH",
+        "congestion": "MODERATE",
+        "newestReportAgeMinutes": 2.0,
+    }
+
+    # 1. Missing distinctDevicesCount with 4 reports -> rejected
+    loc_missing = [{"id": "loc-v", "name": "Verified", "active": True, "verificationStatus": "VERIFIED", "estimate": {**qualifying_est_base}}]
+    rec_missing = compute_smart_recommendation(loc_missing)
+    assert rec_missing["isEligible"] is False
+    assert rec_missing["state"] == "insufficient_data"
+
+    # 2. distinctDevicesCount=None -> rejected
+    loc_none = [{"id": "loc-v", "name": "Verified", "active": True, "verificationStatus": "VERIFIED", "estimate": {**qualifying_est_base, "distinctDevicesCount": None}}]
+    rec_none = compute_smart_recommendation(loc_none)
+    assert rec_none["isEligible"] is False
+    assert rec_none["state"] == "insufficient_data"
+
+    # 3. distinctDevicesCount=0 -> rejected
+    loc_zero = [{"id": "loc-v", "name": "Verified", "active": True, "verificationStatus": "VERIFIED", "estimate": {**qualifying_est_base, "distinctDevicesCount": 0}}]
+    rec_zero = compute_smart_recommendation(loc_zero)
+    assert rec_zero["isEligible"] is False
+    assert rec_zero["state"] == "insufficient_data"
+
+    # 4. distinctDevicesCount=-1 (negative) -> rejected
+    loc_neg = [{"id": "loc-v", "name": "Verified", "active": True, "verificationStatus": "VERIFIED", "estimate": {**qualifying_est_base, "distinctDevicesCount": -1}}]
+    rec_neg = compute_smart_recommendation(loc_neg)
+    assert rec_neg["isEligible"] is False
+    assert rec_neg["state"] == "insufficient_data"
+
+    # 5. distinctDevicesCount="2" (string) -> rejected
+    loc_str = [{"id": "loc-v", "name": "Verified", "active": True, "verificationStatus": "VERIFIED", "estimate": {**qualifying_est_base, "distinctDevicesCount": "2"}}]
+    rec_str = compute_smart_recommendation(loc_str)
+    assert rec_str["isEligible"] is False
+    assert rec_str["state"] == "insufficient_data"
+
+    # 6. distinctDevicesCount=True (boolean) -> rejected
+    loc_bool = [{"id": "loc-v", "name": "Verified", "active": True, "verificationStatus": "VERIFIED", "estimate": {**qualifying_est_base, "distinctDevicesCount": True}}]
+    rec_bool = compute_smart_recommendation(loc_bool)
+    assert rec_bool["isEligible"] is False
+    assert rec_bool["state"] == "insufficient_data"
+
+    # 7. distinctDevicesCount=1 (insufficient) -> rejected
+    loc_one = [{"id": "loc-v", "name": "Verified", "active": True, "verificationStatus": "VERIFIED", "estimate": {**qualifying_est_base, "distinctDevicesCount": 1}}]
+    rec_one = compute_smart_recommendation(loc_one)
+    assert rec_one["isEligible"] is False
+    assert rec_one["state"] == "insufficient_data"
+
+    # 8. distinctDevicesCount=2 (qualifies!)
+    loc_two = [{"id": "loc-v", "name": "Verified", "active": True, "verificationStatus": "VERIFIED", "estimate": {**qualifying_est_base, "distinctDevicesCount": 2}}]
+    rec_two = compute_smart_recommendation(loc_two)
+    assert rec_two["isEligible"] is True
+    assert rec_two["state"] == "recommended"
+    assert rec_two["recommendedLocationId"] == "loc-v"
+
+
+# ==============================================================================
+# P1.13 CORRECTION PASS: ADVERSARIAL SURGE IDENTITY CORROBORATION TESTS
+# ==============================================================================
+
+def test_p1_13_corroboration_both_reports_missing_identifiers():
+    """When both candidate spikes lack client identifiers, neither can establish peer consensus."""
+    now = datetime(2026, 11, 24, 12, 30, 0, tzinfo=timezone.utc)
+    reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "base-1-12345"},
+        {"reportedWaitMinutes": 10.5, "queueLength": 11, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "base-2-12345"},
+        {"reportedWaitMinutes": 9.5, "queueLength": 9, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "base-3-12345"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "base-4-12345"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "base-5-12345"},
+        # Two spikes within 5 minutes, but NEITHER has an identifier
+        {"reportedWaitMinutes": 55.0, "queueLength": 60, "timestamp": (now - timedelta(minutes=10)).isoformat()},
+        {"reportedWaitMinutes": 58.0, "queueLength": 65, "timestamp": (now - timedelta(minutes=15)).isoformat()},
+    ]
+    valid, outliers = filter_outliers(reports, now=now)
+    assert len(valid) == 5
+    assert len(outliers) == 2
+    for o in outliers:
+        assert o["outlierReason"] == "UNCORROBORATED_ISOLATED_SPIKE"
+
+
+def test_p1_13_corroboration_one_report_missing_identifier():
+    """When one candidate spike has an identifier but the other does not, neither corroborates."""
+    now = datetime(2026, 11, 24, 12, 30, 0, tzinfo=timezone.utc)
+    reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "base-1-12345"},
+        {"reportedWaitMinutes": 10.5, "queueLength": 11, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "base-2-12345"},
+        {"reportedWaitMinutes": 9.5, "queueLength": 9, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "base-3-12345"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "base-4-12345"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "base-5-12345"},
+        # One spike has valid ID, second spike has None
+        {"reportedWaitMinutes": 55.0, "queueLength": 60, "timestamp": (now - timedelta(minutes=10)).isoformat(), "deviceId": "dev-alpha-123"},
+        {"reportedWaitMinutes": 58.0, "queueLength": 65, "timestamp": (now - timedelta(minutes=15)).isoformat(), "deviceId": None},
+    ]
+    valid, outliers = filter_outliers(reports, now=now)
+    assert len(valid) == 5
+    assert len(outliers) == 2
+    for o in outliers:
+        assert o["outlierReason"] == "UNCORROBORATED_ISOLATED_SPIKE"
+
+
+def test_p1_13_corroboration_same_identifier_on_both_reports():
+    """When two candidate spikes have identical identifiers, they cannot self-corroborate."""
+    now = datetime(2026, 11, 24, 12, 30, 0, tzinfo=timezone.utc)
+    reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "base-1-12345"},
+        {"reportedWaitMinutes": 10.5, "queueLength": 11, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "base-2-12345"},
+        {"reportedWaitMinutes": 9.5, "queueLength": 9, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "base-3-12345"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "base-4-12345"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "base-5-12345"},
+        {"reportedWaitMinutes": 55.0, "queueLength": 60, "timestamp": (now - timedelta(minutes=10)).isoformat(), "deviceId": "dev-same-instance"},
+        {"reportedWaitMinutes": 58.0, "queueLength": 65, "timestamp": (now - timedelta(minutes=15)).isoformat(), "deviceId": "dev-same-instance"},
+    ]
+    valid, outliers = filter_outliers(reports, now=now)
+    assert len(valid) == 5
+    assert len(outliers) == 2
+    for o in outliers:
+        assert o["outlierReason"] == "UNCORROBORATED_ISOLATED_SPIKE"
+
+
+def test_p1_13_corroboration_distinct_identifiers_within_30m():
+    """When two candidate spikes have distinct valid identifiers within 30m, both corroborate."""
+    now = datetime(2026, 11, 24, 12, 30, 0, tzinfo=timezone.utc)
+    reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "base-1-12345"},
+        {"reportedWaitMinutes": 10.5, "queueLength": 11, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "base-2-12345"},
+        {"reportedWaitMinutes": 9.5, "queueLength": 9, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "base-3-12345"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "base-4-12345"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "base-5-12345"},
+        {"reportedWaitMinutes": 55.0, "queueLength": 60, "timestamp": (now - timedelta(minutes=10)).isoformat(), "deviceId": "dev-alpha-valid"},
+        {"reportedWaitMinutes": 58.0, "queueLength": 65, "timestamp": (now - timedelta(minutes=15)).isoformat(), "deviceId": "dev-beta-valid"},
+    ]
+    valid, outliers = filter_outliers(reports, now=now)
+    assert len(valid) == 7
+    assert len(outliers) == 0
+
+
+def test_p1_13_corroboration_distinct_identifiers_outside_30m():
+    """When candidate spikes with distinct identifiers are outside 30m window, both are isolated."""
+    now = datetime(2026, 11, 24, 13, 0, 0, tzinfo=timezone.utc)
+    reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "base-1-12345"},
+        {"reportedWaitMinutes": 10.5, "queueLength": 11, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "base-2-12345"},
+        {"reportedWaitMinutes": 9.5, "queueLength": 9, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "base-3-12345"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "base-4-12345"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "base-5-12345"},
+        # 45 minutes apart
+        {"reportedWaitMinutes": 55.0, "queueLength": 60, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "dev-alpha-valid"},
+        {"reportedWaitMinutes": 58.0, "queueLength": 65, "timestamp": (now - timedelta(minutes=50)).isoformat(), "deviceId": "dev-beta-valid"},
+    ]
+    valid, outliers = filter_outliers(reports, now=now)
+    assert len(valid) == 5
+    assert len(outliers) == 2
+    for o in outliers:
+        assert o["outlierReason"] == "UNCORROBORATED_ISOLATED_SPIKE"
+
+
+def test_p1_13_corroboration_invalid_timestamps_and_malformed_identifiers():
+    """Malformed identifiers (too short, boolean, non-string) or invalid timestamps are rejected."""
+    now = datetime(2026, 11, 24, 12, 30, 0, tzinfo=timezone.utc)
+    reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "base-1-12345"},
+        {"reportedWaitMinutes": 10.5, "queueLength": 11, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "base-2-12345"},
+        {"reportedWaitMinutes": 9.5, "queueLength": 9, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "base-3-12345"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "base-4-12345"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "base-5-12345"},
+        # Spike with malformed boolean ID
+        {"reportedWaitMinutes": 55.0, "queueLength": 60, "timestamp": (now - timedelta(minutes=10)).isoformat(), "deviceId": True},
+        # Spike with malformed short ID (< 8 chars)
+        {"reportedWaitMinutes": 58.0, "queueLength": 65, "timestamp": (now - timedelta(minutes=12)).isoformat(), "deviceId": "abc"},
+        # Spike with invalid timestamp
+        {"reportedWaitMinutes": 60.0, "queueLength": 70, "timestamp": "not-a-timestamp", "deviceId": "dev-valid-123"},
+    ]
+    valid, outliers = filter_outliers(reports, now=now)
+    assert len(valid) == 5
+    assert len(outliers) == 3
+    reasons = [o["outlierReason"] for o in outliers]
+    assert "UNCORROBORATED_MISSING_TIMESTAMP" in reasons
+    assert reasons.count("UNCORROBORATED_ISOLATED_SPIKE") == 2

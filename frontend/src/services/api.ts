@@ -43,7 +43,7 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     category: 'MESS',
     description: 'Central multi-tiered student mess serving breakfast, lunch, snacks, and dinner counters.',
     landmarkLocation: 'Hostel 12-14 Complex, Lakeside Road, East Campus',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'IIT Bombay Student Mentorship Guide & Techfest Ambassador Sourced',
     openHours: 'Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:30)',
     capacityEstimate: 'Large Dining Complex (~500-650 approx.)',
@@ -56,7 +56,7 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     category: 'MESS',
     description: 'Modern high-capacity hostel mess catering to senior undergraduate and postgraduate wings.',
     landmarkLocation: 'Hostel 15-16 Quadrangle, North-East Campus',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'IIT Bombay Student Mentor Program (SMP) Guide',
     openHours: 'Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:30)',
     capacityEstimate: 'Large Modern Dining Hall (~450-550 approx.)',
@@ -69,7 +69,7 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     category: 'MESS',
     description: 'Historic hostel mess renowned for South and North Indian rotating regional menus.',
     landmarkLocation: 'Hostel 2 Quadrangle, near Gymkhana Grounds',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'IIT Bombay Hostel 2 Council & SMP Guide',
     openHours: 'Breakfast (07:30-09:30), Lunch (12:00-14:00), Dinner (19:30-21:15)',
     capacityEstimate: 'Hostel Dining Hall (~300-380 approx.)',
@@ -82,7 +82,7 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Beloved campus late-night staple serving fresh fruit juices, dosas, parathas, and tea.',
     landmarkLocation: 'Ground Floor, Hostel 3, Main Hostel Avenue',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'IIT Bombay Gymkhana Freshers Guide',
     openHours: '14:00 - 02:30 (Late Night Canteen)',
     capacityEstimate: 'Hostel Canteen Counter (~80-120 approx.)',
@@ -95,7 +95,7 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'High-velocity daytime cafeteria serving express lunches, coffee, sandwiches, and rolls.',
     landmarkLocation: 'Ground Floor, Lecture Hall Complex (LHC), Academic Area',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'IIT Bombay Academic Facilities & SMP Guide',
     openHours: '08:30 - 18:30 (Academic Class Hours)',
     capacityEstimate: 'Academic Cafeteria (~180-240 approx.)',
@@ -108,7 +108,7 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Multi-cuisine sit-down restaurant and faculty guest lounge serving thalis and meals.',
     landmarkLocation: 'Gulmohar Building, First Floor, Opposite Main Building',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'IIT Bombay Estate & Hospitality Directory',
     openHours: 'Lunch (11:30-15:00), Dinner (19:00-22:30)',
     capacityEstimate: 'Restaurant & Lounge (~140-180 approx.)',
@@ -121,7 +121,7 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Quick-service eatery favored by computer science students for coffee, noodles, and wraps.',
     landmarkLocation: 'Kanwal Rekhi School of Information Technology (KReSIT)',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'IIT Bombay Dept of Computer Science & Eng',
     openHours: '09:00 - 20:00 (Department Hours)',
     capacityEstimate: 'Quick-Service Counter (~70-100 approx.)',
@@ -134,7 +134,7 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Active evening hangout spot serving milkshakes, burgers, hot fries, and snacks.',
     landmarkLocation: 'Students Activity Centre (SAC) Grounds',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'IIT Bombay Gymkhana Cultural Affairs',
     openHours: '16:00 - 01:00 (Evening / Night)',
     capacityEstimate: 'Student Activity Cafe (~100-150 approx.)',
@@ -147,7 +147,7 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Artisan coffee, bakery items, iced brews, and quiet tables for study sessions.',
     landmarkLocation: 'Adjacent to Central Library, Main Academic Spine',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'IIT Bombay Central Library Amenities',
     openHours: '08:00 - 23:00 (Library Hours)',
     capacityEstimate: 'Coffee Lounge (~60-80 approx.)',
@@ -160,7 +160,7 @@ export const IITB_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Exclusive dairy outlet offering ice creams, flavored milk, milkshakes, and packaged snacks.',
     landmarkLocation: 'Near Hostel 1 & Campus School Junction',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'IIT Bombay Commercial Establishments',
     openHours: '09:00 - 23:00',
     capacityEstimate: 'Dairy Kiosk & Takeaway (~30-50 approx.)',
@@ -177,7 +177,7 @@ export const VITAP_LOCATIONS: CampusLocation[] = [
     category: 'MESS',
     description: 'Central dining complex with multi-cuisine counters for undergraduate students.',
     landmarkLocation: 'North Student Block, Ground Floor',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
     openHours: 'Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:30)',
     capacityEstimate: 'Central Dining Complex (~350-450 approx.)',
@@ -190,7 +190,7 @@ export const VITAP_LOCATIONS: CampusLocation[] = [
     category: 'MESS',
     description: 'South dining hall featuring vegetarian and regional dining counters.',
     landmarkLocation: 'South Student Block, Near LH-1',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
     openHours: 'Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:00)',
     capacityEstimate: 'Medium Dining Hall (~250-350 approx.)',
@@ -203,7 +203,7 @@ export const VITAP_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Open-air food court offering quick snacks, fruit juices, and meals.',
     landmarkLocation: 'Central Plaza, Between Academic & Hostel Blocks',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
     openHours: '10:00 - 23:00',
     capacityEstimate: 'Open Plaza Seating (~120-180 approx.)',
@@ -216,7 +216,7 @@ export const VITAP_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Express counter near lecture halls for sandwiches, rolls, and coffee.',
     landmarkLocation: 'Central Block (CB), Ground Floor',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
     openHours: '08:30 - 18:00 (Class Hours)',
     capacityEstimate: 'Express Counter (~80-120 approx.)',
@@ -229,7 +229,7 @@ export const VITAP_LOCATIONS: CampusLocation[] = [
     category: 'CANTEEN',
     description: 'Late-evening campus eatery active during study and project hours.',
     landmarkLocation: 'Hostel Avenue Commercial Area',
-    verificationStatus: 'STUDENT_SOURCED',
+    verificationStatus: 'UNVERIFIED',
     verificationSource: 'VIT-AP Student Dining Guide (Community Sourced)',
     openHours: '17:00 - 02:00 (Late Night)',
     capacityEstimate: 'Late Night Counter (~100-150 approx.)',
@@ -387,6 +387,14 @@ function persistReportsStore(store: Record<string, QueueReport[]>): void {
 
 const mockReports: Record<string, QueueReport[]> = loadReportsStore();
 
+function extractClientIdentifier(r: any): string | null {
+  const rawId = r.deviceId || r.clientHash || r.reporterId;
+  if (!rawId || typeof rawId !== 'string') return null;
+  const trimmed = rawId.trim();
+  if (trimmed.length < 8 || trimmed.length > 128) return null;
+  return trimmed;
+}
+
 export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
   const now = Date.now();
   const TAU_MS = 15 * 60 * 1000;
@@ -460,9 +468,15 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
     for (const r of candidateSpikes) {
       const w = Number(r.reportedWaitMinutes);
       const reportTime = new Date(r.timestamp).getTime();
-      const devR = (r as any).deviceId || (r as any).clientHash || (r as any).reporterId;
+      const devR = extractClientIdentifier(r);
 
       if (isNaN(reportTime)) {
+        statisticalOutliers++;
+        continue;
+      }
+
+      // Missing identity is NOT evidence of distinct client instances
+      if (!devR) {
         statisticalOutliers++;
         continue;
       }
@@ -476,9 +490,9 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
         // Temporal proximity within 30 minutes
         if (Math.abs(reportTime - peerTime) > 30 * 60 * 1000) continue;
 
-        // Distinct device identifiers if present
-        const devPeer = (peer as any).deviceId || (peer as any).clientHash || (peer as any).reporterId;
-        if (devR && devPeer && devR === devPeer) continue;
+        // Distinct device identifiers
+        const devPeer = extractClientIdentifier(peer);
+        if (!devPeer || devR === devPeer) continue;
 
         // Value consistency within 20m
         if (Math.abs(w - Number(peer.reportedWaitMinutes)) <= 20.0) {
@@ -498,9 +512,14 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
     for (const r of candidateDrops) {
       const w = Number(r.reportedWaitMinutes);
       const reportTime = new Date(r.timestamp).getTime();
-      const devR = (r as any).deviceId || (r as any).clientHash || (r as any).reporterId;
+      const devR = extractClientIdentifier(r);
 
       if (isNaN(reportTime)) {
+        statisticalOutliers++;
+        continue;
+      }
+
+      if (!devR) {
         statisticalOutliers++;
         continue;
       }
@@ -513,8 +532,8 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
 
         if (Math.abs(reportTime - peerTime) > 30 * 60 * 1000) continue;
 
-        const devPeer = (peer as any).deviceId || (peer as any).clientHash || (peer as any).reporterId;
-        if (devR && devPeer && devR === devPeer) continue;
+        const devPeer = extractClientIdentifier(peer);
+        if (!devPeer || devR === devPeer) continue;
 
         if (Math.abs(w - Number(peer.reportedWaitMinutes)) <= 20.0) {
           peerMatches++;
@@ -574,8 +593,8 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
         totalWeight += weight;
         recentReports.push(r);
 
-        const devId = (r as any).deviceId || (r as any).clientHash;
-        if (devId) observedDevices.add(String(devId));
+        const devId = extractClientIdentifier(r);
+        if (devId) observedDevices.add(devId);
         timestampsMs.push(reportTime);
       }
     }
@@ -602,23 +621,8 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
     };
   }
 
-  // Calculate distinct devices count
-  let distinctDevicesCount = 1;
-  if (observedDevices.size > 0) {
-    distinctDevicesCount = observedDevices.size;
-  } else {
-    // Measure bursts separated by at least 3 minutes
-    const sorted = [...timestampsMs].sort((a, b) => a - b);
-    let bursts = 0;
-    let lastTs = 0;
-    for (const ts of sorted) {
-      if (ts - lastTs >= 180000) {
-        bursts++;
-        lastTs = ts;
-      }
-    }
-    distinctDevicesCount = Math.max(1, bursts);
-  }
+  // Calculate distinct devices count (strictly distinct client instance identifiers)
+  const distinctDevicesCount = observedDevices.size;
 
   const estimatedWait = Math.round((weightedWaitSum / totalWeight) * 10) / 10;
   const estimatedQueue = Math.round(weightedQueueSum / totalWeight);
@@ -911,24 +915,21 @@ export function createApiClient(config: ApiClientConfig = {}) {
       const VERIFIED_STATUSES = new Set([
         'VERIFIED',
         'VERIFIED_CAMPUS_DIRECTORY',
-        'STUDENT_SOURCED',
-        'COMMUNITY_LISTING',
-        'COMMUNITY_DIRECTORY',
       ]);
 
       // Must be active, verified, have at least 3 fresh reports, >= 50% confidence, and >= 2 distinct devices
-      const eligible = candidates.filter(
-        (c) =>
-          c.active &&
-          c.verificationStatus &&
-          VERIFIED_STATUSES.has(c.verificationStatus) &&
-          c.estimate &&
-          c.estimate.predictedWaitMinutes !== null &&
-          ['LIVE', 'RECENT'].includes(c.estimate.freshness) &&
-          c.estimate.recentReportCount >= 3 &&
-          c.estimate.confidence >= 0.50 &&
-          (c.estimate.distinctDevicesCount || 1) >= 2
-      );
+      const eligible = candidates.filter((c) => {
+        if (!c.active) return false;
+        if (!c.verificationStatus || !VERIFIED_STATUSES.has(c.verificationStatus)) return false;
+        if (!c.estimate) return false;
+        if (c.estimate.predictedWaitMinutes === null) return false;
+        if (!['LIVE', 'RECENT'].includes(c.estimate.freshness)) return false;
+        if (c.estimate.recentReportCount < 3) return false;
+        if (c.estimate.confidence < 0.50) return false;
+        const devCount = c.estimate.distinctDevicesCount;
+        if (typeof devCount !== 'number' || isNaN(devCount) || devCount < 2) return false;
+        return true;
+      });
 
       if (eligible.length === 0) {
         let state: SmartRecommendation['state'] = 'insufficient_data';

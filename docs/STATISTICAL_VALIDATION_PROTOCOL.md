@@ -31,6 +31,12 @@ The QueueSense estimation and recommendation engines track `distinctDevicesCount
 > **Scientific & Security Boundary:**  
 > Distinct client device identifiers **do not constitute mathematical proof of distinct human observers**, nor do they guarantee Sybil resistance. In an unauthenticated crowdsourced system without institutional Single Sign-On (SSO), an individual clearing cookies, rotating browsers, or running automated scripts can present multiple distinct client identifiers. While the backend's dual-budget rate limiter (individual device budget capped within a shared campus NAT ceiling) bounds abuse velocity, true observer identity verification requires institutional SSO. All documentation and APIs report `distinctDevicesCount` strictly as distinct client instances.
 
+### 1.4 Separation of Catalog Provenance from Verification Status
+To maintain rigorous scientific and institutional integrity, QueueSense maintains a strict separation between record provenance (where data originated) and verification status (whether independent institutional audit has confirmed it):
+- **Provenance Attributes (`sourceType`, `sourceAttribution`):** Document the historical origin of the catalog entry (e.g., `COMMUNITY_SOURCED`, `STUDENT_SOURCED`, `COMMUNITY_LISTING`, `COMMUNITY_DIRECTORY`). These describe crowdsourced or guide origins.
+- **Verification Status (`verificationStatus`):** Only `VERIFIED` and `VERIFIED_CAMPUS_DIRECTORY` represent active, independently audited venues. All default built-in entries default to `UNVERIFIED`.
+- **Recommendation Engine Enforcement:** Unverified venues cannot qualify for automated recommendations regardless of wait time or report volume, failing closed to `insufficient_data` until an independent verification audit is recorded. Provenance source descriptions are never conflated with verification status.
+
 ---
 
 ## 2. Field Observation Collection Protocol

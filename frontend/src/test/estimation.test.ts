@@ -101,8 +101,9 @@ describe('Client-Side Queue Estimation Logic', () => {
         locationId: 'mess-c',
         reportedWaitMinutes: 5,
         queueLength: 6,
+        deviceId: 'dev_test_device_1',
         timestamp: new Date(now - 1 * 60 * 1000).toISOString(),
-      },
+      } as any,
     ];
 
     const est = computeClientEstimate(singleReport);
@@ -138,7 +139,7 @@ describe('Client-Side Queue Estimation Logic', () => {
     expect(estIsolated.outliersExcluded).toBeGreaterThanOrEqual(1);
     expect(estIsolated.predictedWaitMinutes).toBeLessThan(20);
 
-    // Scenario B: Corroborated rush-hour surge (two students report 35m and 38m)
+    // Scenario B: Corroborated rush-hour surge (two students report 35m and 38m with distinct client IDs)
     const corroboratedReports = [
       ...baselineReports,
       {
@@ -146,6 +147,7 @@ describe('Client-Side Queue Estimation Logic', () => {
         locationId: 'mess-d',
         reportedWaitMinutes: 35,
         queueLength: 45,
+        deviceId: 'dev_student_surge_alpha',
         timestamp: new Date(now - 2 * 60 * 1000).toISOString(),
       },
       {
@@ -153,12 +155,37 @@ describe('Client-Side Queue Estimation Logic', () => {
         locationId: 'mess-d',
         reportedWaitMinutes: 38,
         queueLength: 50,
+        deviceId: 'dev_student_surge_beta',
         timestamp: new Date(now - 1 * 60 * 1000).toISOString(),
       },
     ];
     const estCorroborated = computeClientEstimate(corroboratedReports);
     expect(estCorroborated.predictedWaitMinutes).toBeGreaterThanOrEqual(18);
     expect(estCorroborated.congestion).toBe('VERY_HIGH');
+
+    // Scenario C: Spikes with missing or identical device IDs fail to corroborate
+    const sameDeviceSpikes = [
+      ...baselineReports,
+      {
+        reportId: 'rep_same_dev_1',
+        locationId: 'mess-d',
+        reportedWaitMinutes: 35,
+        queueLength: 45,
+        deviceId: 'dev_student_same_device',
+        timestamp: new Date(now - 2 * 60 * 1000).toISOString(),
+      },
+      {
+        reportId: 'rep_same_dev_2',
+        locationId: 'mess-d',
+        reportedWaitMinutes: 38,
+        queueLength: 50,
+        deviceId: 'dev_student_same_device',
+        timestamp: new Date(now - 1 * 60 * 1000).toISOString(),
+      },
+    ];
+    const estSameDev = computeClientEstimate(sameDeviceSpikes);
+    expect(estSameDev.outliersExcluded).toBe(2);
+    expect(estSameDev.predictedWaitMinutes).toBeLessThan(20);
   });
 
   it('smoothly tapers time-decay weights between 50 and 60 minutes with zero step discontinuity', () => {
@@ -226,12 +253,13 @@ describe('Production Hardening & Recommendation Intelligence', () => {
 
   it('provides student-sourced campus directory with honest provenance', () => {
     expect(INITIAL_LOCATIONS.length).toBeGreaterThanOrEqual(5);
-    const verifiedLocations = INITIAL_LOCATIONS.filter(
-      (l) => l.verificationStatus === 'STUDENT_SOURCED'
+    const unverifiedLocations = INITIAL_LOCATIONS.filter(
+      (l) => l.verificationStatus === 'UNVERIFIED'
     );
-    expect(verifiedLocations.length).toBe(INITIAL_LOCATIONS.length);
-    verifiedLocations.forEach((loc) => {
-      expect(loc.verificationSource.length).toBeGreaterThan(5);
+    expect(unverifiedLocations.length).toBe(INITIAL_LOCATIONS.length);
+    unverifiedLocations.forEach((loc) => {
+      expect(loc.verificationSource).toBeDefined();
+      expect(loc.verificationSource!.length).toBeGreaterThan(5);
     });
   });
 

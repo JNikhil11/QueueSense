@@ -148,35 +148,49 @@ def test_get_recommendations_handler_fail_closed_verification(monkeypatch):
             "id": "loc-verified",
             "name": "Verified Outlet",
             "active": True,
+            "verificationStatus": "VERIFIED",
+        },
+        # 2. Student-sourced provenance (NOT verified) -> disqualified
+        {
+            "id": "loc-student-sourced",
+            "name": "Student Sourced Outlet",
+            "active": True,
             "verificationStatus": "STUDENT_SOURCED",
         },
-        # 2. Explicitly unverified active outlet (UNVERIFIED)
+        # 3. Community listing provenance (NOT verified) -> disqualified
+        {
+            "id": "loc-community-listing",
+            "name": "Community Listing Outlet",
+            "active": True,
+            "verificationStatus": "COMMUNITY_LISTING",
+        },
+        # 4. Explicitly unverified active outlet (UNVERIFIED)
         {
             "id": "loc-explicit-unverified",
             "name": "Unverified Outlet",
             "active": True,
             "verificationStatus": "UNVERIFIED",
         },
-        # 3. Missing verification status (None)
+        # 5. Missing verification status (None)
         {
             "id": "loc-missing-status",
             "name": "Missing Status Outlet",
             "active": True,
             "verificationStatus": None,
         },
-        # 4. Unknown verification status
+        # 6. Unknown verification status
         {
             "id": "loc-unknown-status",
             "name": "Unknown Status Outlet",
             "active": True,
             "verificationStatus": "RANDOM_EXTERNAL_STATUS",
         },
-        # 5. Inactive outlet (active: False)
+        # 7. Inactive outlet (active: False)
         {
             "id": "loc-inactive",
             "name": "Inactive Outlet",
             "active": False,
-            "verificationStatus": "STUDENT_SOURCED",
+            "verificationStatus": "VERIFIED",
         },
     ]
 
@@ -220,6 +234,8 @@ def test_get_recommendations_handler_disqualifies_all_unverified(monkeypatch):
         {"id": "loc-u1", "name": "Unverified 1", "active": True, "verificationStatus": "UNVERIFIED"},
         {"id": "loc-u2", "name": "Unverified 2", "active": True, "verificationStatus": None},
         {"id": "loc-u3", "name": "Unverified 3", "active": True, "verificationStatus": "UNKNOWN_CLAIM"},
+        {"id": "loc-u4", "name": "Student Sourced", "active": True, "verificationStatus": "STUDENT_SOURCED"},
+        {"id": "loc-u5", "name": "Community Listing", "active": True, "verificationStatus": "COMMUNITY_LISTING"},
     ]
 
     from backend.shared.database import QueueSenseDatabase
@@ -236,5 +252,45 @@ def test_get_recommendations_handler_disqualifies_all_unverified(monkeypatch):
     assert rec_data["isEligible"] is False
     assert rec_data["recommendedLocationId"] is None
     assert rec_data["eligibleCount"] == 0
+
+
+def test_get_recommendations_handler_rejects_missing_distinct_devices(monkeypatch):
+    """Legacy estimate lacking distinctDevicesCount cannot qualify even with 5 reports."""
+    qualifying_without_devices = {
+        "predictedWaitMinutes": 8.0,
+        "predictedQueueLength": 10,
+        "congestion": "MODERATE",
+        "confidence": 0.85,
+        "confidenceLabel": "HIGH",
+        "freshness": "LIVE",
+        "recentReportCount": 5,
+        # Notice: NO distinctDevicesCount!
+        "newestReportAgeMinutes": 2.0,
+    }
+    mock_locations = [
+        {"id": "loc-verified", "name": "Verified Outlet", "active": True, "verificationStatus": "VERIFIED"},
+    ]
+    from backend.shared.database import QueueSenseDatabase
+    monkeypatch.setattr(QueueSenseDatabase, "list_locations", lambda self: mock_locations)
+    monkeypatch.setattr(QueueSenseDatabase, "get_current_estimate", lambda self, loc_id: qualifying_without_devices)
+
+    res = rec_handler({}, None)
+    assert res["statusCode"] == 200
+    body = json.loads(res["body"])
+    rec_data = body["data"]
+    assert rec_data["isEligible"] is False
+    assert rec_data["state"] == "insufficient_data"
+
+
+def test_get_recommendations_handler_built_in_catalog_honest_fail_closed():
+    """Default built-in database locations are unverified, so handler honestly returns no recommendation."""
+    res = rec_handler({}, None)
+    assert res["statusCode"] == 200
+    body = json.loads(res["body"])
+    assert body["success"] is True
+    rec_data = body["data"]
+    # All built-in campus locations have verificationStatus='UNVERIFIED', so none qualify
+    assert rec_data["isEligible"] is False
+    assert rec_data["recommendedLocationId"] is None
 
 

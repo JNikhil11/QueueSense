@@ -706,7 +706,8 @@ Status Definitions:
 - **Implemented Remediation:**
   1. **Corroborated Surge Detection:** When candidate deviations exceed the statistical threshold, the system enforces strict temporal and observer peer corroboration:
      - Mutual temporal proximity: $|t_r - t_{\text{peer}}| \le 30.0$ minutes (`SURGE_CORROBORATION_WINDOW_MIN`).
-     - Distinct client device identifiers: where available, $dev_r \neq dev_{\text{peer}}$ is strictly enforced. Two reports from the same device cannot self-corroborate.
+     - Distinct client device identifiers: Both the candidate report and the corroborating peer report must have valid client identifiers (non-empty strings of length 8–128) and distinct identifiers ($dev_r \neq dev_{\text{peer}}$).
+     - Missing identifier safety: Reports with missing, `None`, empty, or malformed identifiers strictly CANNOT corroborate each other. If either report lacks a valid client identifier, peer corroboration fails, and the candidate report is isolated as an uncorroborated anomaly (`UNCORROBORATED_ISOLATED_SPIKE` or `UNCORROBORATED_ISOLATED_DROP`).
      - Value consistency: $|w_r - w_{\text{peer}}| \le 20.0$ minutes (`SURGE_CONSISTENCY_DELTA_MIN`).
      - Conservative timestamp handling: reports with missing or unparseable timestamps cannot establish concurrency and are strictly isolated to `outliers` with reason `UNCORROBORATED_MISSING_TIMESTAMP`.
      - Elevated queue length alone does NOT substitute for peer corroboration; an isolated extreme wait report cannot self-corroborate via queue count.
@@ -773,19 +774,28 @@ Status Definitions:
 - **Files Changed:** `backend/functions/get_recommendations/app.py`, `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py`, `backend/tests/test_api_handlers.py`, `frontend/src/test/estimation.test.ts`
 - **Implemented Remediation:**
   1. **Handler Forwarding:** `get_recommendations/app.py` forwards `"verificationStatus": loc.get("verificationStatus")` into `locations_with_estimates`.
-  2. **Strict Fail-Closed Verification Policy:** Only recognized verified statuses (`VERIFIED`, `VERIFIED_CAMPUS_DIRECTORY`, `STUDENT_SOURCED`, `COMMUNITY_LISTING`, `COMMUNITY_DIRECTORY`) qualify. Missing (`None`), empty, `"UNVERIFIED"`, `"UNVERIFIED_LISTING"`, or unknown statuses are strictly disqualified. A verified outlet always wins over an unverified outlet with a lower wait time.
-  3. **Independent Client Device Corroboration:** Recommendation qualification requires $\ge 3$ fresh reports AND evidence from at least $\ge 2$ distinct client devices (`distinctDevicesCount >= 2`). A single device cycling submissions is disqualified (`state: "insufficient_data"`).
+  2. **Strict Separation of Provenance from Verification Status:**
+     - Provenance attributes (`sourceType`, `sourceAttribution`, `COMMUNITY_SOURCED`, `STUDENT_SOURCED`, `COMMUNITY_LISTING`, `COMMUNITY_DIRECTORY`) document data origin, NOT institutional audit verification.
+     - Only statuses backed by an independent verification process (`VERIFIED`, `VERIFIED_CAMPUS_DIRECTORY`) qualify for automated recommendation.
+     - Provenance labels (`STUDENT_SOURCED`, `COMMUNITY_LISTING`, `COMMUNITY_DIRECTORY`, `UNVERIFIED`) are strictly disqualified.
+     - Built-in initial fixtures (`IITB_LOCATIONS`, `VITAP_LOCATIONS`) have `verificationStatus: 'UNVERIFIED'`. If all outlets in a campus lack an independent verified status, the recommendation engine honestly evaluates to `isEligible: False` and returns `state: "insufficient_data"`.
+  3. **Distinct-Device Fail-Closed Check (No Fallback):**
+     - Recommendation qualification requires $\ge 3$ fresh reports AND evidence from at least $\ge 2$ distinct client devices (`distinctDevicesCount >= 2`).
+     - Eradicated legacy fail-open fallback (`distinct_devices = est.get("distinctDevicesCount", recent_count)`).
+     - Missing, `None`, non-integer, negative, or boolean `distinctDevicesCount` fails closed to `insufficient_data`. Report count is never substituted for distinct client device count.
   4. **Semantics & Residual Risk Disclosure:** `distinctDevicesCount` is strictly documented as distinct client instance identifiers (CSPRNG UUIDs stored in browser storage), NOT verified human observers or Sybil resistance. Without SSO authentication, an adversary rotating client identifiers or using multiple devices/browsers can satisfy device counts; campus NAT IP ceilings (30 req / 5 min) provide secondary containment.
   5. **Fail-Safe Recommendation States:**
      - `"recommended"`: Winner found with verified status, fresh data, and independent corroboration.
-     - `"insufficient_data"`: Fresh data exists but qualification thresholds are not met across campus.
+     - `"insufficient_data"`: Fresh data exists but qualification thresholds are not met across campus (including when all outlets are unverified).
      - `"stale_data"`: All campus observations are $> 20$ minutes old.
      - `"no_active_outlets"`: No outlets are open or active.
 - **Exact Tests Added:**
   - `test_p1_16_qualifies_with_three_distinct_device_reports`, `test_p1_16_disqualifies_single_device_repeated_submissions`, `test_p1_16_disqualifies_unverified_and_inactive_outlets`, `test_p1_16_stale_data_state_transition`, `test_p1_16_no_active_outlets_state_transition`.
-  - `test_p1_16_fail_closed_verification_status_policy`: Verifies all approved statuses qualify and unverified, missing, or unknown statuses fail closed.
+  - `test_p1_16_fail_closed_verification_status_policy`: Verifies only `VERIFIED` and `VERIFIED_CAMPUS_DIRECTORY` qualify, while unverified, missing, or provenance source labels (`STUDENT_SOURCED`, `COMMUNITY_LISTING`, `COMMUNITY_DIRECTORY`, `UNVERIFIED`) fail closed.
+  - `test_p1_16_distinct_devices_validation_fail_closed`: Verifies missing, `None`, 0, negative, string, boolean, 1, and 2 distinct device counts fail closed.
   - `test_get_recommendations_handler_fail_closed_verification`: Handler integration test verifying verified outlet wins against unverified outlet with shorter wait.
-  - `test_get_recommendations_handler_disqualifies_all_unverified`: Handler integration test verifying fail-closed state when all outlets lack verified status.
+  - `test_get_recommendations_handler_built_in_catalog_honest_fail_closed`: Verifies default built-in catalog honestly returns `isEligible: False` and `insufficient_data`.
+  - `test_get_recommendations_handler_rejects_missing_distinct_devices`: Handler test confirming legacy estimates without device count fail closed.
 - **Residual Risks:** Sybil attacks via multiple devices or client identifier rotation are constrained by campus IP ceilings (30 req / 5 min), but absolute Sybil resistance requires authenticated student credentials.
 - **Status:** **`VERIFIED FIXED`**
 - **Residual Risks:** Sybil attacks via multiple devices are constrained by campus IP ceilings (30 req / 5 min), but absolute Sybil resistance requires authenticated student credentials.

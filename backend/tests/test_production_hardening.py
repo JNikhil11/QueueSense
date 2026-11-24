@@ -938,13 +938,14 @@ def test_cold_start_recommendation_protection():
             "id": "iitb-mess-h12-14",
             "name": "Hostel 12-14 Dining Hall",
             "active": True,
-            "verificationStatus": "STUDENT_SOURCED",
+            "verificationStatus": "VERIFIED",
             "estimate": {
                 "predictedWaitMinutes": 5.0,
                 "confidence": 0.35,  # Too low
                 "confidenceLabel": "LIMITED",
                 "freshness": "RECENT",
                 "recentReportCount": 1,  # Only 1 report! Needs >= 3
+                "distinctDevicesCount": 1,
                 "newestReportAgeMinutes": 14.0,
                 "congestion": "MODERATE",
             },
@@ -967,13 +968,14 @@ def test_recommendation_qualifies_with_three_reports_and_high_confidence():
             "id": "iitb-mess-h12-14",
             "name": "Hostel 12-14 Dining Hall",
             "active": True,
-            "verificationStatus": "STUDENT_SOURCED",
+            "verificationStatus": "VERIFIED",
             "estimate": {
                 "predictedWaitMinutes": 6.5,
                 "confidence": 0.72,
                 "confidenceLabel": "HIGH",
                 "freshness": "LIVE",
                 "recentReportCount": 4,
+                "distinctDevicesCount": 3,
                 "newestReportAgeMinutes": 3.0,
                 "congestion": "MODERATE",
             },

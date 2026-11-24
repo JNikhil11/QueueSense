@@ -41,12 +41,11 @@ SURGE_CORROBORATION_WINDOW_MIN = 30.0  # Time window (minutes) to consider repor
 SURGE_CONSISTENCY_DELTA_MIN = 20.0     # Maximum delta between corroborating surge reports
 
 # Recognized verified location statuses (Fail-Closed Recommendation Policy)
+# Only statuses backed by an actual documented independent verification process qualify.
+# Source/provenance labels (e.g. STUDENT_SOURCED, COMMUNITY_LISTING) are NOT verification statuses.
 VERIFIED_LOCATION_STATUSES = {
     "VERIFIED",
     "VERIFIED_CAMPUS_DIRECTORY",
-    "STUDENT_SOURCED",
-    "COMMUNITY_LISTING",
-    "COMMUNITY_DIRECTORY",
 }
 
 
@@ -138,6 +137,21 @@ def extract_report_timestamp(report: Dict[str, Any]) -> Optional[datetime]:
         return parse_iso_timestamp(str(raw_ts))
     except (ValueError, TypeError):
         return None
+
+
+def extract_client_identifier(report: Dict[str, Any]) -> Optional[str]:
+    """
+    Safely extract and validate a client instance identifier.
+    Must be a non-empty string of valid length (8 to 128 chars), not whitespace,
+    and not boolean or numeric types. Missing identity is NOT evidence of distinct client instances.
+    """
+    raw_id = report.get("deviceId") or report.get("clientHash") or report.get("reporterId")
+    if raw_id is None or isinstance(raw_id, bool) or not isinstance(raw_id, (str, bytes)):
+        return None
+    val = str(raw_id).strip()
+    if len(val) < 8 or len(val) > 128:
+        return None
+    return val
 
 
 def filter_outliers(
@@ -244,16 +258,19 @@ def filter_outliers(
     for r in candidate_spikes:
         wait = float(r["reportedWaitMinutes"])
         ts_r = extract_report_timestamp(r)
-        dev_r = r.get("deviceId") or r.get("clientHash") or r.get("reporterId")
+        dev_r = extract_client_identifier(r)
 
         # If timing cannot be established, report cannot be corroborated as concurrent
         if ts_r is None:
             outliers.append({**r, "outlierReason": "UNCORROBORATED_MISSING_TIMESTAMP"})
             continue
 
-        is_corroborated_by_peers = False
-        peer_matches = 0
+        # Missing identity is NOT evidence of distinct client instances
+        if dev_r is None:
+            outliers.append({**r, "outlierReason": "UNCORROBORATED_ISOLATED_SPIKE"})
+            continue
 
+        peer_matches = 0
         for peer in candidate_spikes:
             if peer is r:
                 continue
@@ -267,10 +284,10 @@ def filter_outliers(
             if time_delta_min > SURGE_CORROBORATION_WINDOW_MIN:
                 continue
 
-            # Check 2: Distinct client device identifiers if available
-            dev_peer = peer.get("deviceId") or peer.get("clientHash") or peer.get("reporterId")
-            if dev_r and dev_peer and dev_r == dev_peer:
-                # Same client identifier cannot establish peer consensus
+            # Check 2: Distinct client device identifiers
+            dev_peer = extract_client_identifier(peer)
+            if dev_peer is None or dev_r == dev_peer:
+                # Missing identifier or matching identifier cannot establish peer consensus
                 continue
 
             # Check 3: Value consistency within SURGE_CONSISTENCY_DELTA_MIN (20.0 min)
@@ -288,10 +305,14 @@ def filter_outliers(
     for r in candidate_drops:
         wait = float(r["reportedWaitMinutes"])
         ts_r = extract_report_timestamp(r)
-        dev_r = r.get("deviceId") or r.get("clientHash") or r.get("reporterId")
+        dev_r = extract_client_identifier(r)
 
         if ts_r is None:
             outliers.append({**r, "outlierReason": "UNCORROBORATED_MISSING_TIMESTAMP"})
+            continue
+
+        if dev_r is None:
+            outliers.append({**r, "outlierReason": "UNCORROBORATED_ISOLATED_DROP"})
             continue
 
         peer_matches = 0
@@ -307,8 +328,8 @@ def filter_outliers(
             if time_delta_min > SURGE_CORROBORATION_WINDOW_MIN:
                 continue
 
-            dev_peer = peer.get("deviceId") or peer.get("clientHash") or peer.get("reporterId")
-            if dev_r and dev_peer and dev_r == dev_peer:
+            dev_peer = extract_client_identifier(peer)
+            if dev_peer is None or dev_r == dev_peer:
                 continue
 
             peer_wait = float(peer["reportedWaitMinutes"])
@@ -404,9 +425,9 @@ def calculate_queue_estimate(
                 recent_reports.append(r)
 
                 # Track distinct device / client identity
-                dev_id = r.get("deviceId") or r.get("clientHash") or r.get("reporterId")
+                dev_id = extract_client_identifier(r)
                 if dev_id:
-                    observed_devices.add(str(dev_id))
+                    observed_devices.add(dev_id)
                 distinct_timestamps.append(ts)
 
     if total_weight < 0.001 or not recent_reports:
@@ -429,20 +450,8 @@ def calculate_queue_estimate(
             "updatedAt": now.isoformat(),
         }
 
-    # Evaluate distinct devices count
-    if observed_devices:
-        distinct_devices_count = len(observed_devices)
-    else:
-        # Fallback for anonymous / legacy reports without device IDs:
-        # Measure distinct submissions separated by at least 3 minutes
-        sorted_ts = sorted(distinct_timestamps)
-        independent_bursts = 0
-        last_counted_ts: Optional[datetime] = None
-        for cur_ts in sorted_ts:
-            if last_counted_ts is None or (cur_ts - last_counted_ts).total_seconds() >= 180.0:
-                independent_bursts += 1
-                last_counted_ts = cur_ts
-        distinct_devices_count = max(1, independent_bursts)
+    # Evaluate distinct devices count (strictly distinct client instance identifiers)
+    distinct_devices_count = len(observed_devices)
 
     # Final weighted estimates
     estimated_wait = round(weighted_wait_sum / total_weight, 1)
@@ -558,21 +567,33 @@ def compute_smart_recommendation(
             continue
         has_active_locations = True
 
-        # Check operational verification status (Fail-Closed Policy P1.16)
-        # Only recognized verified statuses qualify. Missing, None, empty, or unknown strings are disqualified.
-        v_status = loc.get("verificationStatus")
-        if not v_status or not isinstance(v_status, str) or v_status not in VERIFIED_LOCATION_STATUSES:
-            continue
-
         est = loc.get("estimate", {})
         freshness = est.get("freshness", "NO RECENT DATA")
         confidence = est.get("confidence", 0.0)
         predicted_wait = est.get("predictedWaitMinutes")
         recent_count = est.get("recentReportCount", 0)
-        distinct_devices = est.get("distinctDevicesCount", recent_count)
 
         if freshness in ("LIVE", "RECENT"):
             has_fresh_reports = True
+
+        # Check operational verification status (Fail-Closed Policy P1.16)
+        # Only statuses backed by an actual documented independent verification process qualify.
+        # Provenance labels (e.g. STUDENT_SOURCED, COMMUNITY_LISTING) are NOT verification statuses.
+        v_status = loc.get("verificationStatus")
+        if not v_status or not isinstance(v_status, str) or v_status not in VERIFIED_LOCATION_STATUSES:
+            continue
+
+        # Check independent device evidence (P1.16 - Fail-closed on missing/invalid device count)
+        # Missing, None, malformed, negative, boolean, non-integer, or insufficient distinctDevicesCount
+        # strictly fails the independent-evidence requirement. Never substitute recentReportCount.
+        raw_devices = est.get("distinctDevicesCount")
+        if (
+            raw_devices is None
+            or isinstance(raw_devices, bool)
+            or not isinstance(raw_devices, int)
+            or raw_devices < min_distinct_devices
+        ):
+            continue
 
         # Check all qualification criteria
         if (
@@ -580,7 +601,6 @@ def compute_smart_recommendation(
             and freshness in ("LIVE", "RECENT")
             and recent_count >= min_reports
             and confidence >= min_confidence
-            and distinct_devices >= min_distinct_devices
         ):
             eligible.append(loc)
 
