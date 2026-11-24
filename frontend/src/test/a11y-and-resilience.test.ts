@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import puppeteer, { Browser, Page } from 'puppeteer-core';
 import { getOrGenerateDeviceId, rotateDeviceId, resetDeviceId } from '../services/deviceId';
-
-const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+import { CHROME_PATH } from './helpers/browser';
 const PREVIEW_URL = 'http://localhost:4173/';
 
 describe('Accessibility (WCAG 2.2 AA), Focus Trapping & Operational Resilience', { timeout: 30000 }, () => {

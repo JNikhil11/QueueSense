@@ -1064,4 +1064,26 @@ Status Definitions:
   7. Preserved `isPartial` in `getLocations()` and returned typed audit metadata in `getAdminReports()`.
 - **Status:** **`VERIFIED FIXED`**
 
+### P1.26 — Batch 6: Cross-Component Adversarial Integration & Release Readiness Verification (Matrices A through H)
+- **Severity:** P1 (Integration Integrity, Adversarial Defense & Cross-Platform Reliability)
+- **Scope & Findings:**
+  1. **Matrix A (Frontend ↔ API Contracts):** Validated exact schema matching, error envelopes (`{ success: False, error, errorCode, requestId }`), boundary constraints, and route `locationId` propagation into all sanitized reports.
+  2. **Matrix B (Report Submission Lifecycle):** Validated atomic idempotency deduplication under concurrency, `IdempotencyConflictError` handling with HTTP 409 conflict responses, transactional database failure fail-closed behavior, and pseudonymized client identity hashing.
+  3. **Matrix C (Authentication Boundary):** Validated Cognito User Pool authorizer claim evaluation (`cognito:groups` = `Admins`, `token_use`, `exp`), rejection of forged/non-admin tokens with `FORBIDDEN_NOT_ADMIN`, and lockdown of static developer API keys in production mode.
+  4. **Matrix D (Rate Limiting & Abuse Resistance):** Validated sliding-window counter burst enforcement triggering HTTP 429, rejection of client-spoofed `X-Forwarded-For` header tampering, and two-pass outlier rejection (physical bounds violations and uncorroborated surges).
+  5. **Matrix E (DynamoDB & Data Integrity):** Validated dynamic campus partition isolation (`campusId` in `iitb` vs `vitap`), 30-day epoch TTL computation on persisted observations, and pagination parameter clamping to [1, 100].
+  6. **Matrix F (Predictions & Recommendations):** Validated exponential decay half-life weighting ($\tau = 1800$s), safe fallback to `NO RECENT DATA` during sparse cold-starts, and client-side payload validation rejecting impossible or negative values.
+  7. **Matrix G (Infrastructure & Least-Privilege IAM):** Validated SAM template IAM policies to ensure zero wildcard `Resource: "*"` on DynamoDB write operations, verified `BillingMode: PAY_PER_REQUEST` on `MainTable`, confirmed private S3 configuration with public access blocked, and verified 30-day explicit log retention across all Lambda log groups.
+  8. **Matrix H (Automated Test Suite Resilience & Cross-Platform Discovery):** Eliminated hardcoded Windows Chrome executable paths across all 7 frontend browser test files. Implemented `frontend/src/test/helpers/browser.ts` with cross-platform discovery prioritizing `CHROME_BIN`, `PUPPETEER_EXECUTABLE_PATH`, and OS candidate paths for Windows, macOS, and Linux.
+- **Exact Tests Added / Verified:**
+  - `backend/tests/test_batch6_adversarial_integration.py` (25 cross-component adversarial integration tests covering Matrices A–G, all passing)
+  - `frontend/src/test/helpers/browser.ts` & `node-env.d.ts` (portable browser path resolver)
+  - Updated 7 browser test suites (`a11y-and-resilience.test.ts`, `card-layout-containment.test.ts`, `focus-trap-lifecycle.test.ts`, `report-modal-idempotency-browser.test.ts`, `runtime-performance.test.ts`, `stale-data-browser.test.ts`, `video-background.test.ts`)
+- **Total Test Counts:**
+  - Backend: **231 / 231 tests passing** across 9 test suites
+  - Frontend: **169 / 169 tests passing** across 13 test suites
+  - SAM Infrastructure: **Valid SAM Template** (validated with `--lint`)
+  - Production Build: **0 errors** (TypeScript `tsc` + Vite bundle passing)
+- **Status:** **`VERIFIED FIXED`**
+
 All remediated findings have been independently inspected, root-caused, repaired, and rigorously verified. The QueueSense codebase on `feature/production-hardening` meets zero-compromise commercial production standards.

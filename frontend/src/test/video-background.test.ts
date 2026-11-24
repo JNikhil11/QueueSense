@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import puppeteer, { Browser, Page } from 'puppeteer-core';
-
-const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+import { CHROME_PATH } from './helpers/browser';
 const PREVIEW_URL = 'http://localhost:4173/';
 
 describe('Global Cinematic Video Background & Modal Synchronization Engine', { timeout: 25000 }, () => {
