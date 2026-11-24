@@ -31,6 +31,9 @@ Parameters:
     Default: ''
     Description: Optional email address for operational CloudWatch alarm notifications
 
+Conditions:
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmNotificationEmail, ""]]
+
 Globals:
   Function:
     Timeout: 10
@@ -114,7 +117,7 @@ Resources:
           RequireSymbols: true
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
-      MfaConfiguration: "OPTIONAL"
+      MfaConfiguration: "ON"
       EnabledMfas:
         - SOFTWARE_TOKEN_MFA
       UserPoolTags:
@@ -204,8 +207,26 @@ Resources:
             ModeBlock: true
             Override: true
           ContentSecurityPolicy:
-            ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; media-src 'self' blob:; connect-src 'self' https://*.amazonaws.com https://*.execute-api.*.amazonaws.com;"
+            ContentSecurityPolicy: !Sub "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' https://*.execute-api.${AWS::Region}.amazonaws.com https://cognito-idp.${AWS::Region}.amazonaws.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
             Override: true
+
+  SpaRoutingFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "queuesense-spa-routing-${Environment}"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: "SPA routing: rewrites extensionless route requests to /index.html while preserving genuine 404s for missing static assets"
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+            var request = event.request;
+            var uri = request.uri;
+            if (uri === '/' || !uri.includes('.')) {
+                request.uri = '/index.html';
+            }
+            return request;
+        }
 
   CloudFrontOAC:
     Type: AWS::CloudFront::OriginAccessControl
@@ -241,16 +262,10 @@ Resources:
             - HEAD
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
           ResponseHeadersPolicyId: !Ref FrontendResponseHeadersPolicy
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt SpaRoutingFunction.FunctionARN
           Compress: true
-        CustomErrorResponses:
-          - ErrorCode: 403
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-            ErrorCachingMinTTL: 10
-          - ErrorCode: 404
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-            ErrorCachingMinTTL: 10
         PriceClass: PriceClass_100
       Tags:
         - Key: Project
@@ -288,7 +303,7 @@ Resources:
       Name: !Sub "queuesense-api-${Environment}"
       AccessLogSettings:
         DestinationArn: !GetAtt ApiAccessLogGroup.Arn
-        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","latency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","integrationErrorMessage":"$context.integrationErrorMessage"}'
+        Format: '{"requestId":"$context.requestId","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","latency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","integrationErrorMessage":"$context.integrationErrorMessage"}'
       CorsConfiguration:
         AllowOrigins:
           - !Sub "https://${FrontendDistribution.DomainName}"
@@ -556,8 +571,24 @@ Resources:
       RetentionInDays: 30
 
   # ==========================================
-  # Observability: CloudWatch Alarms
+  # Observability: CloudWatch Alarms & Notifications
   # ==========================================
+  OperationalAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "queuesense-alerts-${Environment}"
+      Tags:
+        - Key: Project
+          Value: QueueSense
+
+  OperationalAlertsSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref OperationalAlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlarmNotificationEmail
+
   Api5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -574,6 +605,8 @@ Resources:
       Threshold: 5
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref OperationalAlertsTopic
 
   SubmitReportErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -591,6 +624,8 @@ Resources:
       Threshold: 3
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref OperationalAlertsTopic
 
   DynamoDBThrottledRequestsAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -608,6 +643,8 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref OperationalAlertsTopic
 
   QueueReadLatencyAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -625,6 +662,8 @@ Resources:
       Threshold: 3000
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref OperationalAlertsTopic
 
 Outputs:
   HttpApiUrl:
@@ -651,3 +690,6 @@ Outputs:
   AwsRegion:
     Description: AWS Target Region
     Value: !Ref "AWS::Region"
+  OperationalAlertsTopicArn:
+    Description: SNS Topic ARN for Operational CloudWatch Alarms
+    Value: !Ref OperationalAlertsTopic

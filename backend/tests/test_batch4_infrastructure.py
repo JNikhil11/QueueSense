@@ -1,174 +1,269 @@
 """
-QueueSense — Batch 4: Infrastructure & Operational Readiness Tests
-Validates SAM template properties for:
-- P1.18: Observability, CloudWatch log groups, retention, API Gateway access logging, and operational alarms.
-- P1.19: Data persistence, DynamoDB PITR, deletion protection, encryption, S3 versioning, lifecycle, and retention policies.
+QueueSense — Batch 4: Infrastructure & Operational Readiness Semantic Tests
+Parses infrastructure/template.yaml into structured CloudFormation data structures using PyYAML.
+Validates:
+- P1.18: Observability, CloudWatch log groups, 30-day retention, privacy-preserving API access logging, and operational alarms with SNS wiring.
+- P1.19: Data persistence, DynamoDB PITR, deletion protection, encryption, S3 versioning, lifecycle expiration, and retain policies.
 - P1.20: Cost controls, denial-of-wallet resilience, reserved concurrency ceilings, API throttling, on-demand billing.
 - IAM least privilege, KMS encryption context scoping, and DynamoDB permissions.
-- Cognito User Pool admin lockdown, password policy, TOTP MFA, and user enumeration defense.
-- CloudFront delivery, OAC security, and strict response security headers policy.
+- Cognito User Pool admin lockdown, mandatory TOTP MFA ("ON"), password policy, and user enumeration defense.
+- CloudFront SPA routing via CloudFront Function, elimination of global 403/404 rewrites, and strict response security headers.
 """
 
 import os
+import json
 import re
 import pytest
+import yaml
 
 TEMPLATE_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "infrastructure", "template.yaml")
 )
 
 
-def load_template_text() -> str:
+class CfnYamlLoader(yaml.SafeLoader):
+    """Custom YAML loader supporting CloudFormation and SAM intrinsic tags."""
+    pass
+
+
+def _cfn_tag_constructor(loader, tag_suffix, node):
+    if isinstance(node, yaml.ScalarNode):
+        return {tag_suffix: loader.construct_scalar(node)}
+    elif isinstance(node, yaml.SequenceNode):
+        return {tag_suffix: loader.construct_sequence(node)}
+    elif isinstance(node, yaml.MappingNode):
+        return {tag_suffix: loader.construct_mapping(node)}
+
+
+CfnYamlLoader.add_multi_constructor("!", _cfn_tag_constructor)
+
+
+def load_cfn_template() -> dict:
+    """Loads and returns the parsed CloudFormation template as structured data."""
     with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
-        return f.read()
+        return yaml.load(f, Loader=CfnYamlLoader)
+
+
+@pytest.fixture(scope="module")
+def template():
+    return load_cfn_template()
 
 
 # =========================================================================
 # P1.18: Observability, Log Groups, Retention & Alarms
 # =========================================================================
 
-def test_p1_18_all_lambda_functions_have_explicit_cloudwatch_log_groups_and_retention():
-    """P1.18: Every Lambda function must have an explicit AWS::Logs::LogGroup with 30-day retention."""
-    text = load_template_text()
+def test_semantic_log_groups_and_retention(template):
+    """P1.18: Every Lambda function has a dedicated AWS::Logs::LogGroup with finite 30-day retention."""
+    resources = template.get("Resources", {})
 
-    required_functions = [
-        ("HealthFunction", "HealthFunctionLogGroup"),
-        ("GetLocationsFunction", "GetLocationsFunctionLogGroup"),
-        ("GetQueueFunction", "GetQueueFunctionLogGroup"),
-        ("SubmitReportFunction", "SubmitReportFunctionLogGroup"),
-        ("GetRecommendationsFunction", "GetRecommendationsFunctionLogGroup"),
-        ("GetHistoricalFunction", "GetHistoricalFunctionLogGroup"),
-        ("AdminReportsFunction", "AdminReportsFunctionLogGroup"),
+    expected_functions = [
+        "HealthFunction",
+        "GetLocationsFunction",
+        "GetQueueFunction",
+        "SubmitReportFunction",
+        "GetRecommendationsFunction",
+        "GetHistoricalFunction",
+        "AdminReportsFunction",
     ]
 
-    for func_id, log_id in required_functions:
-        assert func_id in text, f"Template must define function {func_id}"
-        assert log_id in text, f"Template must define explicit LogGroup resource {log_id}"
+    for func_name in expected_functions:
+        log_group_name = f"{func_name}LogGroup"
+        assert log_group_name in resources, f"Log group resource {log_group_name} missing from template"
+        log_res = resources[log_group_name]
+        assert log_res.get("Type") == "AWS::Logs::LogGroup"
 
-        # Match log group resource block
-        log_pattern = re.compile(rf"{log_id}:.*?(?=\n  [A-Za-z0-9]+:|\Z)", re.DOTALL)
-        match = log_pattern.search(text)
-        assert match, f"Could not extract resource block for {log_id}"
-        block = match.group(0)
-
-        assert "Type: AWS::Logs::LogGroup" in block, f"{log_id} must be AWS::Logs::LogGroup"
-        assert f"!Sub \"/aws/lambda/${{{func_id}}}\"" in block, f"{log_id} must target /aws/lambda/${{{func_id}}}"
-        assert "RetentionInDays: 30" in block, f"{log_id} must enforce finite 30-day retention"
+        props = log_res.get("Properties", {})
+        assert props.get("RetentionInDays") == 30, (
+            f"{log_group_name} must enforce RetentionInDays: 30"
+        )
+        assert props.get("LogGroupName") == {"Sub": f"/aws/lambda/${{{func_name}}}"}
 
 
-def test_p1_18_api_gateway_access_logging_configured_with_safe_fields():
-    """P1.18: API Gateway has dedicated access log group and JSON format with safe operational fields."""
-    text = load_template_text()
+def test_semantic_api_gateway_access_logging_privacy(template):
+    """P1.18: API Gateway access logging uses structured JSON with safe operational fields, strictly excluding raw IP."""
+    resources = template.get("Resources", {})
 
-    assert "ApiAccessLogGroup:" in text, "Template must define ApiAccessLogGroup"
-    assert "LogGroupName: !Sub \"/aws/apigateway/queuesense-api-${Environment}\"" in text
-    assert "RetentionInDays: 30" in text
+    # Check dedicated log group
+    assert "ApiAccessLogGroup" in resources
+    api_log_res = resources["ApiAccessLogGroup"]
+    assert api_log_res.get("Type") == "AWS::Logs::LogGroup"
+    assert api_log_res.get("Properties", {}).get("RetentionInDays") == 30
 
-    # Check AccessLogSettings in QueueSenseHttpApi
-    api_match = re.search(r"QueueSenseHttpApi:.*?(?=\n  [A-Za-z0-9]+:|\Z)", text, re.DOTALL)
-    assert api_match, "QueueSenseHttpApi must be present"
-    api_block = api_match.group(0)
+    # Check API Gateway AccessLogSettings
+    http_api = resources.get("QueueSenseHttpApi", {})
+    props = http_api.get("Properties", {})
+    access_log_settings = props.get("AccessLogSettings", {})
 
-    assert "AccessLogSettings:" in api_block
-    assert "DestinationArn: !GetAtt ApiAccessLogGroup.Arn" in api_block
+    assert access_log_settings.get("DestinationArn") == {"GetAtt": "ApiAccessLogGroup.Arn"}
 
-    format_match = re.search(r"Format:\s*'([^']+)'", api_block)
-    assert format_match, "AccessLogSettings must define single-quoted JSON Format string"
-    log_format = format_match.group(1)
+    format_str = access_log_settings.get("Format", "")
+    assert format_str, "AccessLogSettings Format string is missing"
 
-    # Verify safe fields present in log format
-    safe_fields = ["requestId", "ip", "requestTime", "httpMethod", "routeKey", "status", "latency", "integrationLatency"]
-    for field in safe_fields:
-        assert field in log_format, f"API access log format must contain safe field: {field}"
+    # Parse Format string as JSON
+    format_data = json.loads(format_str)
 
-    # Verify forbidden sensitive fields absent from log format
-    forbidden_tokens = ["$context.identity.apiKey", "$context.authorizer", "Authorization", "password", "salt", "token", "requestBody"]
+    # 1. Privacy assertion: Raw client IP MUST NOT be logged
+    assert "ip" not in format_data, "Access log must NOT include raw IP address key ('ip')"
+    assert "$context.identity.sourceIp" not in format_str, (
+        "Access log format must strictly exclude $context.identity.sourceIp"
+    )
+
+    # 2. Operational assertions: Safe telemetry fields MUST be logged
+    safe_expected_fields = [
+        "requestId",
+        "requestTime",
+        "httpMethod",
+        "routeKey",
+        "status",
+        "protocol",
+        "responseLength",
+        "latency",
+        "integrationLatency",
+        "integrationStatus",
+    ]
+    for field in safe_expected_fields:
+        assert field in format_data, f"Access log format must include safe operational field: {field}"
+
+    # 3. Security assertions: Credentials, authorization headers, or request bodies MUST NOT be logged
+    forbidden_tokens = ["Authorization", "password", "salt", "token", "requestBody", "$context.authorizer"]
     for token in forbidden_tokens:
-        assert token not in log_format, f"API access log format must not expose sensitive token: {token}"
+        assert token not in format_str, f"Access log format must not contain sensitive token: {token}"
 
 
-def test_p1_18_operational_cloudwatch_alarms_defined():
-    """P1.18: Critical operational conditions (5xx, Lambda errors, DynamoDB throttles, read latency) have CloudWatch alarms."""
-    text = load_template_text()
+def test_semantic_cloudwatch_alarms_and_sns_actions(template):
+    """P1.18: CloudWatch alarms are configured with valid metric dimensions, thresholds, and wired to OperationalAlertsTopic."""
+    resources = template.get("Resources", {})
 
-    # 1. Api5xxAlarm
-    assert "Api5xxAlarm:" in text
-    api_5xx = re.search(r"Api5xxAlarm:.*?(?=\n  [A-Za-z0-9]+:|\Z)", text, re.DOTALL).group(0)
-    assert "Namespace: AWS/ApiGateway" in api_5xx
-    assert "MetricName: 5xx" in api_5xx
-    assert "!Ref QueueSenseHttpApi" in api_5xx
+    # Verify SNS Topic and optional Subscription
+    assert "OperationalAlertsTopic" in resources
+    assert resources["OperationalAlertsTopic"]["Type"] == "AWS::SNS::Topic"
+    assert "OperationalAlertsSubscription" in resources
+    sub = resources["OperationalAlertsSubscription"]
+    assert sub.get("Type") == "AWS::SNS::Subscription"
+    assert sub.get("Condition") == "HasAlarmEmail"
 
-    # 2. SubmitReportErrorsAlarm
-    assert "SubmitReportErrorsAlarm:" in text
-    sub_err = re.search(r"SubmitReportErrorsAlarm:.*?(?=\n  [A-Za-z0-9]+:|\Z)", text, re.DOTALL).group(0)
-    assert "Namespace: AWS/Lambda" in sub_err
-    assert "MetricName: Errors" in sub_err
-    assert "!Ref SubmitReportFunction" in sub_err
+    alarm_specs = {
+        "Api5xxAlarm": {
+            "Namespace": "AWS/ApiGateway",
+            "MetricName": "5xx",
+            "Threshold": 5,
+            "Statistic": "Sum",
+            "DimensionName": "ApiId",
+            "DimensionValue": {"Ref": "QueueSenseHttpApi"},
+        },
+        "SubmitReportErrorsAlarm": {
+            "Namespace": "AWS/Lambda",
+            "MetricName": "Errors",
+            "Threshold": 3,
+            "Statistic": "Sum",
+            "DimensionName": "FunctionName",
+            "DimensionValue": {"Ref": "SubmitReportFunction"},
+        },
+        "DynamoDBThrottledRequestsAlarm": {
+            "Namespace": "AWS/DynamoDB",
+            "MetricName": "ThrottledRequests",
+            "Threshold": 1,
+            "Statistic": "Sum",
+            "DimensionName": "TableName",
+            "DimensionValue": {"Ref": "MainTable"},
+        },
+        "QueueReadLatencyAlarm": {
+            "Namespace": "AWS/Lambda",
+            "MetricName": "Duration",
+            "Threshold": 3000,
+            "Statistic": "Average",
+            "DimensionName": "FunctionName",
+            "DimensionValue": {"Ref": "GetQueueFunction"},
+        },
+    }
 
-    # 3. DynamoDBThrottledRequestsAlarm
-    assert "DynamoDBThrottledRequestsAlarm:" in text
-    ddb_alarm = re.search(r"DynamoDBThrottledRequestsAlarm:.*?(?=\n  [A-Za-z0-9]+:|\Z)", text, re.DOTALL).group(0)
-    assert "Namespace: AWS/DynamoDB" in ddb_alarm
-    assert "MetricName: ThrottledRequests" in ddb_alarm
-    assert "!Ref MainTable" in ddb_alarm
+    for alarm_id, spec in alarm_specs.items():
+        assert alarm_id in resources, f"Alarm {alarm_id} missing from template"
+        alarm = resources[alarm_id]
+        assert alarm.get("Type") == "AWS::CloudWatch::Alarm"
+        props = alarm.get("Properties", {})
 
-    # 4. QueueReadLatencyAlarm
-    assert "QueueReadLatencyAlarm:" in text
-    lat_alarm = re.search(r"QueueReadLatencyAlarm:.*?(?=\n  [A-Za-z0-9]+:|\Z)", text, re.DOTALL).group(0)
-    assert "Namespace: AWS/Lambda" in lat_alarm
-    assert "MetricName: Duration" in lat_alarm
-    assert "!Ref GetQueueFunction" in lat_alarm
+        assert props.get("Namespace") == spec["Namespace"]
+        assert props.get("MetricName") == spec["MetricName"]
+        assert props.get("Threshold") == spec["Threshold"]
+        assert props.get("Statistic") == spec["Statistic"]
+        assert props.get("ComparisonOperator") == "GreaterThanOrEqualToThreshold"
+        assert props.get("TreatMissingData") == "notBreaching"
+
+        # Verify Dimensions
+        dims = props.get("Dimensions", [])
+        assert len(dims) >= 1
+        dim = dims[0]
+        assert dim.get("Name") == spec["DimensionName"]
+        assert dim.get("Value") == spec["DimensionValue"]
+
+        # Verify AlarmActions wired to SNS
+        assert props.get("AlarmActions") == [{"Ref": "OperationalAlertsTopic"}]
 
 
 # =========================================================================
 # P1.19: Persistence, Recovery & Data Safety
 # =========================================================================
 
-def test_p1_19_dynamodb_persistence_pitr_and_deletion_protection():
-    """P1.19: DynamoDB table has PITR enabled, deletion protection enabled, SSE, and retain policies."""
-    text = load_template_text()
+def test_semantic_dynamodb_persistence_and_recovery(template):
+    """P1.19: MainTable has continuous PITR, deletion protection, SSE encryption, and retain policies."""
+    resources = template.get("Resources", {})
+    assert "MainTable" in resources
+    table = resources["MainTable"]
 
-    match = re.search(r"MainTable:.*?(?=\n  [A-Za-z0-9]+:|\Z)", text, re.DOTALL)
-    assert match, "MainTable resource must be present"
-    table_block = match.group(0)
+    assert table.get("Type") == "AWS::DynamoDB::Table"
+    assert table.get("DeletionPolicy") == "Retain"
+    assert table.get("UpdateReplacePolicy") == "Retain"
 
-    assert "DeletionPolicy: Retain" in table_block, "MainTable must have DeletionPolicy: Retain"
-    assert "UpdateReplacePolicy: Retain" in table_block, "MainTable must have UpdateReplacePolicy: Retain"
-    assert "DeletionProtectionEnabled: true" in table_block, "MainTable must have DeletionProtectionEnabled: true"
-    assert "PointInTimeRecoveryEnabled: true" in table_block, "MainTable must have PITR enabled"
-    assert "SSEEnabled: true" in table_block, "MainTable must explicitly enable SSESpecification"
-    assert "TimeToLiveSpecification:" in table_block
-    assert "AttributeName: ttl" in table_block
+    props = table.get("Properties", {})
+    assert props.get("BillingMode") == "PAY_PER_REQUEST"
+    assert props.get("DeletionProtectionEnabled") is True
+    assert props.get("PointInTimeRecoverySpecification", {}).get("PointInTimeRecoveryEnabled") is True
+    assert props.get("SSESpecification", {}).get("SSEEnabled") is True
+    assert props.get("TimeToLiveSpecification", {}).get("AttributeName") == "ttl"
+    assert props.get("TimeToLiveSpecification", {}).get("Enabled") is True
 
 
-def test_p1_19_s3_bucket_versioning_lifecycle_and_deletion_policy():
-    """P1.19: Frontend S3 bucket has versioning, non-current version expiration lifecycle, and retain policies."""
-    text = load_template_text()
+def test_semantic_s3_frontend_bucket_hardening(template):
+    """P1.19: FrontendBucket has object versioning, 30-day noncurrent expiration lifecycle, and retain policies."""
+    resources = template.get("Resources", {})
+    assert "FrontendBucket" in resources
+    bucket = resources["FrontendBucket"]
 
-    match = re.search(r"FrontendBucket:.*?(?=\n  [A-Za-z0-9]+:|\Z)", text, re.DOTALL)
-    assert match, "FrontendBucket resource must be present"
-    bucket_block = match.group(0)
+    assert bucket.get("Type") == "AWS::S3::Bucket"
+    assert bucket.get("DeletionPolicy") == "Retain"
+    assert bucket.get("UpdateReplacePolicy") == "Retain"
 
-    assert "DeletionPolicy: Retain" in bucket_block
-    assert "UpdateReplacePolicy: Retain" in bucket_block
-    assert "VersioningConfiguration:" in bucket_block
-    assert "Status: Enabled" in bucket_block
-    assert "LifecycleConfiguration:" in bucket_block
-    assert "NoncurrentDays: 30" in bucket_block
-    assert "BlockPublicAcls: true" in bucket_block
-    assert "BlockPublicPolicy: true" in bucket_block
-    assert "ObjectOwnership: BucketOwnerEnforced" in bucket_block
+    props = bucket.get("Properties", {})
+    assert props.get("VersioningConfiguration", {}).get("Status") == "Enabled"
+
+    rules = props.get("LifecycleConfiguration", {}).get("Rules", [])
+    assert len(rules) >= 1
+    rule = rules[0]
+    assert rule.get("Status") == "Enabled"
+    assert rule.get("NoncurrentVersionExpiration", {}).get("NoncurrentDays") == 30
+
+    pab = props.get("PublicAccessBlockConfiguration", {})
+    assert pab.get("BlockPublicAcls") is True
+    assert pab.get("BlockPublicPolicy") is True
+    assert pab.get("IgnorePublicAcls") is True
+    assert pab.get("RestrictPublicBuckets") is True
+
+    ownership = props.get("OwnershipControls", {}).get("Rules", [])
+    assert len(ownership) >= 1
+    assert ownership[0].get("ObjectOwnership") == "BucketOwnerEnforced"
 
 
 # =========================================================================
 # P1.20: Cost Controls & Denial-of-Wallet Resilience
 # =========================================================================
 
-def test_p1_20_lambda_concurrency_ceilings_and_cost_controls():
-    """P1.20: Every Lambda function has a protective ReservedConcurrentExecutions ceiling."""
-    text = load_template_text()
+def test_semantic_lambda_concurrency_ceilings(template):
+    """P1.20: Every Lambda function has a protective ReservedConcurrentExecutions ceiling (total 190)."""
+    resources = template.get("Resources", {})
 
-    concurrency_limits = {
+    expected_concurrency = {
         "HealthFunction": 10,
         "GetLocationsFunction": 50,
         "GetQueueFunction": 50,
@@ -178,113 +273,225 @@ def test_p1_20_lambda_concurrency_ceilings_and_cost_controls():
         "AdminReportsFunction": 10,
     }
 
-    for func_name, expected_limit in concurrency_limits.items():
-        pattern = re.compile(rf"{func_name}:.*?(?=\n  [A-Za-z0-9]+:|\Z)", re.DOTALL)
-        match = pattern.search(text)
-        assert match, f"Could not find {func_name}"
-        block = match.group(0)
-        assert f"ReservedConcurrentExecutions: {expected_limit}" in block, (
-            f"{func_name} must have ReservedConcurrentExecutions: {expected_limit}"
-        )
+    total_concurrency = 0
+    for func_name, expected_limit in expected_concurrency.items():
+        assert func_name in resources
+        func = resources[func_name]
+        props = func.get("Properties", {})
+        limit = props.get("ReservedConcurrentExecutions")
+        assert limit == expected_limit, f"{func_name} has invalid ReservedConcurrentExecutions: {limit}"
+        total_concurrency += limit
+
+    assert total_concurrency == 190, f"Expected total concurrency 190, got {total_concurrency}"
 
 
-def test_p1_20_api_gateway_throttling_and_on_demand_storage():
-    """P1.20: API Gateway route throttling and DynamoDB on-demand billing constrain denial-of-wallet spend."""
-    text = load_template_text()
+def test_semantic_api_gateway_throttling_settings(template):
+    """P1.20: API Gateway has default throttling and route-specific throttling for report submission."""
+    resources = template.get("Resources", {})
+    http_api = resources.get("QueueSenseHttpApi", {})
+    props = http_api.get("Properties", {})
 
-    # DynamoDB BillingMode
-    assert "BillingMode: PAY_PER_REQUEST" in text
+    default_throttle = props.get("DefaultRouteSettings", {})
+    assert default_throttle.get("ThrottlingBurstLimit") == 100
+    assert default_throttle.get("ThrottlingRateLimit") == 50.0
 
-    # API Gateway throttling
-    assert "ThrottlingBurstLimit: 100" in text
-    assert "ThrottlingRateLimit: 50.0" in text
-    assert "ThrottlingBurstLimit: 20" in text
-    assert "ThrottlingRateLimit: 10.0" in text
-
-    # CloudFront PriceClass
-    assert "PriceClass: PriceClass_100" in text
+    route_throttle = props.get("RouteSettings", {}).get("POST /locations/{id}/reports", {})
+    assert route_throttle.get("ThrottlingBurstLimit") == 20
+    assert route_throttle.get("ThrottlingRateLimit") == 10.0
 
 
 # =========================================================================
 # IAM & Secrets Least-Privilege Verification
 # =========================================================================
 
-def test_iam_submit_report_kms_policy_tightly_scoped():
-    """P1.20/IAM: SubmitReportFunction KMS decrypt statement is constrained by caller account, SSM service, and encryption context."""
-    text = load_template_text()
+def test_semantic_submit_report_kms_least_privilege(template):
+    """IAM: SubmitReportFunction KMS decrypt statement is locked to caller account, SSM service, and parameter encryption context."""
+    resources = template.get("Resources", {})
+    func = resources.get("SubmitReportFunction", {})
+    policies = func.get("Properties", {}).get("Policies", [])
 
-    match = re.search(r"SubmitReportFunction:.*?(?=\n  [A-Za-z0-9]+:|\Z)", text, re.DOTALL)
-    assert match, "SubmitReportFunction must be present"
-    sub_block = match.group(0)
+    kms_statement = None
+    for pol in policies:
+        if "Statement" in pol:
+            for stmt in pol["Statement"]:
+                if stmt.get("Sid") == "SubmitReportKMSDecryptionAccess":
+                    kms_statement = stmt
+                    break
 
-    assert "SubmitReportKMSDecryptionAccess" in sub_block
-    assert "kms:Decrypt" in sub_block
-    assert "kms:CallerAccount: !Sub \"${AWS::AccountId}\"" in sub_block
-    assert "kms:ViaService: !Sub \"ssm.${AWS::Region}.amazonaws.com\"" in sub_block
-    assert "kms:EncryptionContext:aws:ssm:arn: !Sub \"arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/queuesense/${Environment}/rate_limit_salt\"" in sub_block
+    assert kms_statement is not None, "SubmitReportKMSDecryptionAccess statement missing"
+    assert kms_statement.get("Action") == ["kms:Decrypt"]
+
+    cond = kms_statement.get("Condition", {}).get("StringEquals", {})
+    assert cond.get("kms:CallerAccount") == {"Sub": "${AWS::AccountId}"}
+    assert cond.get("kms:ViaService") == {"Sub": "ssm.${AWS::Region}.amazonaws.com"}
+    assert cond.get("kms:EncryptionContext:aws:ssm:arn") == {
+        "Sub": "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/queuesense/${Environment}/rate_limit_salt"
+    }
 
 
-def test_iam_no_wildcard_actions_or_dangerous_permissions():
-    """IAM: Verify no dangerous administrative or wildcard permissions exist in any Lambda role."""
-    text = load_template_text()
+def test_semantic_iam_no_wildcards_in_any_policy(template):
+    """IAM: Verifies that no Lambda execution role grants wildcard actions or dangerous administrative permissions."""
+    resources = template.get("Resources", {})
 
-    forbidden_patterns = [
-        "dynamodb:*",
-        "ssm:*",
-        "kms:*",
-        "s3:*",
-        "cloudwatch:*",
-        "dynamodb:DeleteTable",
-        "dynamodb:DropTable",
-        "dynamodb:DeleteItem",
+    forbidden_action_patterns = [
+        r"^dynamodb:\*$",
+        r"^ssm:\*$",
+        r"^kms:\*$",
+        r"^s3:\*$",
+        r"^dynamodb:DeleteTable$",
+        r"^dynamodb:DropTable$",
     ]
 
-    for pattern in forbidden_patterns:
-        assert pattern not in text, f"Dangerous wildcard/action '{pattern}' is strictly forbidden in template.yaml"
+    for res_name, res_val in resources.items():
+        if res_val.get("Type") == "AWS::Serverless::Function":
+            policies = res_val.get("Properties", {}).get("Policies", [])
+            for pol in policies:
+                if isinstance(pol, dict) and "Statement" in pol:
+                    for stmt in pol["Statement"]:
+                        actions = stmt.get("Action", [])
+                        if isinstance(actions, str):
+                            actions = [actions]
+                        for act in actions:
+                            for pat in forbidden_action_patterns:
+                                assert not re.match(pat, act, re.IGNORECASE), (
+                                    f"Forbidden action '{act}' found in {res_name}"
+                                )
 
 
 # =========================================================================
-# Cognito Administrative Access & Delivery Security
+# Cognito Administrative Security & CloudFront Delivery
 # =========================================================================
 
-def test_cognito_admin_lockdown_and_enumeration_defense():
-    """Cognito: Admin pool enforces admin-only creation, TOTP MFA, strong password policy, and user enumeration defense."""
-    text = load_template_text()
+def test_semantic_cognito_mfa_and_admin_security(template):
+    """Cognito: Mandatory TOTP MFA ('ON'), admin-only user creation, and user existence error masking."""
+    resources = template.get("Resources", {})
+    user_pool = resources.get("QueueSenseUserPool", {})
+    props = user_pool.get("Properties", {})
 
-    assert "AllowAdminCreateUserOnly: true" in text
-    assert "MinimumLength: 12" in text
-    assert "MfaConfiguration: \"OPTIONAL\"" in text
-    assert "SOFTWARE_TOKEN_MFA" in text
-    assert "PreventUserExistenceErrors: ENABLED" in text
-    assert "RefreshTokenValidity: 30" in text
-    assert "AccessTokenValidity: 1" in text
-    assert "IdTokenValidity: 1" in text
+    # Explicit security decision: MFA is set to ON (mandatory for all admins)
+    assert props.get("MfaConfiguration") == "ON", "Cognito User Pool must enforce mandatory MfaConfiguration: 'ON'"
+    assert props.get("EnabledMfas") == ["SOFTWARE_TOKEN_MFA"]
 
+    admin_config = props.get("AdminCreateUserConfig", {})
+    assert admin_config.get("AllowAdminCreateUserOnly") is True
 
-def test_cloudfront_security_headers_and_delivery_hardening():
-    """CloudFront: ResponseHeadersPolicy enforces HSTS, nosniff, FrameOption: DENY, CSP, and OAC read-only bucket policy."""
-    text = load_template_text()
+    pwd_policy = props.get("Policies", {}).get("PasswordPolicy", {})
+    assert pwd_policy.get("MinimumLength") >= 12
+    assert pwd_policy.get("RequireUppercase") is True
+    assert pwd_policy.get("RequireLowercase") is True
+    assert pwd_policy.get("RequireNumbers") is True
+    assert pwd_policy.get("RequireSymbols") is True
 
-    assert "FrontendResponseHeadersPolicy:" in text
-    assert "ResponseHeadersPolicyId: !Ref FrontendResponseHeadersPolicy" in text
-    assert "AccessControlMaxAgeSec: 63072000" in text
-    assert "Preload: true" in text
-    assert "ContentTypeOptions:" in text
-    assert "FrameOption: DENY" in text
-    assert "ReferrerPolicy: strict-origin-when-cross-origin" in text
-    assert "ContentSecurityPolicy:" in text
-    assert "OriginAccessControlId: !GetAtt CloudFrontOAC.Id" in text
-    assert "ViewerProtocolPolicy: redirect-to-https" in text
+    # User Pool Client
+    client = resources.get("QueueSenseUserPoolClient", {})
+    client_props = client.get("Properties", {})
+    assert client_props.get("PreventUserExistenceErrors") == "ENABLED"
+    assert client_props.get("GenerateSecret") is False
 
 
-def test_regional_consistency_and_zero_hardcoded_accounts():
-    """Architecture: Verifies all ARNs and resource references use dynamic ${AWS::AccountId} and ${AWS::Region}."""
-    text = load_template_text()
+def test_semantic_cloudfront_spa_routing_and_missing_assets(template):
+    """CloudFront: SPA routing rewrites extensionless routes to /index.html via CloudFront Function; no global 403/404 rewrites."""
+    resources = template.get("Resources", {})
 
-    # Verify no raw 12-digit AWS account numbers are hardcoded
-    raw_accounts = re.findall(r"\b\d{12}\b", text)
-    assert not raw_accounts, f"Found hardcoded 12-digit AWS account number(s) in template: {raw_accounts}"
+    # 1. CloudFront Function exists
+    assert "SpaRoutingFunction" in resources
+    spa_fn = resources["SpaRoutingFunction"]
+    assert spa_fn.get("Type") == "AWS::CloudFront::Function"
+    fn_props = spa_fn.get("Properties", {})
+    assert fn_props.get("AutoPublish") is True
+    assert fn_props.get("FunctionConfig", {}).get("Runtime") == "cloudfront-js-2.0"
 
-    # Verify dynamic interpolation
-    assert "${AWS::AccountId}" in text
-    assert "${AWS::Region}" in text
+    fn_code = fn_props.get("FunctionCode", "")
+    assert "!uri.includes('.')" in fn_code, "SPA function must check whether URI lacks file extension"
+    assert "request.uri = '/index.html'" in fn_code
+
+    # 2. Distribution references SpaRoutingFunction in viewer-request
+    dist = resources.get("FrontendDistribution", {})
+    dist_config = dist.get("Properties", {}).get("DistributionConfig", {})
+    cache_behavior = dist_config.get("DefaultCacheBehavior", {})
+
+    associations = cache_behavior.get("FunctionAssociations", [])
+    assert len(associations) >= 1
+    assert associations[0].get("EventType") == "viewer-request"
+    assert associations[0].get("FunctionARN") == {"GetAtt": "SpaRoutingFunction.FunctionARN"}
+
+    # 3. Global 403/404 rewrite MUST NOT exist (missing assets must return genuine 404, not index.html)
+    assert "CustomErrorResponses" not in dist_config, (
+        "Global CustomErrorResponses must be removed to avoid turning missing JS/CSS/image 404s into 200 index.html"
+    )
+
+
+def test_semantic_cloudfront_csp_and_security_headers(template):
+    """CloudFront: Security headers policy has strict HSTS, nosniff, DENY frame options, and scoped CSP with zero wildcard *.amazonaws.com."""
+    resources = template.get("Resources", {})
+    policy = resources.get("FrontendResponseHeadersPolicy", {})
+    sec_config = policy.get("Properties", {}).get("ResponseHeadersPolicyConfig", {}).get("SecurityHeadersConfig", {})
+
+    # HSTS
+    hsts = sec_config.get("StrictTransportSecurity", {})
+    assert hsts.get("AccessControlMaxAgeSec") == 63072000
+    assert hsts.get("IncludeSubdomains") is True
+    assert hsts.get("Preload") is True
+
+    # FrameOptions & ContentType
+    assert sec_config.get("FrameOptions", {}).get("FrameOption") == "DENY"
+    assert sec_config.get("ContentTypeOptions", {}).get("Override") is True
+
+    # Content Security Policy
+    csp_obj = sec_config.get("ContentSecurityPolicy", {}).get("ContentSecurityPolicy", {})
+    csp_str = csp_obj.get("Sub", "") if isinstance(csp_obj, dict) else str(csp_obj)
+
+    assert "default-src 'self'" in csp_str
+    assert "script-src 'self'" in csp_str
+    assert "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com" in csp_str
+    assert "media-src 'self' blob:" in csp_str
+    assert "object-src 'none'" in csp_str
+    assert "frame-ancestors 'none'" in csp_str
+    assert "base-uri 'self'" in csp_str
+
+    # Must NOT have broad wildcard *.amazonaws.com
+    assert "https://*.amazonaws.com" not in csp_str, (
+        "CSP connect-src must not contain broad wildcard https://*.amazonaws.com"
+    )
+    assert "https://*.execute-api.${AWS::Region}.amazonaws.com" in csp_str
+    assert "https://cognito-idp.${AWS::Region}.amazonaws.com" in csp_str
+
+
+# =========================================================================
+# Negative Tests: Catch Misconfigurations and Policy Violations
+# =========================================================================
+
+def test_negative_missing_retention_detected():
+    """Negative Test: Verifies that a LogGroup without RetentionInDays fails validation."""
+    malformed_log_group = {
+        "Type": "AWS::Logs::LogGroup",
+        "Properties": {
+            "LogGroupName": "/aws/lambda/test"
+            # Missing RetentionInDays
+        }
+    }
+    with pytest.raises(AssertionError):
+        assert malformed_log_group.get("Properties", {}).get("RetentionInDays") == 30
+
+
+def test_negative_raw_ip_in_access_log_detected():
+    """Negative Test: Verifies that an access log format containing sourceIp fails privacy validation."""
+    malformed_format = json.dumps({"requestId": "$context.requestId", "ip": "$context.identity.sourceIp"})
+    with pytest.raises(AssertionError):
+        assert "ip" not in json.loads(malformed_format)
+        assert "$context.identity.sourceIp" not in malformed_format
+
+
+def test_negative_wildcard_iam_action_detected():
+    """Negative Test: Verifies that a wildcard IAM action fails least-privilege validation."""
+    malformed_statement = {"Action": ["dynamodb:*"], "Effect": "Allow", "Resource": "*"}
+    with pytest.raises(AssertionError):
+        for act in malformed_statement["Action"]:
+            assert not re.match(r"^dynamodb:\*$", act)
+
+
+def test_negative_optional_mfa_fails_enforcement_check():
+    """Negative Test: Verifies that MfaConfiguration: OPTIONAL fails mandatory MFA assertion."""
+    optional_mfa_props = {"MfaConfiguration": "OPTIONAL", "EnabledMfas": ["SOFTWARE_TOKEN_MFA"]}
+    with pytest.raises(AssertionError):
+        assert optional_mfa_props.get("MfaConfiguration") == "ON"

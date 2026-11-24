@@ -817,36 +817,37 @@ Status Definitions:
 - **Status:** **`BLOCKED BY MISSING REAL-WORLD DATA`** (Protocol & software hardening complete; empirical field dataset pending)
 
 ### P1.18 — Observability, Alarms and Incident Detection
-- **Severity:** P1 (Operational Reliability & Incident Response)
+- **Severity:** P1 (Operational Reliability, Privacy & Incident Response)
 - **Original Evidence:**
   1. Lambda functions had zero explicit CloudWatch LogGroup definitions in `infrastructure/template.yaml`, causing automatic creation of unmanaged `/aws/lambda/*` log groups with indefinite (Never Expire) retention.
-  2. `QueueSenseHttpApi` lacked `AccessLogSettings`, providing zero visibility into HTTP 4xx/5xx integration failures, routing errors, client abuse patterns, or API latency distributions.
-  3. Zero CloudWatch alarms existed to detect operational anomalies or platform disruptions.
-- **Reproduction:** Inspected `infrastructure/template.yaml`; confirmed zero `AWS::Logs::LogGroup` resources and zero `AWS::CloudWatch::Alarm` resources.
+  2. `QueueSenseHttpApi` lacked access logging; an earlier draft added `$context.identity.sourceIp`, directly contradicting the project's privacy guarantee that raw IPs are never logged.
+  3. Zero CloudWatch alarms existed to detect operational anomalies, and the declared `AlarmNotificationEmail` was unwired.
+- **Reproduction:** Inspected `infrastructure/template.yaml`; confirmed missing log groups, access log configuration, alarms, and unwired email parameter.
 - **Root Cause:** Reliance on AWS defaults for Lambda logging, omitted API Gateway v2 access log wiring, and lack of baseline operational alarm configuration.
 - **Files Changed:** `infrastructure/template.yaml`, `backend/tests/test_batch4_infrastructure.py`, `docs/ARCHITECTURE.md`, `docs/MASTER_AUDIT_REGISTER.md`
 - **Implemented Remediation:**
   1. **Explicit Log Groups & Retention:** Added dedicated `AWS::Logs::LogGroup` resources for all 7 Lambda functions with explicit 30-day retention (`RetentionInDays: 30`), eliminating indefinite storage costs and orphaned log groups.
-  2. **Safe Structured API Gateway Access Logging:** Defined `ApiAccessLogGroup` (`/aws/apigateway/queuesense-api-${Environment}`) with 30-day retention. Wired JSON structured logging into `QueueSenseHttpApi` with safe operational fields (`requestId`, `ip`, `requestTime`, `httpMethod`, `routeKey`, `status`, `latency`, `integrationLatency`) while strictly excluding sensitive tokens, passwords, authorization headers, or salts.
+  2. **Strict Privacy-Preserving API Gateway Access Logging:** Defined `ApiAccessLogGroup` (`/aws/apigateway/queuesense-api-${Environment}`) with 30-day retention. Wired JSON structured logging into `QueueSenseHttpApi` with safe operational fields (`requestId`, `requestTime`, `httpMethod`, `routeKey`, `status`, `protocol`, `responseLength`, `latency`, `integrationLatency`, `integrationStatus`, `integrationErrorMessage`). Raw client IP addresses (`$context.identity.sourceIp`) are **strictly excluded**, fully reconciling access logs with `backend/shared/security.py` privacy guarantees.
   3. **Core Operational Alarms:** Configured 4 baseline CloudWatch alarms:
-     - `Api5xxAlarm`: Triggers when API Gateway 5xx errors reach $\ge 5$ in 5 minutes.
+     - `Api5xxAlarm`: Triggers when API Gateway 5xx errors reach $\ge 5$ in 5 minutes (Namespace: `AWS/ApiGateway`, Metric: `5xx`, Dimension: `ApiId`).
      - `SubmitReportErrorsAlarm`: Triggers on $\ge 3$ Lambda errors in `SubmitReportFunction` over 5 minutes.
      - `DynamoDBThrottledRequestsAlarm`: Triggers on $\ge 1$ throttled request in 5 minutes.
      - `QueueReadLatencyAlarm`: Triggers when `GetQueueFunction` duration averages $\ge 3000$ms over 5 minutes.
-  4. **Notification Configuration:** Added optional `AlarmNotificationEmail` parameter; documented that production subscriptions require live SNS topic or email configuration.
+  4. **Wired SNS Alerting:** Defined `OperationalAlertsTopic` and wired it to `AlarmActions` on all 4 alarms. Configured `OperationalAlertsSubscription` conditionally triggered when `AlarmNotificationEmail` is provided.
 - **Exact Tests Added:**
-  - `test_p1_18_all_lambda_functions_have_explicit_cloudwatch_log_groups_and_retention`, `test_p1_18_api_gateway_access_logging_configured_with_safe_fields`, `test_p1_18_operational_cloudwatch_alarms_defined` in `test_batch4_infrastructure.py`.
-- **Residual Risks:** CloudWatch alarms without a live email/SNS subscription or ChatOps integration only record alarm state in CloudWatch; operational response requires manual console inspection or provisioning of a live notification channel.
+  - `test_semantic_log_groups_and_retention`, `test_semantic_api_gateway_access_logging_privacy`, `test_semantic_cloudwatch_alarms_and_sns_actions`, `test_negative_missing_retention_detected`, `test_negative_raw_ip_in_access_log_detected` in `test_batch4_infrastructure.py`.
+- **Residual Risks:** CloudWatch alarms without a live email/SNS subscription or ChatOps integration only record alarm state in CloudWatch Console; when `AlarmNotificationEmail` is provided, AWS requires the recipient to confirm the subscription email before messages will be delivered.
 - **Status:** **`VERIFIED FIXED`**
 
 ### P1.19 — Log Retention, Data Recovery and Persistence Safety
-- **Severity:** P1 (Data Loss Prevention & Business Continuity)
+- **Severity:** P1 (Data Loss Prevention, SPA Correctness & Business Continuity)
 - **Original Evidence:**
   1. `MainTable` lacked Point-in-Time Recovery (PITR) and deletion protection, exposing location metadata and historical reports to accidental stack deletion (`DeletionPolicy: Delete` default) or operational corruption.
-  2. `FrontendBucket` lacked versioning and lifecycle policies, risking accidental frontend asset overwrites without rollback capability, or unconstrained storage accumulation from stale versions.
-- **Reproduction:** Inspected `infrastructure/template.yaml`; confirmed missing `PointInTimeRecoverySpecification`, `DeletionProtectionEnabled`, `DeletionPolicy: Retain`, and S3 versioning/lifecycle.
-- **Root Cause:** Absence of enterprise persistence and backup policies in initial rapid-prototyping infrastructure templates.
-- **Files Changed:** `infrastructure/template.yaml`, `backend/tests/test_batch4_infrastructure.py`, `docs/ARCHITECTURE.md`, `docs/MASTER_AUDIT_REGISTER.md`
+  2. `FrontendBucket` lacked versioning and lifecycle policies.
+  3. CloudFront used a naive global rewrite (`403 -> 200 /index.html` and `404 -> 200 /index.html`), causing missing JavaScript/CSS/image assets to return HTML with status 200 instead of genuine 404s, masking broken assets.
+- **Reproduction:** Inspected `infrastructure/template.yaml`; confirmed missing `PointInTimeRecoverySpecification`, `DeletionProtectionEnabled`, `DeletionPolicy: Retain`, and misleading `CustomErrorResponses` in CloudFront.
+- **Root Cause:** Absence of enterprise persistence policies and treating client-side SPA routing as an S3 error rewrite rather than an edge routing function.
+- **Files Changed:** `infrastructure/template.yaml`, `backend/tests/test_batch4_infrastructure.py`, `frontend/src/test/spa-routing.test.ts`, `docs/ARCHITECTURE.md`, `docs/MASTER_AUDIT_REGISTER.md`
 - **Implemented Remediation:**
   1. **DynamoDB Persistence Hardening:**
      - Enabled Point-in-Time Recovery (`PointInTimeRecoveryEnabled: true`) providing 35-day continuous per-second restore capability (< $0.02/month for campus dining dataset).
@@ -858,18 +859,28 @@ Status Definitions:
      - Configured S3 lifecycle rule (`ExpireNoncurrentFrontendVersions`) to automatically purge non-current asset versions after 30 days (`NoncurrentDays: 30`), capping storage overhead.
      - Enforced `DeletionPolicy: Retain` and `UpdateReplacePolicy: Retain` on `FrontendBucket`.
      - Enforced `ObjectOwnership: BucketOwnerEnforced` with full public access block.
+  3. **Edge SPA Routing Function & Genuine 404s:**
+     - Removed misleading global `CustomErrorResponses` (403/404 rewrites) from CloudFront distribution.
+     - Implemented `SpaRoutingFunction` (`AWS::CloudFront::Function` with runtime `cloudfront-js-2.0` on `viewer-request`):
+       * Rewrites extensionless client-side routes (`/`, `/admin`, `/locations/123`) to `/index.html`, preserving seamless client route navigation and page refresh.
+       * Preserves file-extension requests (`.js`, `.css`, `.png`, `.mp4`): missing assets return genuine HTTP 404 responses from S3.
+       * Preserves genuine HTTP 403 responses on unauthorized S3 access without masking them as 200 HTML.
 - **Exact Tests Added:**
-  - `test_p1_19_dynamodb_persistence_pitr_and_deletion_protection`, `test_p1_19_s3_bucket_versioning_lifecycle_and_deletion_policy` in `test_batch4_infrastructure.py`.
+  - `test_semantic_dynamodb_persistence_and_recovery`, `test_semantic_s3_frontend_bucket_hardening`, `test_semantic_cloudfront_spa_routing_and_missing_assets` in `test_batch4_infrastructure.py`.
+  - `frontend/src/test/spa-routing.test.ts`: 5 tests verifying SPA route rewrites, genuine 404 for missing JS/CSS/media, and genuine 403 on access denial.
 - **Residual Risks:** Point-in-Time Recovery restore creates a new DynamoDB table with a different ARN; disaster recovery runbooks require updating the application's `TABLE_NAME` environment variable to point to the restored table.
 - **Status:** **`VERIFIED FIXED`**
 
 ### P1.20 — Cost Controls and Denial-of-Wallet Resilience
-- **Severity:** P1 (FinOps & Cost Governance)
+- **Severity:** P1 (FinOps, Least-Privilege IAM & Cost Governance)
 - **Original Evidence:**
   1. Lambda functions had zero concurrency controls, permitting runaway recursive execution or malicious burst traffic to consume the regional account concurrency limit (default 1,000) and generate unbounded compute spend.
   2. Unbounded API requests could exhaust free tier boundaries and incur unexpected data transfer and DynamoDB on-demand charges.
-- **Reproduction:** Audited `infrastructure/template.yaml`; confirmed missing `ReservedConcurrentExecutions` on all Lambda functions.
-- **Root Cause:** Missing compute concurrency bounds and lack of a quantified FinOps operational cost model.
+  3. Previous reports made an unsupported guarantee that an attack had a strict "$15 maximum cost".
+  4. Cognito MFA was marked `OPTIONAL` while claiming mandatory enforcement.
+  5. CloudFront CSP had broad wildcard `https://*.amazonaws.com`.
+- **Reproduction:** Audited `infrastructure/template.yaml`; confirmed missing `ReservedConcurrentExecutions`, `MfaConfiguration: "OPTIONAL"`, and broad CSP.
+- **Root Cause:** Missing compute concurrency bounds, loose CSP rules, and lack of a quantified FinOps operational cost model.
 - **Files Changed:** `infrastructure/template.yaml`, `backend/tests/test_batch4_infrastructure.py`, `docs/ARCHITECTURE.md`, `docs/MASTER_AUDIT_REGISTER.md`
 - **Implemented Remediation:**
   1. **Strict Lambda Concurrency Ceilings:** Configured conservative `ReservedConcurrentExecutions` across all 7 functions:
@@ -880,20 +891,23 @@ Status Definitions:
      - `GetRecommendationsFunction`: 30
      - `GetHistoricalFunction`: 20
      - `AdminReportsFunction`: 10
-     - Total allocated concurrency: 190, strictly reserving > 800 executions for the rest of the AWS account and preventing runaway spend.
-  2. **Multi-Layered Throttling:**
+     - Total allocated concurrency: 190, strictly reserving > 800 executions for the rest of the AWS account and preventing runaway parallel worker spend.
+  2. **Multi-Layered Throttling & Realistic FinOps Modeling:**
      - API Gateway default rate limit: 50 req/sec (Burst 100).
      - Report submission route rate limit: 10 req/sec (Burst 20).
      - Application-tier dual-budget rate limiter: 5 req / 5 min per device within a 30 req / 5 min campus NAT ceiling.
-  3. **On-Demand Storage & Edge Caching:**
-     - DynamoDB `PAY_PER_REQUEST` ensures $0.00 idle cost.
-     - CloudFront `PriceClass_100` minimizes edge location costs while serving global static assets via CloudFront Free Tier (1 TB data transfer out, 10M requests free).
-     - Added CloudFront `FrontendResponseHeadersPolicy` enforcing strict security headers (HSTS, nosniff, FrameOption: DENY, CSP).
-  4. **KMS Policy Least-Privilege Scoping:**
+     - Documented realistic cost formulas distinguishing Free Tier allowances, post-Free Tier standard pricing, and billing implications of evaluated requests (see Architecture & FinOps section). Eradicated unsupported "$15 hard limit" guarantees.
+  3. **Mandatory Cognito Administrator MFA:**
+     - Configured `MfaConfiguration: "ON"` with `SOFTWARE_TOKEN_MFA` (TOTP), enforcing multi-factor authentication for all dining operations administrator accounts.
+     - Configured `PreventUserExistenceErrors: ENABLED` to stop user enumeration.
+  4. **Tightened CSP & Response Headers:**
+     - Replaced broad `https://*.amazonaws.com` with regional endpoints (`https://*.execute-api.${AWS::Region}.amazonaws.com`, `https://cognito-idp.${AWS::Region}.amazonaws.com`).
+     - Added `object-src 'none'`, `base-uri 'self'`, and `frame-ancestors 'none'`.
+  5. **KMS Policy Least-Privilege Scoping:**
      - Tightened `SubmitReportFunction` KMS decrypt permission to enforce `kms:CallerAccount: !Sub "${AWS::AccountId}"`, `kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"`, and `kms:EncryptionContext:aws:ssm:arn` strictly matching the specific parameter ARN.
 - **Exact Tests Added:**
-  - `test_p1_20_lambda_concurrency_ceilings_and_cost_controls`, `test_p1_20_api_gateway_throttling_and_on_demand_storage`, `test_iam_submit_report_kms_policy_tightly_scoped`, `test_iam_no_wildcard_actions_or_dangerous_permissions`, `test_cognito_admin_lockdown_and_enumeration_defense`, `test_cloudfront_security_headers_and_delivery_hardening`, `test_regional_consistency_and_zero_hardcoded_accounts`.
-- **Residual Risks:** In extreme traffic surges exceeding 50 req/sec, legitimate users may receive HTTP 429 throttling responses until queue volume stabilizes.
+  - `test_semantic_lambda_concurrency_ceilings`, `test_semantic_api_gateway_throttling_settings`, `test_semantic_submit_report_kms_least_privilege`, `test_semantic_iam_no_wildcards_in_any_policy`, `test_semantic_cognito_mfa_and_admin_security`, `test_semantic_cloudfront_csp_and_security_headers`, `test_negative_wildcard_iam_action_detected`, `test_negative_optional_mfa_fails_enforcement_check`.
+- **Residual Risks:** In extreme traffic surges exceeding 50 req/sec, legitimate users may receive HTTP 429 throttling responses until queue volume stabilizes. Account-level financial caps require configuring AWS Budgets in the AWS Billing Console.
 - **Status:** **`VERIFIED FIXED`**
 
 ---
