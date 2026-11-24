@@ -204,10 +204,122 @@ def test_sliding_window_rate_limiting_boundary_burst_mitigation():
         assert any(results_301) is False
         assert sum(results_301) == 0
 
-    # 3. At second 360 (60s later, 1 token recovered): exactly 1 request allowed
+    # 3. At second 360 (60s later, 1 token recovered): exactly 1 request allowed sequentially
     with patch("time.time", return_value=360.0):
         assert adapter.check_rate_limit(client_hash, window_s, max_req) is True
         assert adapter.check_rate_limit(client_hash, window_s, max_req) is False
+
+    # 4. At second 420 (120s later, 2nd token recovered): exactly 1 additional request allowed sequentially
+    # (since 1 token was already consumed at t=360, leaving 1 more available)
+    with patch("time.time", return_value=420.0):
+        assert adapter.check_rate_limit(client_hash, window_s, max_req) is True
+        assert adapter.check_rate_limit(client_hash, window_s, max_req) is False
+
+
+def test_sliding_window_exact_capacity_at_t420_fresh_vs_sequential():
+    """
+    Priority 1.1 Mathematical Discrepancy Reconciliation:
+    Verify that at t=420 (offset 120s into window 1, weight=0.6, effective_prev=3.0, max_allowed_n_curr=1):
+    1. When starting fresh (N_curr=0), exactly TWO requests are permitted:
+       - 1st request: N_curr=0 <= 1 -> allowed (N_curr becomes 1).
+       - 2nd request: N_curr=1 <= 1 -> allowed (N_curr becomes 2).
+       - 3rd request: N_curr=2 <= 1 -> rejected.
+    2. When continuing sequentially from t=360 (where 1 request was consumed, so N_curr=1):
+       - Exactly ONE additional request is permitted (N_curr goes from 1 to 2, 2nd request rejected).
+    """
+    from unittest.mock import patch, MagicMock
+    from backend.shared.database import InMemoryStorageAdapter, DynamoDBStorageAdapter
+
+    window_s = 300
+    max_req = 5
+
+    # --- Scenario 1: InMemoryStorageAdapter Fresh at t=420 ---
+    mem_fresh = InMemoryStorageAdapter()
+    mem_fresh._rate_limits["client_fresh::0"] = 5
+    with patch("time.time", return_value=420.0):
+        res_fresh = [mem_fresh.check_rate_limit("client_fresh", window_s, max_req) for _ in range(5)]
+    assert res_fresh == [True, True, False, False, False], f"Expected exactly 2 allowed fresh at t=420, got {res_fresh}"
+    assert sum(res_fresh) == 2
+
+    # --- Scenario 2: InMemoryStorageAdapter Sequential (t=360 then t=420) ---
+    mem_seq = InMemoryStorageAdapter()
+    mem_seq._rate_limits["client_seq::0"] = 5
+    with patch("time.time", return_value=360.0):
+        res_360 = [mem_seq.check_rate_limit("client_seq", window_s, max_req) for _ in range(3)]
+    assert res_360 == [True, False, False]  # 1 allowed at t=360
+
+    with patch("time.time", return_value=420.0):
+        res_420 = [mem_seq.check_rate_limit("client_seq", window_s, max_req) for _ in range(3)]
+    assert res_420 == [True, False, False]  # 1 additional allowed at t=420 sequentially
+
+    # --- Scenario 3: DynamoDBStorageAdapter Fresh at t=420 ---
+    dyn_fresh = DynamoDBStorageAdapter("Table", "ap-southeast-2")
+    mock_table = MagicMock()
+    dyn_fresh._table = mock_table
+
+    store = {("RATELIMIT#dyn_fresh", "WINDOW#0"): {"reqCount": 5}}
+
+    def mock_get(Key):
+        k = (Key["PK"], Key["SK"])
+        return {"Item": store[k]} if k in store else {}
+
+    def mock_update(Key, UpdateExpression, ConditionExpression, ExpressionAttributeNames, ExpressionAttributeValues, ReturnValues):
+        k = (Key["PK"], Key["SK"])
+        curr = store.get(k, {}).get("reqCount", 0)
+        max_n = ExpressionAttributeValues[":max_n"]
+        if "attribute_not_exists(reqCount)" in ConditionExpression and k not in store:
+            pass
+        elif curr <= max_n:
+            pass
+        else:
+            class MockClientError(Exception):
+                def __init__(self):
+                    self.response = {"Error": {"Code": "ConditionalCheckFailedException"}}
+            raise MockClientError()
+        new_c = curr + 1
+        store[k] = {"reqCount": new_c}
+        return {"Attributes": {"reqCount": new_c}}
+
+    mock_table.get_item.side_effect = mock_get
+    mock_table.update_item.side_effect = mock_update
+
+    with patch("time.time", return_value=420.0):
+        res_dyn = [dyn_fresh.check_rate_limit("dyn_fresh", window_s, max_req) for _ in range(5)]
+    assert res_dyn == [True, True, False, False, False], f"DynamoDB expected 2 allowed fresh at t=420, got {res_dyn}"
+    assert sum(res_dyn) == 2
+
+
+def test_sliding_window_multi_offset_recovery_schedule():
+    """
+    Priority 1.1 Remediation:
+    Verify recovery schedule across multiple offsets immediately before and after window boundaries.
+    """
+    from unittest.mock import patch
+    from backend.shared.database import InMemoryStorageAdapter
+
+    window_s = 300
+    max_req = 5
+
+    # Table of (timestamp, expected_fresh_allowed_requests)
+    offsets = [
+        (300.0, 0),  # offset 0s, weight 1.0, effective 5.0 -> 0 allowed
+        (301.0, 0),  # offset 1s, weight 0.9967, effective 4.983 -> 0 allowed
+        (359.0, 0),  # offset 59s, weight 0.8033, effective 4.017 -> 0 allowed
+        (360.0, 1),  # offset 60s, weight 0.8000, effective 4.000 -> exactly 1 allowed
+        (419.0, 1),  # offset 119s, weight 0.6033, effective 3.017 -> exactly 1 allowed
+        (420.0, 2),  # offset 120s, weight 0.6000, effective 3.000 -> exactly 2 allowed
+        (480.0, 3),  # offset 180s, weight 0.4000, effective 2.000 -> exactly 3 allowed
+        (540.0, 4),  # offset 240s, weight 0.2000, effective 1.000 -> exactly 4 allowed
+        (599.0, 4),  # offset 299s, weight 0.0033, effective 0.017 -> exactly 4 allowed
+        (600.0, 5),  # offset 0s into window 2, window 0 fully expired -> all 5 allowed
+    ]
+
+    for t_val, expected_allowed in offsets:
+        adapter = InMemoryStorageAdapter()
+        adapter._rate_limits["offset_client::0"] = 5
+        with patch("time.time", return_value=t_val):
+            allowed = sum(adapter.check_rate_limit("offset_client", window_s, max_req) for _ in range(10))
+            assert allowed == expected_allowed, f"At t={t_val} (offset {t_val % 300}s), expected {expected_allowed} but got {allowed}"
 
 
 def test_sliding_window_concurrent_requests_race_condition():
@@ -236,6 +348,72 @@ def test_sliding_window_concurrent_requests_race_condition():
     # Exactly 5 must succeed, exactly 15 must be rejected
     assert sum(results) == max_req
     assert results.count(False) == 15
+
+
+def test_sliding_window_concurrent_requests_across_adjacent_windows():
+    """
+    Priority 1.1 Remediation:
+    Examine concurrent requests across adjacent windows (e.g., requests arriving simultaneously
+    at t=299.9s in window 0 and t=300.1s in window 1).
+    Verify that cross-window concurrency cannot exceed the total capacity budget.
+    """
+    import concurrent.futures
+    from unittest.mock import patch
+    from backend.shared.database import InMemoryStorageAdapter
+
+    adapter = InMemoryStorageAdapter()
+    client_hash = "cross_window_client"
+    window_s = 300
+    max_req = 5
+
+    # 1. Fill window 0 to capacity at t=299.0
+    with patch("time.time", return_value=299.0):
+        for _ in range(5):
+            assert adapter.check_rate_limit(client_hash, window_s, max_req) is True
+
+    # 2. Concurrently dispatch 10 requests at t=300.1 (immediately across window boundary)
+    results_boundary = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = []
+        for _ in range(10):
+            # Each worker executes at t=300.1
+            def task():
+                with patch("time.time", return_value=300.1):
+                    return adapter.check_rate_limit(client_hash, window_s, max_req)
+            futures.append(executor.submit(task))
+        for f in concurrent.futures.as_completed(futures):
+            results_boundary.append(f.result())
+
+    # All 10 requests across the boundary must be rejected because window 0 is at capacity
+    # and effective_prev is 5 * ((300 - 0.1)/300) = 4.998 -> max_allowed_n_curr = floor(5 - 1 - 4.998) = -1 < 0
+    assert sum(results_boundary) == 0
+    assert results_boundary.count(False) == 10
+
+    # 3. Test simultaneous cross-window race condition:
+    # 5 threads at t=299.9 competing while 5 threads at t=300.1 execute simultaneously.
+    # In distributed storage without cross-window 2PC/transactions, if a thread at t=300.1
+    # reads window 0 before concurrent threads at t=299.9 finish incrementing,
+    # it reads a transient n_prev < 5. Thus, cross-window concurrency can admit
+    # between max_req (5) and 2 * max_req (10) requests during the sub-millisecond race.
+    adapter_interleaved = InMemoryStorageAdapter()
+    interleaved_results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = []
+        for i in range(10):
+            t_target = 299.9 if (i % 2 == 0) else 300.1
+            def task(t_val):
+                with patch("time.time", return_value=t_val):
+                    return adapter_interleaved.check_rate_limit("interleaved_client", window_s, max_req)
+            futures.append(executor.submit(task, t_target))
+        for f in concurrent.futures.as_completed(futures):
+            interleaved_results.append(f.result())
+
+    allowed_total = sum(interleaved_results)
+    # Must admit at least 5 (window 0 capacity) and at most 10 (both windows' uncoordinated theoretical max)
+    assert max_req <= allowed_total <= (2 * max_req), (
+        f"Cross-window race allowed {allowed_total} requests, outside bounded range [{max_req}, {2 * max_req}]"
+    )
+
 
 
 def test_dynamodb_adapter_sliding_window_conditional_update():

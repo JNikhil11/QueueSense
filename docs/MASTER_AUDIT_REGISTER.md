@@ -322,12 +322,37 @@ Status Definitions:
   - In `DynamoDBStorageAdapter`: Reads previous window count via `get_item`, verifies $\text{max\_n} \ge 0$, and executes atomic `update_item` with `ConditionExpression="attribute_not_exists(reqCount) OR reqCount <= :max_n"`. Catches `ConditionalCheckFailedException` to return `False` (rate limited), and fails closed (`DatabasePersistenceError`) on any DynamoDB/connectivity errors.
   - In `InMemoryStorageAdapter`: Thread-safe sliding-window counter check under `_lock`.
 - **Tests Performed:**
-  1. `test_sliding_window_rate_limiting_boundary_burst_mitigation`: Proves 5 requests at $t=299$ succeed, 5 requests at $t=301$ are rejected ($0/5$ allowed), and request capacity recovers smoothly at 1 request per 60 seconds ($t=360$, $t=420$).
-  2. `test_sliding_window_concurrent_requests_race_condition`: Proves multi-threaded concurrent requests from 20 threads allow exactly 5 requests and reject 15.
-  3. `test_dynamodb_adapter_sliding_window_conditional_update`: Verifies DynamoDB adapter passes conditional expression and handles `ConditionalCheckFailedException` vs storage failure.
+  1. `test_sliding_window_rate_limiting_boundary_burst_mitigation`: Proves 5 requests at $t=299$ succeed, 5 requests at $t=301$ are rejected ($0/5$ allowed), and request capacity recovers smoothly sequentially (1 additional request at $t=360$, 1 additional request at $t=420$).
+  2. `test_sliding_window_exact_capacity_at_t420_fresh_vs_sequential`: Mathematically reconciles capacity at $t=420$ ($\text{weight}_{\text{prev}} = 0.60$, $\text{effective}_{\text{prev}} = 3.0$, $\text{max\_n} = 1$). Proves that when starting fresh ($N_{\text{curr}}=0$), exactly TWO requests are allowed (counts 0 and 1 $\le 1$). Proves that when continuing sequentially from $t=360$ ($N_{\text{curr}}=1$), exactly ONE additional request is allowed. Validated on both `InMemoryStorageAdapter` and `DynamoDBStorageAdapter`.
+  3. `test_sliding_window_multi_offset_recovery_schedule`: Verifies token recovery across 10 distinct timestamp offsets before and after window boundaries:
+     - $t=300.0$ (offset 0s, weight 1.000): 0 allowed
+     - $t=301.0$ (offset 1s, weight 0.997): 0 allowed
+     - $t=359.0$ (offset 59s, weight 0.803): 0 allowed
+     - $t=360.0$ (offset 60s, weight 0.800): 1 allowed
+     - $t=419.0$ (offset 119s, weight 0.603): 1 allowed
+     - $t=420.0$ (offset 120s, weight 0.600): 2 allowed
+     - $t=480.0$ (offset 180s, weight 0.400): 3 allowed
+     - $t=540.0$ (offset 240s, weight 0.200): 4 allowed
+     - $t=599.0$ (offset 299s, weight 0.003): 4 allowed
+     - $t=600.0$ (offset 0s into window 2, window 0 fully expired): 5 allowed
+  4. `test_sliding_window_concurrent_requests_race_condition`: Proves multi-threaded concurrent requests within a single window from 20 threads allow exactly 5 requests and reject 15.
+  5. `test_sliding_window_concurrent_requests_across_adjacent_windows`: Tests cross-window concurrency:
+     - Sequential cross-boundary: 5 requests fill window 0 at $t=299$; 10 concurrent requests at $t=300.1$ are all rejected ($0/10$ allowed).
+     - Simultaneous cross-boundary race: Threads racing across $t=299.9$ and $t=300.1$ across uncoordinated processes are provably bounded between $\text{max\_req}$ (5) and $2 \times \text{max\_req}$ (10), protected upstream by API Gateway route throttling (Burst 20, Rate 10).
+  6. `test_dynamodb_adapter_sliding_window_conditional_update`: Verifies DynamoDB adapter passes conditional expression and handles `ConditionalCheckFailedException` vs storage failure.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** `bb59119`
-- **Residual Risk:** In shared campus Wi-Fi environments (hostel NAT egress), students sharing a common public IP share a sliding rate-limit budget (5 requests per 5 minutes = 1 request every 60s). This is an explicit, accepted abuse-prevention trade-off to prevent script floods. API Gateway provides independent route throttling (Burst 20, Rate 10).
+- **Commit SHA:** `bb59119` (Reconciliation: `feature/production-hardening`)
+- **Mathematical Guarantees & Approximation Distinction:**
+  - *Algorithm:* QueueSense implements the Cloudflare / Stripe **Weighted Sliding-Window Counter** approximation.
+  - *Memory & Storage Complexity:* $O(1)$ state (two scalar integers: $N_{\text{prev}}$ and $N_{\text{curr}}$). Requires only 1 point read and 1 atomic conditional update in DynamoDB (`reqCount <= :max_n`), avoiding the $O(N)$ storage growth, unbounded list serializations, and high write amplification of an exact rolling log.
+  - *Approximation Behavior:* Assumes uniform distribution of requests across the prior window. If an attacker bunches 5 requests at $t=299$, tokens begin recovering proportionally at $t=360$ (refill rate: $T / M = 300 / 5 = 60$s per token) rather than blocking until $t=599$ as an exact rolling log would. Conversely, if 5 requests were sent at $t=1$, the sliding counter still penalizes the client at $t=301$ ($\text{weight} \approx 1.0$), whereas an exact log would release tokens at $t=301$.
+- **Campus Wi-Fi NAT Sharing Trade-off & Defenses:**
+  - *Context:* In university hostels, thousands of students share a common public egress IP. Keying rate limits on public IP hash (`HASH(sourceIp + salt)`) means all students behind that NAT share a 5 requests / 5 minutes sliding window budget (average 1 report per minute).
+  - *Architectural Rationale:* QueueSense operates on a zero-PII crowdsourcing model (no student login required). Client IP is the sole network-layer identifier available at API Gateway.
+  - *Mitigations:*
+    1. **Read Path Independence:** Queue browsing (`GET /locations`, `GET /locations/{id}/queue`) has zero rate limiting and is cached at CloudFront edge locations, ensuring student browsing is completely uninhibited.
+    2. **Low Submission Frequency:** Physical queue reporting is an infrequent event (a student reports once upon joining or completing a meal). A throughput of 1 report per minute across a dining hall provides sufficient sampling density without overloading backend Lambda concurrency.
+    3. **Production Roadmap:** If NAT collision becomes severe during campus rollout, the rate-limit key can incorporate a client-generated ephemeral device token (stored in `localStorage` and rotated daily) combined with IP hash, or transition to student Cognito identity tokens upon opting into authenticated reporting.
 
 ---
 
