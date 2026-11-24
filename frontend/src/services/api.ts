@@ -391,6 +391,7 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
   const now = Date.now();
   const TAU_MS = 15 * 60 * 1000;
   const MAX_AGE_MS = 60 * 60 * 1000;
+  const TAPER_START_MS = 50 * 60 * 1000;
 
   if (!reports || reports.length === 0) {
     return {
@@ -399,9 +400,11 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
       congestion: 'UNKNOWN',
       confidence: 0,
       confidenceLabel: 'NO DATA',
+      confidenceScoreType: 'HEURISTIC_COMPOSITE',
       freshness: 'NO RECENT DATA',
       reportCount: 0,
       recentReportCount: 0,
+      distinctDevicesCount: 0,
       newestReportAgeMinutes: null,
       newestReportTimestamp: null,
       disagreementMinutes: 0,
@@ -411,50 +414,163 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
     };
   }
 
+  // First pass: Physical plausibility & numerical validation
+  const plausible: QueueReport[] = [];
+  let physicalOutliers = 0;
+  for (const r of reports) {
+    const w = Number(r.reportedWaitMinutes);
+    const q = Number(r.queueLength);
+    if (!Number.isFinite(w) || !Number.isFinite(q) || w < 0 || w > 120 || q < 0 || q > 300) {
+      physicalOutliers++;
+    } else {
+      plausible.push(r);
+    }
+  }
+
+  // Statistical outlier filtering with Corroborated Surge Detection
+  let validReports: QueueReport[] = plausible;
+  let statisticalOutliers = 0;
+
+  if (plausible.length >= 5) {
+    const waits = plausible.map((r) => Number(r.reportedWaitMinutes)).sort((a, b) => a - b);
+    const n = waits.length;
+    const medianWait = n % 2 !== 0 ? waits[Math.floor(n / 2)] : (waits[n / 2 - 1] + waits[n / 2]) / 2;
+    const absDevs = waits.map((w) => Math.abs(w - medianWait)).sort((a, b) => a - b);
+    const mad = n % 2 !== 0 ? absDevs[Math.floor(n / 2)] : (absDevs[n / 2 - 1] + absDevs[n / 2]) / 2;
+    const cutoff = Math.max(3.5 * mad, 25.0);
+
+    const normal: QueueReport[] = [];
+    const candidateSpikes: QueueReport[] = [];
+    const candidateDrops: QueueReport[] = [];
+
+    for (const r of plausible) {
+      const w = Number(r.reportedWaitMinutes);
+      if (w - medianWait > cutoff) {
+        candidateSpikes.push(r);
+      } else if (medianWait - w > cutoff) {
+        candidateDrops.push(r);
+      } else {
+        normal.push(r);
+      }
+    }
+
+    // Corroborate spikes: require at least 2 reports agreeing on elevated condition
+    const corroboratedSpikes: QueueReport[] = [];
+    for (const r of candidateSpikes) {
+      const w = Number(r.reportedWaitMinutes);
+      let peerMatches = 0;
+      if (candidateSpikes.length >= 2) {
+        for (const peer of candidateSpikes) {
+          if (peer !== r && Math.abs(w - Number(peer.reportedWaitMinutes)) <= 20.0) {
+            peerMatches++;
+          }
+        }
+      }
+      if (peerMatches >= 1) {
+        corroboratedSpikes.push(r);
+      } else {
+        statisticalOutliers++;
+      }
+    }
+
+    // Corroborate drops: require at least 2 reports agreeing on low condition
+    const corroboratedDrops: QueueReport[] = [];
+    if (candidateDrops.length >= 2) {
+      corroboratedDrops.push(...candidateDrops);
+    } else {
+      statisticalOutliers += candidateDrops.length;
+    }
+
+    validReports = [...normal, ...corroboratedSpikes, ...corroboratedDrops];
+  }
+
+  const outliersExcluded = physicalOutliers + statisticalOutliers;
+
   let weightedWaitSum = 0;
   let weightedQueueSum = 0;
   let totalWeight = 0;
   let newestAgeMinutes: number | null = null;
   let newestTimestamp: string | null = null;
   const recentReports: QueueReport[] = [];
+  const observedDevices = new Set<string>();
+  const timestampsMs: number[] = [];
 
-  for (const r of reports) {
-    const ageMs = Math.max(0, now - new Date(r.timestamp).getTime());
-    const ageMin = ageMs / (60 * 1000);
+  for (const r of validReports) {
+    const reportTime = new Date(r.timestamp).getTime();
+    if (isNaN(reportTime)) continue;
 
-    if (newestAgeMinutes === null || ageMin < newestAgeMinutes) {
-      newestAgeMinutes = ageMin;
+    const ageMs = now - reportTime;
+
+    // Reject future reports (> 30s ahead)
+    if (ageMs < -30000) continue;
+    const clampedAgeMs = Math.max(0, ageMs);
+    const clampedAgeMin = clampedAgeMs / (60 * 1000);
+
+    if (newestAgeMinutes === null || clampedAgeMin < newestAgeMinutes) {
+      newestAgeMinutes = clampedAgeMin;
       newestTimestamp = r.timestamp;
     }
 
-    if (ageMs <= MAX_AGE_MS) {
-      const weight = Math.exp(-ageMs / TAU_MS);
-      if (weight > 0.001) {
-        weightedWaitSum += weight * r.reportedWaitMinutes;
-        weightedQueueSum += weight * r.queueLength;
+    if (clampedAgeMs <= MAX_AGE_MS) {
+      const baseWeight = Math.exp(-clampedAgeMs / TAU_MS);
+      let weight = baseWeight;
+      // Smooth cosine tapering between 50m and 60m
+      if (clampedAgeMs > TAPER_START_MS) {
+        const taperFraction = (clampedAgeMs - TAPER_START_MS) / (MAX_AGE_MS - TAPER_START_MS);
+        const taperWeight = 0.5 * (1.0 + Math.cos(Math.PI * taperFraction));
+        weight = baseWeight * taperWeight;
+      }
+
+      if (weight > 0.0001) {
+        weightedWaitSum += weight * Number(r.reportedWaitMinutes);
+        weightedQueueSum += weight * Number(r.queueLength);
         totalWeight += weight;
         recentReports.push(r);
+
+        const devId = (r as any).deviceId || (r as any).clientHash;
+        if (devId) observedDevices.add(String(devId));
+        timestampsMs.push(reportTime);
       }
     }
   }
 
-  if (totalWeight < 0.01 || recentReports.length === 0) {
+  if (totalWeight < 0.001 || recentReports.length === 0) {
     return {
       predictedWaitMinutes: null,
       predictedQueueLength: null,
       congestion: 'UNKNOWN',
       confidence: 0,
       confidenceLabel: 'NO DATA',
+      confidenceScoreType: 'HEURISTIC_COMPOSITE',
       freshness: 'NO RECENT DATA',
       reportCount: reports.length,
       recentReportCount: 0,
-      newestReportAgeMinutes: newestAgeMinutes ? Math.round(newestAgeMinutes) : null,
+      distinctDevicesCount: 0,
+      newestReportAgeMinutes: newestAgeMinutes !== null ? Math.round(newestAgeMinutes) : null,
       newestReportTimestamp: newestTimestamp,
       disagreementMinutes: 0,
-      outliersExcluded: 0,
+      outliersExcluded,
       evidenceExplanation: 'Past reports are over 60 minutes old and no longer reflect current conditions.',
       updatedAt: new Date().toISOString(),
     };
+  }
+
+  // Calculate distinct devices count
+  let distinctDevicesCount = 1;
+  if (observedDevices.size > 0) {
+    distinctDevicesCount = observedDevices.size;
+  } else {
+    // Measure bursts separated by at least 3 minutes
+    const sorted = [...timestampsMs].sort((a, b) => a - b);
+    let bursts = 0;
+    let lastTs = 0;
+    for (const ts of sorted) {
+      if (ts - lastTs >= 180000) {
+        bursts++;
+        lastTs = ts;
+      }
+    }
+    distinctDevicesCount = Math.max(1, bursts);
   }
 
   const estimatedWait = Math.round((weightedWaitSum / totalWeight) * 10) / 10;
@@ -472,13 +588,22 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
     else if (newestAgeMinutes <= 60) freshness = 'STALE';
   }
 
-  const waits = recentReports.map((r) => r.reportedWaitMinutes);
+  const waits = recentReports.map((r) => Number(r.reportedWaitMinutes));
   const disagreement = waits.length > 1 ? Math.round((Math.max(...waits) - Math.min(...waits)) * 10) / 10 : 0;
 
-  const volumeScore = Math.min(recentReports.length / 4, 1.0) * 0.45;
-  const recencyFactor = Math.max(0, 1.0 - (newestAgeMinutes || 0) / 25) * 0.35;
-  const agreementFactor = waits.length > 1 ? Math.max(0, 1.0 - disagreement / 15) * 0.2 : 0.08;
-  const confidence = Math.round(Math.min(1.0, volumeScore + recencyFactor + agreementFactor) * 100) / 100;
+  // Dynamic Evidence-Weighting Normalization (P1.15)
+  const volumeRaw = Math.min(recentReports.length / 4, 1.0);
+  const recencyRaw = Math.max(0, 1.0 - (newestAgeMinutes || 0) / 25);
+  let confidence = 0;
+
+  if (recentReports.length > 1) {
+    const agreementRaw = Math.max(0, 1.0 - disagreement / 15);
+    confidence = Math.round(Math.min(1.0, 0.45 * volumeRaw + 0.35 * recencyRaw + 0.20 * agreementRaw) * 100) / 100;
+  } else {
+    // Dynamic renormalization for single report: agreement undefined
+    const renormalizedScore = (0.45 * volumeRaw + 0.35 * recencyRaw) / 0.80;
+    confidence = Math.round(Math.min(0.40, renormalizedScore * 0.70) * 100) / 100;
+  }
 
   let confidenceLabel: QueueEstimate['confidenceLabel'] = 'VERY LOW';
   if (confidence >= 0.7) confidenceLabel = 'HIGH';
@@ -505,13 +630,15 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
     congestion,
     confidence,
     confidenceLabel,
+    confidenceScoreType: 'HEURISTIC_COMPOSITE',
     freshness,
     reportCount: reports.length,
     recentReportCount: recentReports.length,
+    distinctDevicesCount,
     newestReportAgeMinutes: newestAgeMinutes !== null ? Math.round(newestAgeMinutes * 10) / 10 : null,
     newestReportTimestamp: newestTimestamp,
     disagreementMinutes: disagreement,
-    outliersExcluded: 0,
+    outliersExcluded,
     evidenceExplanation: explanation,
     updatedAt: new Date().toISOString(),
   };
@@ -616,13 +743,19 @@ export function createApiClient(config: ApiClientConfig = {}) {
     ): Promise<{ report: QueueReport; updatedEstimate: QueueEstimate; isLive: boolean }> {
       const mode = getDataMode();
       const baseUrl = getBaseUrl();
-      // Generate server-side idempotency key
-      const idempotencyKey =
-        payload.idempotencyKey ||
-        'idem_' +
-          (typeof crypto !== 'undefined' && crypto.randomUUID
-            ? crypto.randomUUID()
-            : `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`);
+      // Generate client-side idempotency key using CSPRNG
+      let idempotencyKey = payload.idempotencyKey;
+      if (!idempotencyKey) {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+          idempotencyKey = 'idem_' + crypto.randomUUID();
+        } else if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+          const bytes = new Uint8Array(16);
+          crypto.getRandomValues(bytes);
+          idempotencyKey = 'idem_' + Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+        } else {
+          idempotencyKey = `idem_${Date.now()}_${performance.now().toString(36).replace('.', '')}`;
+        }
+      }
 
       if (this.isLiveApiConfigured()) {
         try {
@@ -719,26 +852,47 @@ export function createApiClient(config: ApiClientConfig = {}) {
         estimate: computeClientEstimate(mockReports[loc.id] || []),
       }));
 
-      // Must have at least 3 fresh reports and >= 50% confidence
+      const hasActiveLocations = candidates.some((c) => c.active);
+      const hasFreshReports = candidates.some(
+        (c) => c.estimate && ['LIVE', 'RECENT'].includes(c.estimate.freshness)
+      );
+
+      // Must be active, not unverified, have at least 3 fresh reports, >= 50% confidence, and >= 2 distinct devices
       const eligible = candidates.filter(
         (c) =>
+          c.active &&
+          c.verificationStatus !== 'UNVERIFIED_LISTING' &&
           c.estimate &&
           c.estimate.predictedWaitMinutes !== null &&
           ['LIVE', 'RECENT'].includes(c.estimate.freshness) &&
           c.estimate.recentReportCount >= 3 &&
-          c.estimate.confidence >= 0.50
+          c.estimate.confidence >= 0.50 &&
+          (c.estimate.distinctDevicesCount || 1) >= 2
       );
 
       if (eligible.length === 0) {
+        let state: SmartRecommendation['state'] = 'insufficient_data';
+        let reason =
+          'Not enough recent queue reports across campus to make a reliable recommendation yet. At least 3 fresh observations (within 20 minutes), 50%+ confidence, and independent corroboration from multiple devices are required.';
+
+        if (!hasActiveLocations) {
+          state = 'no_active_outlets';
+          reason = 'No campus food outlets are currently open or active.';
+        } else if (!hasFreshReports) {
+          state = 'stale_data';
+          reason =
+            'Not enough recent queue reports across campus to make a reliable recommendation yet. All campus queue observations are over 20 minutes old and considered stale. Fresh student reports are needed before making a recommendation.';
+        }
+
         return {
           data: {
             recommendedLocationId: null,
             recommendedLocationName: null,
-            reason:
-              'Not enough recent queue reports across campus to make a reliable recommendation yet. At least 3 fresh observations and 50%+ confidence required.',
+            reason,
             isEligible: false,
-            state: 'insufficient_data',
+            state,
             minReportsRequired: 3,
+            minConfidenceRequired: 0.50,
             candidateCount: candidates.length,
             eligibleCount: 0,
           },

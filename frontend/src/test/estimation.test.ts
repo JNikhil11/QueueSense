@@ -92,6 +92,118 @@ describe('Client-Side Queue Estimation Logic', () => {
     expect(est.reportCount).toBe(3);
     expect(est.recentReportCount).toBe(3);
   });
+
+  it('dynamically renormalizes confidence for a single observation and caps at 0.40', () => {
+    const now = Date.now();
+    const singleReport: QueueReport[] = [
+      {
+        reportId: 'rep_single',
+        locationId: 'mess-c',
+        reportedWaitMinutes: 5,
+        queueLength: 6,
+        timestamp: new Date(now - 1 * 60 * 1000).toISOString(),
+      },
+    ];
+
+    const est = computeClientEstimate(singleReport);
+    expect(est.confidenceScoreType).toBe('HEURISTIC_COMPOSITE');
+    expect(est.confidence).toBeLessThanOrEqual(0.40);
+    expect(est.confidenceLabel).toMatch(/LIMITED|MODERATE/);
+    expect(est.distinctDevicesCount).toBe(1);
+  });
+
+  it('filters uncorroborated isolated extreme spikes while preserving corroborated rush-hour surges', () => {
+    const now = Date.now();
+    // Baseline: 5 reports with low wait (5m)
+    const baselineReports: QueueReport[] = Array.from({ length: 5 }, (_, i) => ({
+      reportId: `base_${i}`,
+      locationId: 'mess-d',
+      reportedWaitMinutes: 5,
+      queueLength: 6,
+      timestamp: new Date(now - (10 + i * 2) * 60 * 1000).toISOString(),
+    }));
+
+    // Scenario A: Isolated extreme spike (110m, no corroboration)
+    const isolatedSpikeReports = [
+      ...baselineReports,
+      {
+        reportId: 'rep_isolated_spike',
+        locationId: 'mess-d',
+        reportedWaitMinutes: 110,
+        queueLength: 10,
+        timestamp: new Date(now - 1 * 60 * 1000).toISOString(),
+      },
+    ];
+    const estIsolated = computeClientEstimate(isolatedSpikeReports);
+    expect(estIsolated.outliersExcluded).toBeGreaterThanOrEqual(1);
+    expect(estIsolated.predictedWaitMinutes).toBeLessThan(20);
+
+    // Scenario B: Corroborated rush-hour surge (two students report 35m and 38m)
+    const corroboratedReports = [
+      ...baselineReports,
+      {
+        reportId: 'rep_surge_1',
+        locationId: 'mess-d',
+        reportedWaitMinutes: 35,
+        queueLength: 45,
+        timestamp: new Date(now - 2 * 60 * 1000).toISOString(),
+      },
+      {
+        reportId: 'rep_surge_2',
+        locationId: 'mess-d',
+        reportedWaitMinutes: 38,
+        queueLength: 50,
+        timestamp: new Date(now - 1 * 60 * 1000).toISOString(),
+      },
+    ];
+    const estCorroborated = computeClientEstimate(corroboratedReports);
+    expect(estCorroborated.predictedWaitMinutes).toBeGreaterThanOrEqual(18);
+    expect(estCorroborated.congestion).toBe('VERY_HIGH');
+  });
+
+  it('smoothly tapers time-decay weights between 50 and 60 minutes with zero step discontinuity', () => {
+    const now = Date.now();
+
+    // Report at 45m: untapered exponential
+    const rep45: QueueReport[] = [
+      {
+        reportId: 'r45',
+        locationId: 'test',
+        reportedWaitMinutes: 10,
+        queueLength: 5,
+        timestamp: new Date(now - 45 * 60 * 1000).toISOString(),
+      },
+    ];
+    const est45 = computeClientEstimate(rep45);
+    expect(est45.predictedWaitMinutes).toBe(10);
+
+    // Report at 55m: cosine tapered (T(55) = 0.5)
+    const rep55: QueueReport[] = [
+      {
+        reportId: 'r55',
+        locationId: 'test',
+        reportedWaitMinutes: 20,
+        queueLength: 10,
+        timestamp: new Date(now - 55 * 60 * 1000).toISOString(),
+      },
+    ];
+    const est55 = computeClientEstimate(rep55);
+    expect(est55.predictedWaitMinutes).toBe(20);
+
+    // Report at 61m: completely disregarded
+    const rep61: QueueReport[] = [
+      {
+        reportId: 'r61',
+        locationId: 'test',
+        reportedWaitMinutes: 20,
+        queueLength: 10,
+        timestamp: new Date(now - 61 * 60 * 1000).toISOString(),
+      },
+    ];
+    const est61 = computeClientEstimate(rep61);
+    expect(est61.predictedWaitMinutes).toBeNull();
+    expect(est61.freshness).toBe('NO RECENT DATA');
+  });
 });
 
 describe('Production Hardening & Recommendation Intelligence', () => {

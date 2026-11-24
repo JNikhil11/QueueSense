@@ -1,8 +1,9 @@
 """
 QueueSense - Queue Intelligence & Estimation Module
 Pure Python implementation with no external framework dependencies.
-Provides transparent, deterministic estimation, outlier handling, freshness decay,
-and evidence confidence scoring.
+Provides transparent, deterministic estimation, robust rush-hour outlier handling,
+smooth time-decay tapering, dynamic evidence-weighting normalization, and
+cold-start recommendation protection.
 """
 
 from __future__ import annotations
@@ -11,29 +12,38 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
 
 # Configuration Constants
-DEFAULT_DECAY_CONSTANT_MINUTES = 15.0  # Tau in exp(-t / tau)
+DEFAULT_DECAY_CONSTANT_MINUTES = 15.0  # Tau in exp(-t / tau); half-life = tau * ln(2) ~= 10.397m
 MAX_REPORT_AGE_MINUTES = 60.0          # Reports older than 60m are disregarded
-STALE_THRESHOLD_MINUTES = 20.0         # Age where status transitions to STALE
+TAPER_START_AGE_MINUTES = 50.0         # Age where smooth cosine decay tapering begins
+STALE_THRESHOLD_MINUTES = 20.0         # Age where status transitions from RECENT to STALE
 LIVE_THRESHOLD_MINUTES = 7.0           # Age where status transitions from LIVE to RECENT
 
 # Congestion Thresholds (Wait time in minutes)
 CONGESTION_THRESHOLDS = {
-    "LOW": (0, 3.5),
+    "LOW": (0.0, 3.5),
     "MODERATE": (3.5, 8.5),
     "HIGH": (8.5, 15.5),
     "VERY_HIGH": (15.5, float("inf")),
 }
 
-# Outlier bounds (Reported wait time limits)
-MIN_PLAUSIBLE_WAIT_MINUTES = 0
-MAX_PLAUSIBLE_WAIT_MINUTES = 120
+# Outlier bounds (Reported wait time and queue physical plausibility limits)
+MIN_PLAUSIBLE_WAIT_MINUTES = 0.0
+MAX_PLAUSIBLE_WAIT_MINUTES = 120.0
 MIN_PLAUSIBLE_QUEUE_LENGTH = 0
 MAX_PLAUSIBLE_QUEUE_LENGTH = 300
+
+# MAD Outlier Tuning Constants
+MAD_MIN_SCALE_MINUTES = 5.0            # Prevents division by zero or zero-deviation collapse
+MAD_CUTOFF_MULTIPLIER = 3.5            # Multiplier on scale for candidate deviation
+MAD_MIN_CUTOFF_MINUTES = 25.0          # Minimum deviation threshold before considering an outlier
+SURGE_CORROBORATION_MIN_COUNT = 2      # Minimum concurrent reports to corroborate a surge
+SURGE_CORROBORATION_WINDOW_MIN = 30.0  # Time window to consider reports mutually corroborating
+SURGE_CONSISTENCY_DELTA_MIN = 20.0     # Maximum delta between corroborating surge reports
+SURGE_QUEUE_THRESHOLD = 20             # Queue length that independently corroborates an elevated wait
 
 
 def parse_iso_timestamp(ts_str: str) -> datetime:
     """Parse ISO 8601 string into a timezone-aware UTC datetime."""
-    # Handle 'Z' suffix or standard offsets
     clean_str = ts_str.replace("Z", "+00:00")
     dt = datetime.fromisoformat(clean_str)
     if dt.tzinfo is None:
@@ -46,24 +56,40 @@ def calculate_freshness_weight(
     now: datetime,
     tau: float = DEFAULT_DECAY_CONSTANT_MINUTES,
     max_age: float = MAX_REPORT_AGE_MINUTES,
+    taper_start: float = TAPER_START_AGE_MINUTES,
 ) -> float:
     """
-    Calculate exponential freshness weight: w = exp(-age / tau).
-    Returns 0.0 if report age exceeds max_age or is in the future.
+    Calculate time-decay freshness weight with smooth tapering:
+    - Base weight: w_base = exp(-age / tau).
+    - Half-life: t_1/2 = tau * ln(2) (~10.397 min for tau=15.0).
+    - Future timestamps (> 30s ahead) are rejected (return 0.0).
+    - Minor clock jitter (-30s <= age < 0s) is clamped to age 0.0.
+    - Smooth cosine tapering between taper_start (50m) and max_age (60m)
+      eliminates the step discontinuity at the 60-minute cutoff:
+      T(age) = 0.5 * (1.0 + cos(pi * (age - 50) / 10)) for 50 <= age <= 60.
+    - Reports older than max_age return 0.0.
     """
     age_seconds = (now - report_time).total_seconds()
     age_minutes = age_seconds / 60.0
 
     if age_minutes < 0:
-        # Future report protection: treat as age 0 or ignore if clock skew > 5m
-        if age_minutes < -5.0:
+        # Reject future reports exceeding clock-skew tolerance (> 30 seconds ahead)
+        if age_minutes < -0.5:
             return 0.0
         age_minutes = 0.0
 
     if age_minutes > max_age:
         return 0.0
 
-    return math.exp(-age_minutes / tau)
+    base_weight = math.exp(-age_minutes / tau)
+
+    # Smooth cosine tapering between taper_start and max_age
+    if age_minutes > taper_start:
+        taper_fraction = (age_minutes - taper_start) / (max_age - taper_start)
+        taper_weight = 0.5 * (1.0 + math.cos(math.pi * taper_fraction))
+        return base_weight * taper_weight
+
+    return base_weight
 
 
 def classify_congestion(wait_minutes: float) -> str:
@@ -96,34 +122,68 @@ def determine_freshness_status(newest_age_minutes: Optional[float]) -> str:
 
 
 def filter_outliers(
-    reports: List[Dict[str, Any]]
+    reports: List[Dict[str, Any]],
+    now: Optional[datetime] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    Separate valid reports from outliers.
-    For small sample sizes (N < 5), preserve all reports within physical bounds
-    and operational rush limits. A 20-minute wait during lunch rush is physically
-    valid and must not be rejected merely because earlier reports were 5 minutes.
-    For larger sample sizes (N >= 5), use Median Absolute Deviation (MAD) with
-    rush-tolerant deviation bounds (min deviation threshold >= 25.0 minutes).
+    Robust outlier filtering with Corroborated Surge Detection:
+    1. Physical Bounds Filtering:
+       Checks 0 <= reportedWaitMinutes <= 120 and 0 <= queueLength <= 300.
+       Rejects non-numeric, NaN, Infinity, or negative inputs.
+    2. Small Sample Sizes (N < 5 plausible):
+       Preserves all plausible reports. Small samples lack statistical power
+       to reliably compute MAD without high false-positive rejection.
+    3. Large Sample Sizes (N >= 5 plausible):
+       Computes median wait time and Median Absolute Deviation (MAD).
+       Enforces minimum scale (>= 5.0m) and rush-tolerant cutoff (>= 25.0m deviation).
+       Corroborated Surge Detection:
+       If a candidate spike (wait > median + cutoff) is corroborated by:
+       - At least one other concurrent high observation (within 30m, delta <= 20m), OR
+       - An elevated queue length (queue >= 20 people),
+       the report represents a genuine rush-hour surge and is RETAINED.
+       Uncorroborated isolated extreme spikes/drops are flagged and excluded.
     """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
     valid: List[Dict[str, Any]] = []
     outliers: List[Dict[str, Any]] = []
 
-    # First pass: basic plausibility boundaries (0-120 min wait, 0-300 queue)
+    # First pass: Physical plausibility & numerical integrity
     plausible: List[Dict[str, Any]] = []
     for r in reports:
-        wait = float(r.get("reportedWaitMinutes", 0))
-        queue = float(r.get("queueLength", 0))
+        raw_wait = r.get("reportedWaitMinutes")
+        raw_queue = r.get("queueLength", 0)
+
+        # Numerical type and finiteness check
+        if raw_wait is None or isinstance(raw_wait, bool) or not isinstance(raw_wait, (int, float)):
+            outliers.append({**r, "outlierReason": "NON_NUMERIC_WAIT_TIME"})
+            continue
+        if raw_queue is None or isinstance(raw_queue, bool) or not isinstance(raw_queue, (int, float)):
+            outliers.append({**r, "outlierReason": "NON_NUMERIC_QUEUE_LENGTH"})
+            continue
+
+        wait = float(raw_wait)
+        queue = float(raw_queue)
+
+        if math.isnan(wait) or math.isinf(wait):
+            outliers.append({**r, "outlierReason": "INVALID_FLOAT_WAIT_TIME"})
+            continue
+        if math.isnan(queue) or math.isinf(queue):
+            outliers.append({**r, "outlierReason": "INVALID_FLOAT_QUEUE_LENGTH"})
+            continue
+
         if (
             MIN_PLAUSIBLE_WAIT_MINUTES <= wait <= MAX_PLAUSIBLE_WAIT_MINUTES
             and MIN_PLAUSIBLE_QUEUE_LENGTH <= queue <= MAX_PLAUSIBLE_QUEUE_LENGTH
         ):
             plausible.append(r)
         else:
-            outliers.append(r)
+            outliers.append({**r, "outlierReason": "PHYSICAL_BOUNDS_VIOLATION"})
 
     # For sample sizes under 5, do not discard plausible rush-hour observations.
-    # Meal rush transitions (e.g. from 5 mins to 20 mins) are common in campus dining.
     if len(plausible) < 5:
         return plausible, outliers
 
@@ -140,17 +200,59 @@ def filter_outliers(
         else (abs_deviations[n // 2 - 1] + abs_deviations[n // 2]) / 2.0
     )
 
-    # Campus dining waits experience rapid meal-hour spikes.
-    # Use rush-tolerant cutoff: effective threshold is at least 25.0 minutes deviation.
-    cutoff = max(3.5 * mad, 25.0)
+    # Campus dining queues experience rapid meal-hour spikes.
+    # Base cutoff combines 3.5 * MAD with a safe minimum 25.0 minutes deviation
+    cutoff = max(MAD_CUTOFF_MULTIPLIER * mad, MAD_MIN_CUTOFF_MINUTES)
+
+    # Identify candidate spikes and candidate drops
+    candidate_spikes: List[Dict[str, Any]] = []
+    candidate_drops: List[Dict[str, Any]] = []
+    normal_reports: List[Dict[str, Any]] = []
 
     for r in plausible:
         wait = float(r["reportedWaitMinutes"])
-        if abs(wait - median_wait) > cutoff:
-            outliers.append(r)
+        if (wait - median_wait) > cutoff:
+            candidate_spikes.append(r)
+        elif (median_wait - wait) > cutoff:
+            candidate_drops.append(r)
         else:
-            valid.append(r)
+            normal_reports.append(r)
 
+    # Evaluate candidate spikes with Corroborated Surge Detection
+    corroborated_spikes: List[Dict[str, Any]] = []
+    for r in candidate_spikes:
+        wait = float(r["reportedWaitMinutes"])
+
+        # Genuine rush-hour surge requires peer corroboration from at least one other
+        # concurrent report. A single isolated submission cannot corroborate itself
+        # even if it injects a high queue length.
+        is_corroborated_by_peers = False
+        if len(candidate_spikes) >= SURGE_CORROBORATION_MIN_COUNT:
+            peer_matches = 0
+            for peer in candidate_spikes:
+                if peer is not r:
+                    peer_wait = float(peer["reportedWaitMinutes"])
+                    if abs(wait - peer_wait) <= SURGE_CONSISTENCY_DELTA_MIN:
+                        peer_matches += 1
+            if peer_matches >= 1:
+                is_corroborated_by_peers = True
+
+        if is_corroborated_by_peers:
+            corroborated_spikes.append(r)
+        else:
+            outliers.append({**r, "outlierReason": "UNCORROBORATED_ISOLATED_SPIKE"})
+
+    # Evaluate candidate drops (e.g. sudden drop from high wait)
+    corroborated_drops: List[Dict[str, Any]] = []
+    for r in candidate_drops:
+        wait = float(r["reportedWaitMinutes"])
+        # If multiple reports indicate the line cleared, corroborate it
+        if len(candidate_drops) >= 2:
+            corroborated_drops.append(r)
+        else:
+            outliers.append({**r, "outlierReason": "UNCORROBORATED_ISOLATED_DROP"})
+
+    valid = normal_reports + corroborated_spikes + corroborated_drops
     return valid, outliers
 
 
@@ -162,7 +264,7 @@ def calculate_queue_estimate(
     """
     Core estimation function:
     Computes time-decay weighted wait time and queue length,
-    freshness state, confidence level, and evidence summary.
+    freshness state, heuristic confidence score, and independent evidence tracking.
     """
     if now is None:
         now = datetime.now(timezone.utc)
@@ -170,7 +272,7 @@ def calculate_queue_estimate(
         now = now.replace(tzinfo=timezone.utc)
 
     # Filter out malformed & extreme outliers
-    valid_reports, outliers = filter_outliers(reports)
+    valid_reports, outliers = filter_outliers(reports, now=now)
 
     if not valid_reports:
         return {
@@ -179,9 +281,11 @@ def calculate_queue_estimate(
             "congestion": "UNKNOWN",
             "confidence": 0.0,
             "confidenceLabel": "NO DATA",
+            "confidenceScoreType": "HEURISTIC_COMPOSITE",
             "freshness": "NO RECENT DATA",
             "reportCount": 0,
             "recentReportCount": 0,
+            "distinctDevicesCount": 0,
             "newestReportAgeMinutes": None,
             "newestReportTimestamp": None,
             "disagreementMinutes": 0.0,
@@ -197,10 +301,25 @@ def calculate_queue_estimate(
     newest_age_minutes: Optional[float] = None
     newest_timestamp: Optional[str] = None
     recent_reports: List[Dict[str, Any]] = []
+    observed_devices: set = set()
+    distinct_timestamps: List[datetime] = []
 
     for r in valid_reports:
-        ts = parse_iso_timestamp(str(r["timestamp"]))
-        age_min = max(0.0, (now - ts).total_seconds() / 60.0)
+        raw_ts = r.get("timestamp")
+        if not raw_ts:
+            continue
+        try:
+            ts = parse_iso_timestamp(str(raw_ts))
+        except (ValueError, TypeError):
+            continue
+
+        age_seconds = (now - ts).total_seconds()
+        age_min = age_seconds / 60.0
+
+        # Reject future reports beyond clock skew tolerance
+        if age_min < -0.5:
+            continue
+        age_min = max(0.0, age_min)
 
         if newest_age_minutes is None or age_min < newest_age_minutes:
             newest_age_minutes = age_min
@@ -208,7 +327,7 @@ def calculate_queue_estimate(
 
         if age_min <= MAX_REPORT_AGE_MINUTES:
             weight = calculate_freshness_weight(ts, now, tau=tau)
-            if weight > 0.001:
+            if weight > 0.0001:
                 wait_val = float(r["reportedWaitMinutes"])
                 queue_val = float(r.get("queueLength", 0))
                 weighted_wait_sum += weight * wait_val
@@ -216,16 +335,24 @@ def calculate_queue_estimate(
                 total_weight += weight
                 recent_reports.append(r)
 
-    if total_weight < 0.01 or not recent_reports:
+                # Track distinct device / client identity
+                dev_id = r.get("deviceId") or r.get("clientHash") or r.get("reporterId")
+                if dev_id:
+                    observed_devices.add(str(dev_id))
+                distinct_timestamps.append(ts)
+
+    if total_weight < 0.001 or not recent_reports:
         return {
             "predictedWaitMinutes": None,
             "predictedQueueLength": None,
             "congestion": "UNKNOWN",
             "confidence": 0.0,
             "confidenceLabel": "NO RECENT DATA",
+            "confidenceScoreType": "HEURISTIC_COMPOSITE",
             "freshness": "NO RECENT DATA",
             "reportCount": len(reports),
             "recentReportCount": 0,
+            "distinctDevicesCount": 0,
             "newestReportAgeMinutes": newest_age_minutes,
             "newestReportTimestamp": newest_timestamp,
             "disagreementMinutes": 0.0,
@@ -233,6 +360,21 @@ def calculate_queue_estimate(
             "evidenceExplanation": "Past reports are over 60 minutes old and no longer reflect current conditions.",
             "updatedAt": now.isoformat(),
         }
+
+    # Evaluate distinct devices count
+    if observed_devices:
+        distinct_devices_count = len(observed_devices)
+    else:
+        # Fallback for anonymous / legacy reports without device IDs:
+        # Measure distinct submissions separated by at least 3 minutes
+        sorted_ts = sorted(distinct_timestamps)
+        independent_bursts = 0
+        last_counted_ts: Optional[datetime] = None
+        for cur_ts in sorted_ts:
+            if last_counted_ts is None or (cur_ts - last_counted_ts).total_seconds() >= 180.0:
+                independent_bursts += 1
+                last_counted_ts = cur_ts
+        distinct_devices_count = max(1, independent_bursts)
 
     # Final weighted estimates
     estimated_wait = round(weighted_wait_sum / total_weight, 1)
@@ -247,21 +389,26 @@ def calculate_queue_estimate(
     else:
         disagreement = 0.0
 
-    # Calculate Confidence Score (0.0 to 1.0)
-    # Factor 1: Volume of reports (up to 4 reports gives 0.45)
-    volume_score = min(len(recent_reports) / 4.0, 1.0) * 0.45
+    # Calculate Confidence Score (0.0 to 1.0) via Dynamic Renormalization (P1.15)
+    # Factor 1: Volume of reports (base weight: 0.45, saturates at 4 reports)
+    volume_raw = min(len(recent_reports) / 4.0, 1.0)
+    # Factor 2: Recency of newest report (base weight: 0.35, decays over 25m)
+    recency_raw = max(0.0, 1.0 - (newest_age_minutes or 0.0) / 25.0)
 
-    # Factor 2: Recency of newest report (within 5m gives 0.35, decaying)
-    recency_factor = max(0.0, 1.0 - (newest_age_minutes or 0.0) / 25.0) * 0.35
-
-    # Factor 3: Agreement (disagreement <= 3 mins gives 0.20, penalized if wide)
     if len(recent_reports) > 1:
-        agreement_factor = max(0.0, 1.0 - (disagreement / 15.0)) * 0.20
+        # Factor 3: Agreement (base weight: 0.20, disagreement <= 3m gives full score)
+        agreement_raw = max(0.0, 1.0 - (disagreement / 15.0))
+        # Full model: 45% volume + 35% recency + 20% agreement = 100%
+        confidence = round(
+            min(1.0, 0.45 * volume_raw + 0.35 * recency_raw + 0.20 * agreement_raw),
+            2,
+        )
     else:
-        # Single report: cannot measure agreement, neutral weight
-        agreement_factor = 0.08
-
-    confidence = round(min(1.0, volume_score + recency_factor + agreement_factor), 2)
+        # Dynamic renormalization when agreement cannot be evaluated (N=1)
+        # Active weights: w_vol = 0.45 / 0.80 = 0.5625, w_rec = 0.35 / 0.80 = 0.4375
+        renormalized_score = (0.45 * volume_raw + 0.35 * recency_raw) / 0.80
+        # Epistemic single-source uncertainty cap: a single report carries higher variance
+        confidence = round(min(0.40, renormalized_score * 0.70), 2)
 
     # Qualitative label
     if confidence >= 0.70:
@@ -292,9 +439,11 @@ def calculate_queue_estimate(
         "congestion": congestion,
         "confidence": confidence,
         "confidenceLabel": confidence_label,
+        "confidenceScoreType": "HEURISTIC_COMPOSITE",
         "freshness": freshness,
         "reportCount": len(reports),
         "recentReportCount": len(recent_reports),
+        "distinctDevicesCount": distinct_devices_count,
         "newestReportAgeMinutes": round(newest_age_minutes, 1) if newest_age_minutes is not None else None,
         "newestReportTimestamp": newest_timestamp,
         "disagreementMinutes": disagreement,
@@ -308,39 +457,77 @@ def compute_smart_recommendation(
     locations_with_estimates: List[Dict[str, Any]],
     min_reports: int = 3,
     min_confidence: float = 0.50,
+    min_distinct_devices: int = 2,
 ) -> Dict[str, Any]:
     """
-    Defensible recommendation engine:
-    Recommends the outlet with the shortest credible wait time.
-    Cold-Start Protection:
-    Requires at least min_reports (default: 3) fresh observations (<= 20m)
-    AND confidence >= min_confidence (default: 0.50).
-    When insufficient data exists across all campus outlets, returns an explicit
-    insufficient_data state instead of declaring an unjustified winner.
+    Defensible recommendation engine (P1.16):
+    Recommends the active outlet with the shortest credible wait time.
+    Cold-Start Protection & Operational Safeguards:
+    1. Operational verification: Must be an active location and not unverified.
+    2. Freshness: Requires observations within the last 20 minutes (LIVE or RECENT).
+    3. Volume threshold: Requires at least min_reports (default: 3) fresh observations.
+    4. Confidence threshold: Requires confidence >= min_confidence (default: 0.50).
+    5. Independent evidence: Requires observations from at least min_distinct_devices (default: 2)
+       distinct client devices or independent observation bursts.
+    Fail-Safe States:
+    - "recommended": Qualified recommendation found.
+    - "insufficient_data": Fresh data exists but thresholds not met.
+    - "stale_data": All campus observations are stale (> 20m old).
+    - "no_active_outlets": No candidate locations are active.
     """
     eligible: List[Dict[str, Any]] = []
+    has_active_locations = False
+    has_fresh_reports = False
 
     for loc in locations_with_estimates:
+        # Check active status
+        if not loc.get("active", True):
+            continue
+        has_active_locations = True
+
+        # Check operational verification status (must not be explicitly unverified)
+        if loc.get("verificationStatus") == "UNVERIFIED":
+            continue
+
         est = loc.get("estimate", {})
         freshness = est.get("freshness", "NO RECENT DATA")
         confidence = est.get("confidence", 0.0)
         predicted_wait = est.get("predictedWaitMinutes")
         recent_count = est.get("recentReportCount", 0)
+        distinct_devices = est.get("distinctDevicesCount", recent_count)
 
-        # Must be an active location
-        if not loc.get("active", True):
-            continue
+        if freshness in ("LIVE", "RECENT"):
+            has_fresh_reports = True
 
-        # Must have fresh or recent data, valid wait time, minimum reports, and minimum confidence
+        # Check all qualification criteria
         if (
             predicted_wait is not None
             and freshness in ("LIVE", "RECENT")
             and recent_count >= min_reports
             and confidence >= min_confidence
+            and distinct_devices >= min_distinct_devices
         ):
             eligible.append(loc)
 
     if not eligible:
+        if not has_active_locations:
+            state = "no_active_outlets"
+            reason = "No campus food outlets are currently open or active."
+        elif not has_fresh_reports:
+            state = "stale_data"
+            reason = (
+                "Not enough recent queue reports across campus to make a reliable recommendation yet. "
+                "All campus queue observations are over 20 minutes old and considered stale. "
+                "Fresh student reports are needed before making a recommendation."
+            )
+        else:
+            state = "insufficient_data"
+            reason = (
+                f"Not enough recent queue reports across campus to make a reliable recommendation yet. "
+                f"At least {min_reports} fresh observations (within 20 minutes), {int(min_confidence * 100)}%+ "
+                f"confidence, and independent corroboration from multiple devices are required."
+            )
+
         return {
             "recommendedLocationId": None,
             "recommendedLocationName": None,
@@ -348,13 +535,9 @@ def compute_smart_recommendation(
             "congestion": "UNKNOWN",
             "confidence": 0.0,
             "confidenceLabel": "INSUFFICIENT DATA",
-            "reason": (
-                f"Not enough recent queue reports across campus to make a reliable recommendation yet. "
-                f"At least {min_reports} fresh observations (within 20 minutes) and {int(min_confidence * 100)}%+ "
-                f"confidence are required."
-            ),
+            "reason": reason,
             "isEligible": False,
-            "state": "insufficient_data",
+            "state": state,
             "minReportsRequired": min_reports,
             "minConfidenceRequired": min_confidence,
             "candidateCount": len(locations_with_estimates),
@@ -394,4 +577,3 @@ def compute_smart_recommendation(
         "candidateCount": len(locations_with_estimates),
         "eligibleCount": len(eligible),
     }
-

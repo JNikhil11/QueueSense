@@ -12,9 +12,11 @@ export interface QueueEstimate {
   congestion: CongestionLevel;
   confidence: number;
   confidenceLabel: ConfidenceLabel;
+  confidenceScoreType?: string;
   freshness: FreshnessState;
   reportCount: number;
   recentReportCount: number;
+  distinctDevicesCount?: number;
   newestReportAgeMinutes: number | null;
   newestReportTimestamp: string | null;
   disagreementMinutes: number;
@@ -57,8 +59,9 @@ export interface SmartRecommendation {
   confidenceLabel?: ConfidenceLabel;
   reason: string;
   isEligible: boolean;
-  state?: 'recommended' | 'insufficient_data';
+  state?: 'recommended' | 'insufficient_data' | 'stale_data' | 'no_active_outlets';
   minReportsRequired?: number;
+  minConfidenceRequired?: number;
   candidateCount: number;
   eligibleCount: number;
 }

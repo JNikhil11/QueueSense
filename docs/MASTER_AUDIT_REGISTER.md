@@ -70,6 +70,11 @@ Status Definitions:
 | **Batch 2** | **P1.10** | Campus NAT Collisions & Dual-Budget Rate Limiting | **P1** | `backend/shared/security.py`, `backend/functions/submit_report/app.py`, `backend/tests/test_batch2_security.py` | **`VERIFIED FIXED`** | `28ef95e`+ |
 | **Batch 2** | **P1.11** | Numeric Boundary Validation (NaN, Inf, Booleans, Query Limits) | **P1** | `backend/shared/validation.py`, `backend/functions/admin/app.py`, `backend/functions/get_historical/app.py`, `backend/tests/test_batch2_security.py` | **`VERIFIED FIXED`** | `28ef95e`+ |
 | **Batch 2** | **P1.12** | Secrets, SSM SecureString & KMS Decryption Policies | **P1** | `infrastructure/template.yaml`, `backend/shared/security.py`, `backend/tests/test_batch2_security.py` | **`VERIFIED FIXED`** | `28ef95e`+ |
+| **Batch 3** | **P1.13** | MAD Outlier Handling & Rush-Hour Surge Corroboration | **P1** | `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 3** | **P1.14** | Time-Decay Model, Decay Constant & Smooth Cosine Tapering | **P1** | `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 3** | **P1.15** | Dynamic Evidence-Weighting Normalization (45/35/20) | **P1** | `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 3** | **P1.16** | Recommendation Confidence, Freshness & Operational Thresholds | **P1** | `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 3** | **P1.17** | Physical Sensor Ground-Truth Absence & Validation Framework | **P1** | `docs/STATISTICAL_VALIDATION_PROTOCOL.md`, `backend/shared/prediction.py`, `backend/tests/test_batch3_statistics.py` | **`BLOCKED BY MISSING REAL-WORLD DATA`** | Current HEAD |
 
 ---
 
@@ -692,8 +697,86 @@ Status Definitions:
   - `test_secret_retrieval_failure_does_not_leak_secrets_in_errors_or_logs`: Asserts error messages never leak secrets.
   - `test_no_hardcoded_aws_credentials_in_repository`: Scans all tracked repo files to assert no `AKIA` or `ASIA` keys are committed.
   - `test_git_history_contains_zero_credentials_or_private_keys`: Fails honestly if git fails/times out, skips with visible reason if git missing, captures stderr, and scans local history for access keys, secret keys, and private key headers.
-- **Residual Risks:** Production deployments must ensure the SSM SecureString parameter `/queuesense/prod/rate_limit_salt` is provisioned prior to stack deployment.
+### P1.13 — MAD Outlier Handling and Rush-Hour Surge Behaviour
+- **Severity:** P1 (Statistical Integrity & Queue Dynamics)
+- **Original Evidence:** Earlier outlier filtering evaluated `reportedWaitMinutes` against `median_wait` using fixed MAD cutoffs (`max(3.5 * mad, 25.0)`). When historical observations had low variance (e.g. 5 consecutive reports of 5m), a genuine meal-time rush (e.g. two consecutive reports of 35m and 38m) produced deviations $|35 - 5| = 30 > 25.0$, causing both genuine surge reports to be erroneously classified as outliers and discarded. Conversely, a single isolated malicious spike could not be distinguished from a corroborated surge.
+- **Reproduction:** Tested dataset with five 5m reports followed by two 35m rush-hour reports. Earlier implementation filtered both 35m reports out, hiding the lunch rush from students.
+- **Root Cause:** Failure to distinguish isolated uncorroborated anomalies from peer-corroborated regime shifts in non-stationary queuing systems.
+- **Files Changed:** `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py`, `frontend/src/test/estimation.test.ts`
+- **Implemented Remediation:**
+  1. **Corroborated Surge Detection:** When candidate deviations exceed the statistical threshold, the system checks for peer corroboration ($\ge 2$ candidate reports within 30 minutes agreeing within $\Delta \le 20.0$ min). Corroborated reports represent real dining hall surges and are preserved in the estimation pool.
+  2. **Isolated Spike Suppression:** An isolated single report with extreme deviation without peer corroboration is flagged and isolated to `outliers` with reason `UNCORROBORATED_ISOLATED_SPIKE`, preventing a single malicious input from distorting the estimate.
+  3. **Zero-MAD Safety:** When all observations are identical ($\text{MAD} = 0.0$), the minimum scale is bounded to $\ge 5.0$m and cutoff to $\ge 25.0$m, preventing zero division or false rejection.
+  4. **Small Sample Handling ($N < 5$):** For small samples where empirical MAD lacks statistical power, all physically plausible reports ($[0, 120]$ min, $[0, 300]$ queue) are preserved.
+- **Exact Tests Added:**
+  - `test_p1_13_scenario_1_normal_queue_low_variance` through `test_p1_13_scenario_12_surge_followed_by_rapid_return_to_normal` in `backend/tests/test_batch3_statistics.py` (covering all 12 adversarial scenarios specified in directive).
+- **Residual Risks:** An organized group of colluding users submitting 2+ coordinated false reports within 5 minutes could simulate a false rush. This is bounded by upstream IP/NAT rate limits and requires authenticated SSO for complete cryptographic prevention.
 - **Status:** **`VERIFIED FIXED`**
+
+### P1.14 — Time-Decay Model, Decay Constant and Observation Cutoff
+- **Severity:** P1 (Temporal Weighting & Continuity)
+- **Original Evidence:** Exponential decay $w(t) = \exp(-t/\tau)$ with $\tau = 15.0$m dropped smoothly until 60 minutes, where it was hard-cut to 0.0 ($w(59.9) \approx 0.0183 \to w(60.01) = 0.0$), creating a step discontinuity in the estimation function. Furthermore, future timestamps or clock skew could inject arbitrary weights.
+- **Reproduction:** Evaluated weight at $t=59.9$m vs $t=60.1$m; verified step drop of $0.0183$ and potential estimate cliff when older reports crossed 60 minutes.
+- **Root Cause:** Absence of a continuous tapering window at the observation horizon cutoff, and lack of strict clock skew guards.
+- **Files Changed:** `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py`, `frontend/src/test/estimation.test.ts`
+- **Implemented Remediation:**
+  1. **Mathematical Half-Life Derivation:** Formally verified $t_{1/2} = \tau \ln(2) = 15.0 \times 0.693147 \approx 10.397$ min, yielding relative weights: 0m (1.000), 5m (0.7165), 10m (0.5134), 15m (0.3679), 20m (0.2636), 30m (0.1353), 45m (0.0498), 50m (0.0357).
+  2. **Smooth Cosine Tapering Window:** Between 50m and 60m, applied $T(t) = 0.5 \times (1 + \cos(\pi(t - 50)/10))$, guaranteeing $C^1$ smooth transition to zero at 60m with zero step discontinuity.
+  3. **Clock Skew Protection:** Future timestamps $> 30$ seconds ahead are rejected (weight 0.0); slight NTP jitter ($-30\text{s} \le \text{age} < 0$) is clamped to age 0.0.
+  4. **Honest Stale Data:** Reports $> 60$m return `freshness: "NO RECENT DATA"` and `predictedWaitMinutes: None`.
+- **Exact Tests Added:**
+  - `test_p1_14_decay_half_life_exact_verification`, `test_p1_14_relative_weights_table_derivation`, `test_p1_14_smooth_cosine_tapering_eliminates_60m_step_discontinuity`, `test_p1_14_future_timestamps_and_clock_skew` in `test_batch3_statistics.py`.
+- **Residual Risks:** Fixed $\tau = 15.0$m assumes campus dining service times average 10-15 minutes; empirical calibration against field stopwatch measurements is required to tune outlet-specific service velocities.
+- **Status:** **`VERIFIED FIXED`**
+
+### P1.15 — Evidence-Weighting Heuristic (45/35/20)
+- **Severity:** P1 (Scoring Methodology & Scientific Honesty)
+- **Original Evidence:** The 45/35/20 confidence formula ($0.45 \times \text{volume} + 0.35 \times \text{recency} + 0.20 \times \text{agreement}$) injected an arbitrary constant ($0.08$) when $N=1$, and lacked dynamic renormalization when evidence factors were unavailable.
+- **Reproduction:** Tested confidence on single-report input; verified static $0.08$ additive without mathematical justification.
+- **Root Cause:** Treating heuristic engineering scoring factors as complete without dynamic renormalization for missing components.
+- **Files Changed:** `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py`, `frontend/src/test/estimation.test.ts`
+- **Implemented Remediation:**
+  1. **Dynamic Renormalization:** When agreement is undefined ($N=1$), active weights are renormalized: $w'_{\text{vol}} = 0.45 / 0.80 = 0.5625$ and $w'_{\text{rec}} = 0.35 / 0.80 = 0.4375$, strictly summing to 1.0.
+  2. **Epistemic Uncertainty Bounding:** Because a single report carries unverified variance, single-observation confidence is strictly capped at $\le 0.40$ (limiting label to `"LIMITED"` / `"MODERATE"`).
+  3. **Explicit Labeling:** Output payload explicitly labels `confidenceScoreType: "HEURISTIC_COMPOSITE"` to prevent clients from misinterpreting scores as Bayesian posterior probabilities.
+- **Exact Tests Added:**
+  - `test_p1_15_full_model_weights_sum_to_one`, `test_p1_15_dynamic_renormalization_for_single_observation`, `test_p1_15_disagreement_penalizes_confidence`, `test_p1_15_missing_evidence_zero_reports`.
+- **Residual Risks:** Weights are heuristic engineering constants; real probabilistic confidence intervals require empirical ground-truth error distributions.
+- **Status:** **`VERIFIED FIXED`**
+
+### P1.16 — Recommendation Confidence, Freshness and Operational Thresholds
+- **Severity:** P1 (Recommendation Validity & Abuse Resistance)
+- **Original Evidence:** Cold-start recommendation required $\ge 3$ reports, but counted raw submissions rather than independent observers. A single device cycling 3 submissions artificially satisfied the threshold. Unverified outlets could also be recommended if they had reports.
+- **Reproduction:** Injected 3 reports from a single `deviceId` within 5 minutes; verified that earlier engine recommended the outlet as consensus-backed.
+- **Root Cause:** Equating raw report count with independent corroborating evidence.
+- **Files Changed:** `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py`, `frontend/src/test/estimation.test.ts`
+- **Implemented Remediation:**
+  1. **Independent Device Corroboration:** Recommendation qualification requires $\ge 3$ fresh reports AND evidence from at least $\ge 2$ distinct client devices (`distinctDevicesCount >= 2`). A single device cycling submissions is disqualified (`state: "insufficient_data"`).
+  2. **Operational Status Enforcement:** Inactive outlets (`active: False`) and unverified listings (`verificationStatus: "UNVERIFIED"`) are strictly disqualified from receiving recommendations.
+  3. **Fail-Safe Recommendation States:**
+     - `"recommended"`: Winner found with verified status, fresh data, and independent corroboration.
+     - `"insufficient_data"`: Thresholds not met across campus.
+     - `"stale_data"`: All campus observations are $> 20$ minutes old.
+     - `"no_active_outlets"`: No outlets are open or active.
+- **Exact Tests Added:**
+  - `test_p1_16_qualifies_with_three_distinct_device_reports`, `test_p1_16_disqualifies_single_device_repeated_submissions`, `test_p1_16_disqualifies_unverified_and_inactive_outlets`, `test_p1_16_stale_data_state_transition`, `test_p1_16_no_active_outlets_state_transition`.
+- **Residual Risks:** Sybil attacks via multiple devices are constrained by campus IP ceilings (30 req / 5 min), but absolute Sybil resistance requires authenticated student credentials.
+- **Status:** **`VERIFIED FIXED`**
+
+### P1.17 — Absence of Physical Sensor Ground Truth
+- **Severity:** P1 (Scientific Integrity & Ground-Truth Disclosure)
+- **Original Evidence:** The repository relied entirely on crowdsourced inputs with zero physical sensor infrastructure or verified human ground-truth datasets. Algorithmic unit tests were at risk of being misrepresented as proof of real-world predictive accuracy.
+- **Reproduction:** Codebase audit confirmed zero physical sensors, camera feeds, LiDAR counters, or ground-truth logs exist in the repository.
+- **Root Cause:** Inherent limitation of purely crowdsourced platforms prior to formal field validation.
+- **Files Changed:** `docs/STATISTICAL_VALIDATION_PROTOCOL.md`, `backend/shared/prediction.py`, `backend/tests/test_batch3_statistics.py`
+- **Implemented Remediation:**
+  1. **Canonical Ground-Truth Protocol (`docs/STATISTICAL_VALIDATION_PROTOCOL.md`):** Formally authored 6-section protocol specifying observation collection schema, token transit vs headcount census methodologies, evaluation metrics (MAE, RMSE, MedAE, Bias), stratified evaluations, time-based holdout validation, and phased integration roadmap.
+  2. **Explicit Scientific Disclosure:** Formally disclosed in documentation, code docstrings, and API payloads (`confidenceScoreType: "HEURISTIC_COMPOSITE"`) that real-world predictive accuracy has not yet been established in the absence of independent physical ground truth.
+  3. **Numerical Robustness:** Enforced strict rejection of NaN, Infinity, -Infinity in `filter_outliers` without throwing unhandled exceptions.
+- **Exact Tests Added:**
+  - `test_p1_17_nan_and_infinity_rejection`, `test_p1_17_scientific_honesty_composite_type`.
+- **Residual Risks:** Predictive error bounds (MAE/RMSE) cannot be computed until field observers collect physical queue measurements following `STATISTICAL_VALIDATION_PROTOCOL.md`.
+- **Status:** **`BLOCKED BY MISSING REAL-WORLD DATA`** (Protocol & software hardening complete; empirical field dataset pending)
 
 ---
 
