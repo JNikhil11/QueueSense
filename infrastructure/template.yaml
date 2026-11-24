@@ -26,6 +26,10 @@ Parameters:
     Type: String
     Default: iitb
     Description: Campus institution identifier (e.g. iitb, vitap)
+  AlarmNotificationEmail:
+    Type: String
+    Default: ''
+    Description: Optional email address for operational CloudWatch alarm notifications
 
 Globals:
   Function:
@@ -48,9 +52,16 @@ Resources:
   # ==========================================
   MainTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${TableName}-${Environment}"
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
       AttributeDefinitions:
         - AttributeName: PK
           AttributeType: S
@@ -103,6 +114,9 @@ Resources:
           RequireSymbols: true
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
+      MfaConfiguration: "OPTIONAL"
+      EnabledMfas:
+        - SOFTWARE_TOKEN_MFA
       UserPoolTags:
         Project: QueueSense
 
@@ -112,6 +126,14 @@ Resources:
       ClientName: !Sub "queuesense-client-${Environment}"
       UserPoolId: !Ref QueueSenseUserPool
       GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      RefreshTokenValidity: 30
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      TokenValidityUnits:
+        RefreshToken: days
+        AccessToken: hours
+        IdToken: hours
       ExplicitAuthFlows:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
@@ -129,8 +151,18 @@ Resources:
   # ==========================================
   FrontendBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Sub "queuesense-frontend-${Environment}-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireNoncurrentFrontendVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -140,9 +172,40 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
       Tags:
         - Key: Project
           Value: QueueSense
+
+  FrontendResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "queuesense-security-headers-${Environment}"
+        Comment: "QueueSense Strict Security Headers Policy"
+        SecurityHeadersConfig:
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 63072000
+            IncludeSubdomains: true
+            Preload: true
+            Override: true
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          XSSProtection:
+            Protection: true
+            ModeBlock: true
+            Override: true
+          ContentSecurityPolicy:
+            ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; media-src 'self' blob:; connect-src 'self' https://*.amazonaws.com https://*.execute-api.*.amazonaws.com;"
+            Override: true
 
   CloudFrontOAC:
     Type: AWS::CloudFront::OriginAccessControl
@@ -177,6 +240,7 @@ Resources:
             - GET
             - HEAD
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          ResponseHeadersPolicyId: !Ref FrontendResponseHeadersPolicy
           Compress: true
         CustomErrorResponses:
           - ErrorCode: 403
@@ -212,10 +276,19 @@ Resources:
   # ==========================================
   # API Gateway: HTTP API with CORS & Throttling
   # ==========================================
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/queuesense-api-${Environment}"
+      RetentionInDays: 30
+
   QueueSenseHttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       Name: !Sub "queuesense-api-${Environment}"
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","latency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","integrationStatus":"$context.integrationStatus","integrationErrorMessage":"$context.integrationErrorMessage"}'
       CorsConfiguration:
         AllowOrigins:
           - !Sub "https://${FrontendDistribution.DomainName}"
@@ -255,6 +328,7 @@ Resources:
     Properties:
       CodeUri: ../backend/
       Handler: functions.health.app.lambda_handler
+      ReservedConcurrentExecutions: 10
       Events:
         HealthCheck:
           Type: HttpApi
@@ -263,11 +337,18 @@ Resources:
             Path: /health
             Method: GET
 
+  HealthFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${HealthFunction}"
+      RetentionInDays: 30
+
   GetLocationsFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ../backend/
       Handler: functions.get_locations.app.lambda_handler
+      ReservedConcurrentExecutions: 50
       Policies:
         - Statement:
             - Sid: GetLocationsDynamoDBAccess
@@ -288,11 +369,18 @@ Resources:
             Path: /locations
             Method: GET
 
+  GetLocationsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${GetLocationsFunction}"
+      RetentionInDays: 30
+
   GetQueueFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ../backend/
       Handler: functions.get_queue.app.lambda_handler
+      ReservedConcurrentExecutions: 50
       Policies:
         - Statement:
             - Sid: GetQueueDynamoDBAccess
@@ -318,11 +406,18 @@ Resources:
             Path: /locations/{id}
             Method: GET
 
+  GetQueueFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${GetQueueFunction}"
+      RetentionInDays: 30
+
   SubmitReportFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ../backend/
       Handler: functions.submit_report.app.lambda_handler
+      ReservedConcurrentExecutions: 20
       Environment:
         Variables:
           RATE_LIMIT_SALT_PARAMETER_NAME: !Sub "/queuesense/${Environment}/rate_limit_salt"
@@ -353,6 +448,7 @@ Resources:
                 StringEquals:
                   kms:CallerAccount: !Sub "${AWS::AccountId}"
                   kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
+                  kms:EncryptionContext:aws:ssm:arn: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/queuesense/${Environment}/rate_limit_salt"
       Events:
         SubmitObservation:
           Type: HttpApi
@@ -361,11 +457,18 @@ Resources:
             Path: /locations/{id}/reports
             Method: POST
 
+  SubmitReportFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${SubmitReportFunction}"
+      RetentionInDays: 30
+
   GetRecommendationsFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ../backend/
       Handler: functions.get_recommendations.app.lambda_handler
+      ReservedConcurrentExecutions: 30
       Policies:
         - Statement:
             - Sid: GetRecommendationsDynamoDBAccess
@@ -386,11 +489,18 @@ Resources:
             Path: /recommendations
             Method: GET
 
+  GetRecommendationsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${GetRecommendationsFunction}"
+      RetentionInDays: 30
+
   GetHistoricalFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ../backend/
       Handler: functions.get_historical.app.lambda_handler
+      ReservedConcurrentExecutions: 20
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Sub "${TableName}-${Environment}"
@@ -402,11 +512,18 @@ Resources:
             Path: /locations/{id}/historical
             Method: GET
 
+  GetHistoricalFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${GetHistoricalFunction}"
+      RetentionInDays: 30
+
   AdminReportsFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ../backend/
       Handler: functions.admin.app.lambda_handler
+      ReservedConcurrentExecutions: 10
       Environment:
         Variables:
           USER_POOL_ID: !Ref QueueSenseUserPool
@@ -431,6 +548,83 @@ Resources:
             Method: GET
             Auth:
               Authorizer: CognitoAuthorizer
+
+  AdminReportsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AdminReportsFunction}"
+      RetentionInDays: 30
+
+  # ==========================================
+  # Observability: CloudWatch Alarms
+  # ==========================================
+  Api5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "queuesense-api-5xx-${Environment}"
+      AlarmDescription: "Alerts when API Gateway 5xx errors exceed threshold (>= 5 errors in 5 min)"
+      Namespace: AWS/ApiGateway
+      MetricName: 5xx
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref QueueSenseHttpApi
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  SubmitReportErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "queuesense-submit-report-errors-${Environment}"
+      AlarmDescription: "Alerts on sustained Lambda errors in SubmitReportFunction (>= 3 errors in 5 min)"
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref SubmitReportFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  DynamoDBThrottledRequestsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "queuesense-dynamodb-throttles-${Environment}"
+      AlarmDescription: "Alerts on any DynamoDB throttled requests (>= 1 in 5 min)"
+      Namespace: AWS/DynamoDB
+      MetricName: ThrottledRequests
+      Dimensions:
+        - Name: TableName
+          Value: !Ref MainTable
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  QueueReadLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "queuesense-queue-read-latency-${Environment}"
+      AlarmDescription: "Alerts when GetQueueFunction average execution duration exceeds 3000ms"
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref GetQueueFunction
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
 
 Outputs:
   HttpApiUrl:
