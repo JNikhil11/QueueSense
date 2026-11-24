@@ -297,6 +297,40 @@ Status Definitions:
 
 ---
 
-## 4. Verification Sign-Off
+## 4. Adversarial Remediation Log (One-Defect-At-A-Time)
 
-All 24 audit findings have been independently inspected, root-caused, repaired, and rigorously verified. The QueueSense codebase on `feature/production-hardening` meets zero-compromise commercial production standards.
+### P0.1 — DynamoDB Transaction Permission Mismatch
+- **Severity:** P0 (Critical Release Blocker)
+- **Defect:** `SubmitReportFunction` calls `client.transact_write_items()` during idempotent report submissions, but its IAM policy only allowed `GetItem`, `Query`, `PutItem`, and `UpdateItem`. `dynamodb:TransactWriteItems` was missing.
+- **Evidence:** Static IAM policy inspection confirmed permission was missing; any idempotent write in production would fail closed with `AccessDeniedException` -> HTTP 500 (`PERSISTENCE_FAILED`).
+- **Root Cause:** Standard table actions were added during least-privilege policy creation without the transaction execution action.
+- **Fix:** In `infrastructure/template.yaml`, added `dynamodb:TransactWriteItems` to `SubmitReportDynamoDBAccess` scoped strictly to `!GetAtt MainTable.Arn`.
+- **Tests Performed:** `test_get_locations_template_and_ssm_policy_configuration` asserts permission is present and no wildcard `*` is granted; `sam validate -t infrastructure/template.yaml --lint` passed.
+- **Result:** **`VERIFIED FIXED`**
+- **Commit SHA:** `e9fce4d`
+- **Residual Risk:** None. Resource scope is least-privilege.
+
+### P1.1 — Fixed-Window Rate Limiting (Boundary Burst Vulnerability)
+- **Severity:** P1 (Abuse Prevention & Data Integrity)
+- **Defect:** `check_rate_limit()` in both `DynamoDBStorageAdapter` and `InMemoryStorageAdapter` calculated `window_idx = current_epoch // window_seconds`. This created static fixed windows where a client could submit 5 requests at second 299 (end of window 0) and 5 requests at second 301 (start of window 1), executing 10 write requests in 2 seconds (2x the intended rate limit).
+- **Evidence:** Reproduction test with monkeypatched time proved that 10 requests were permitted across the boundary ($t=299$ and $t=301$) with zero rejections.
+- **Root Cause:** Fixed-window partitioning discarded historical request volume from the immediately preceding window, failing to measure the true rolling rate over continuous time.
+- **Fix:** Implemented the **Sliding-Window Counter (weighted counter) algorithm** in both `DynamoDBStorageAdapter` and `InMemoryStorageAdapter`:
+  - Overlap weight: $\text{weight}_{\text{prev}} = (T - (t \pmod T)) / T$.
+  - Effective previous requests: $\text{effective}_{\text{prev}} = N_{\text{prev}} \times \text{weight}_{\text{prev}}$.
+  - Maximum allowable current requests: $\text{max\_n} = \lfloor M - 1 - \text{effective}_{\text{prev}} \rfloor$.
+  - In `DynamoDBStorageAdapter`: Reads previous window count via `get_item`, verifies $\text{max\_n} \ge 0$, and executes atomic `update_item` with `ConditionExpression="attribute_not_exists(reqCount) OR reqCount <= :max_n"`. Catches `ConditionalCheckFailedException` to return `False` (rate limited), and fails closed (`DatabasePersistenceError`) on any DynamoDB/connectivity errors.
+  - In `InMemoryStorageAdapter`: Thread-safe sliding-window counter check under `_lock`.
+- **Tests Performed:**
+  1. `test_sliding_window_rate_limiting_boundary_burst_mitigation`: Proves 5 requests at $t=299$ succeed, 5 requests at $t=301$ are rejected ($0/5$ allowed), and request capacity recovers smoothly at 1 request per 60 seconds ($t=360$, $t=420$).
+  2. `test_sliding_window_concurrent_requests_race_condition`: Proves multi-threaded concurrent requests from 20 threads allow exactly 5 requests and reject 15.
+  3. `test_dynamodb_adapter_sliding_window_conditional_update`: Verifies DynamoDB adapter passes conditional expression and handles `ConditionalCheckFailedException` vs storage failure.
+- **Result:** **`VERIFIED FIXED`**
+- **Commit SHA:** `bb59119`
+- **Residual Risk:** In shared campus Wi-Fi environments (hostel NAT egress), students sharing a common public IP share a sliding rate-limit budget (5 requests per 5 minutes = 1 request every 60s). This is an explicit, accepted abuse-prevention trade-off to prevent script floods. API Gateway provides independent route throttling (Burst 20, Rate 10).
+
+---
+
+## 5. Verification Sign-Off
+
+All remediated findings have been independently inspected, root-caused, repaired, and rigorously verified. The QueueSense codebase on `feature/production-hardening` meets zero-compromise commercial production standards.
