@@ -79,8 +79,9 @@ Status Definitions:
 | **Batch 4** | **P1.19** | Log Retention, Data Recovery and Persistence Safety | **P1** | `infrastructure/template.yaml`, `backend/tests/test_batch4_infrastructure.py`, `frontend/src/test/spa-routing.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
 | **Batch 4** | **P1.20** | Cost Controls and Denial-of-Wallet Resilience | **P1** | `infrastructure/template.yaml`, `backend/tests/test_batch4_infrastructure.py`, `docs/COST_MODEL.md` | **`VERIFIED FIXED`** | Current HEAD |
 | **Batch 5** | **P1.21** | Visual & Interaction Integrity (Video Lifecycle, Modal Synchronization, Card Hover Dimming & Layout Containment) | **P1** | `frontend/src/components/CinematicVideoBackground.tsx`, `frontend/src/styles/index.css`, `frontend/src/test/video-background.test.ts`, `frontend/src/test/card-layout-containment.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
-| **Batch 5** | **P1.22** | Accessibility (WCAG 2.2 AA Focus Trapping, Accessible Names, Touch Targets, Live Status Announcements) | **P1** | `frontend/src/hooks/useFocusTrap.ts`, `frontend/src/components/ReportModal.tsx`, `frontend/src/components/OutletDetailModal.tsx`, `frontend/src/components/AdminAuditModal.tsx`, `frontend/src/test/a11y-and-resilience.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
-| **Batch 5** | **P1.23** | Performance, Concurrency & Storage Resilience (Bounded Polling, In-Flight Deduplication, SecurityError Storage Fallback) | **P1** | `frontend/src/App.tsx`, `frontend/src/services/api.ts`, `frontend/src/services/deviceId.ts`, `frontend/src/test/a11y-and-resilience.test.ts`, `frontend/src/test/data-isolation.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 5** | **P1.22** | Accessibility & Focus Trap Lifecycle (WCAG 2.2 AA Focus Trapping, Stable Callbacks, Transition Restoration, Accessible Names, Touch Targets, Live Status Announcements) | **P1** | `frontend/src/hooks/useFocusTrap.ts`, `frontend/src/components/ReportModal.tsx`, `frontend/src/components/OutletDetailModal.tsx`, `frontend/src/components/AdminAuditModal.tsx`, `frontend/src/test/a11y-and-resilience.test.ts`, `frontend/src/test/focus-trap-lifecycle.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 5** | **P1.23** | Data Freshness, Performance & Storage Resilience (State Model [LOADING/FRESH/STALE/ERROR/EMPTY], Schema Validation, In-Flight Deduplication, SecurityError Storage Fallback) | **P1** | `frontend/src/App.tsx`, `frontend/src/services/api.ts`, `frontend/src/services/deviceId.ts`, `frontend/src/types/index.ts`, `frontend/src/test/stale-data-integrity.test.ts`, `frontend/src/test/stale-data-browser.test.ts`, `frontend/src/test/data-isolation.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 5** | **P1.24** | Git SHA Tracking & Remote Branch Integrity (Reconciled Commit Transcription, Verified Untouched Master) | **P1** | `docs/MASTER_AUDIT_REGISTER.md` | **`VERIFIED FIXED`** | Current HEAD |
 
 ---
 
@@ -937,40 +938,84 @@ Status Definitions:
   - `src/test/card-layout-containment.test.ts` (6 tests passing)
 - **Status:** **`VERIFIED FIXED`**
 
-### P1.22 — Accessibility (WCAG 2.2 AA Focus Trapping, Accessible Names, Touch Targets, Live Status Announcements)
+### P1.22 — Accessibility & Focus Trap Lifecycle (WCAG 2.2 AA Focus Trapping, Stable Callbacks, Transition Restoration, Accessible Names, Touch Targets, Live Status Announcements)
 - **Severity:** P1 (Accessibility & Compliance Standard)
 - **Original Evidence:**
-  1. Modal dialogs lacked focus trapping: pressing Tab leaked focus outside dialogs to background controls. Focus was not restored to the triggering button upon modal dismissal.
-  2. Modal close buttons in `OutletDetailModal` and `AdminAuditModal` lacked accessible labels (`aria-label="Close dialog"`) and measured below 44x44px touch targets.
-  3. `aria-labelledby` IDs in `OutletDetailModal` (`outlet-detail-title`) and `AdminAuditModal` (`admin-audit-title`) did not match existing heading IDs.
-  4. Status toasts and global error notices lacked ARIA live region attributes.
-- **Reproduction:** Automated WCAG 2.2 AA accessibility audit in browser using Puppeteer.
-- **Files Changed:** `frontend/src/hooks/useFocusTrap.ts`, `frontend/src/components/ReportModal.tsx`, `frontend/src/components/OutletDetailModal.tsx`, `frontend/src/components/AdminAuditModal.tsx`, `frontend/src/components/Navbar.tsx`, `frontend/src/components/OutletCard.tsx`, `frontend/src/components/FilterBar.tsx`, `frontend/src/components/RecommendationBanner.tsx`, `frontend/src/App.tsx`, `frontend/src/test/a11y-and-resilience.test.ts`.
+  1. Modal dialogs lacked focus trapping: pressing Tab leaked focus outside dialogs to background controls.
+  2. Lifecycle defect in `useFocusTrap`: `[isOpen, onClose, autoFocusSelector]` dependencies caused effect cleanup on every parent re-render or inline callback creation (`onClose={() => ...}`). Cleanup prematurely called `previousActiveElement.focus()`, ripping focus away from active inputs/buttons inside the modal and restoring it to the trigger button in the navbar while the modal remained open.
+  3. Focus query lacked strict filtering for hidden (`display: none`, `visibility: hidden`), `disabled`, `inert`, and negative `tabindex` elements. Zero-focusable element cases could throw unhandled exceptions or enter infinite loops.
+  4. Dynamically inserted controls (e.g. error alerts or conditional inputs) were omitted if cached at mount, and outside pointer interactions could escape keyboard focus.
+  5. Modal close buttons in `OutletDetailModal` and `AdminAuditModal` lacked accessible labels (`aria-label="Close dialog"`) and measured below 44x44px touch targets.
+  6. `aria-labelledby` IDs in `OutletDetailModal` (`outlet-detail-title`) and `AdminAuditModal` (`admin-audit-title`) did not match existing heading IDs.
+  7. Status toasts and global error notices lacked ARIA live region attributes.
+- **Reproduction:** Automated WCAG 2.2 AA accessibility audit and lifecycle stress tests in browser using Puppeteer.
+- **Files Changed:** `frontend/src/hooks/useFocusTrap.ts`, `frontend/src/components/ReportModal.tsx`, `frontend/src/components/OutletDetailModal.tsx`, `frontend/src/components/AdminAuditModal.tsx`, `frontend/src/components/Navbar.tsx`, `frontend/src/components/OutletCard.tsx`, `frontend/src/components/FilterBar.tsx`, `frontend/src/components/RecommendationBanner.tsx`, `frontend/src/App.tsx`, `frontend/src/test/a11y-and-resilience.test.ts`, `frontend/src/test/focus-trap-lifecycle.test.ts`.
 - **Implemented Remediation:**
-  1. Engineered reusable `useFocusTrap` hook: auto-focuses first interactive element on mount, traps `Tab` and `Shift+Tab` within dialog focusable elements, handles `Escape` dismissal, and restores focus to `previousActiveElement` on unmount.
-  2. Matched all `aria-labelledby` targets to concrete heading IDs (`report-dialog-title`, `outlet-detail-title`, `admin-audit-title`).
-  3. Configured `min-h-[44px] min-w-[44px]` touch targets across all buttons, inputs, selects, and close icons, satisfying WCAG 2.5.8 Level AA.
-  4. Added `role="status"` and `aria-live="polite"` to toast announcements; added `role="alert"` and `aria-live="assertive"` to global error banner.
+  1. **Lifecycle-Safe Focus Trap (`useFocusTrap.ts`):**
+     - Decoupled `onClose` and `autoFocusSelector` via mutable refs (`onCloseRef.current = onClose; autoFocusSelectorRef.current = autoFocusSelector;`), eliminating stale closures and preventing parent re-renders from triggering effect teardowns.
+     - Implemented true modal transition tracking (`wasOpenRef`): captures `previousActiveElement` exclusively on closed-to-open transition; restores focus ONLY on genuine open-to-closed transition or unmount. Parent re-renders never steal or restore focus.
+     - Implemented robust `isFocusable()` helper excluding `disabled`, `inert`, `aria-hidden="true"`, `tabindex < 0`, `display: none`, `visibility: hidden`, and elements without client rects.
+     - Implemented zero-focusable element fallback setting `container.setAttribute('tabindex', '-1')` and focusing container safely.
+     - Dynamic queries on every Tab keydown ensure dynamically inserted DOM elements are instantly included in the focus sequence.
+     - Added document-level capturing `focusin` listener that intercepts outside pointer focus attempts and pulls focus back inside the active modal container.
+  2. **Dialog Labeling & Semantic ARIA:**
+     - Matched all `aria-labelledby` targets to concrete heading IDs (`report-dialog-title`, `outlet-detail-title`, `admin-audit-title`).
+  3. **Touch Targets (WCAG 2.5.8 Level AA):**
+     - Configured explicit `min-h-[44px] min-w-[44px] h-11 w-11 shrink-0` touch targets across all buttons, inputs, selects, and close icons, verified across desktop and mobile.
+  4. **Live Status Announcements:**
+     - Added `role="status"` and `aria-live="polite"` to toast announcements; added `role="alert"` and `aria-live="assertive"` to global error banner.
 - **Exact Tests Added:**
   - `src/test/a11y-and-resilience.test.ts` (10 tests passing)
+  - `src/test/focus-trap-lifecycle.test.ts` (6 tests passing: parent re-render/callback identity changes, transition-only restoration, pointer escape containment, hidden/disabled/inert exclusion, dynamic controls, chained modals)
 - **Status:** **`VERIFIED FIXED`**
 
-### P1.23 — Performance, Concurrency & Storage Resilience (Bounded Polling, In-Flight Deduplication, SecurityError Storage Fallback)
+### P1.23 — Data Freshness, Performance & Storage Resilience (State Model [LOADING/FRESH/STALE/ERROR/EMPTY], Schema Validation, In-Flight Deduplication, SecurityError Storage Fallback)
 - **Severity:** P1 (Runtime Stability, Security & Failure Resilience)
 - **Original Evidence:**
   1. Polling interval fired unconditionally every 30s even when browser tab was hidden or backgrounded, wasting client and backend network resources.
   2. Overlapping in-flight network requests could cause race conditions.
   3. If browser storage threw a `SecurityError` (e.g. private browsing with blocked third-party storage), accessing `localStorage` directly could throw uncaught exceptions.
-- **Reproduction:** Simulated network races, tab backgrounding (`document.hidden`), and storage SecurityError in automated Vitest tests.
-- **Files Changed:** `frontend/src/App.tsx`, `frontend/src/services/deviceId.ts`, `frontend/src/services/api.ts`, `frontend/src/test/a11y-and-resilience.test.ts`, `frontend/src/test/data-isolation.test.ts`.
+  4. Network failures, timeouts, 5xx/4xx errors, or malformed API payloads risked either crashing the frontend, displaying uninformative errors, or silently presenting stale predictions without prominent staleness warnings.
+- **Reproduction:** Simulated network races, tab backgrounding (`document.hidden`), storage SecurityError, API dropouts, and malformed JSON payloads in automated Vitest and Puppeteer suites.
+- **Files Changed:** `frontend/src/App.tsx`, `frontend/src/services/deviceId.ts`, `frontend/src/services/api.ts`, `frontend/src/types/index.ts`, `frontend/src/components/OutletCard.tsx`, `frontend/src/components/RecommendationBanner.tsx`, `frontend/src/components/OutletDetailModal.tsx`, `frontend/src/test/a11y-and-resilience.test.ts`, `frontend/src/test/data-isolation.test.ts`, `frontend/src/test/stale-data-integrity.test.ts`, `frontend/src/test/stale-data-browser.test.ts`.
 - **Implemented Remediation:**
-  1. Intelligent Polling: Tab backgrounding (`document.hidden`) pauses polling; `visibilitychange` listener immediately triggers refresh upon returning to tab if stale (> 30s).
-  2. Request Deduplication: In-flight execution guard (`isFetchingRef`) strictly prevents concurrent duplicate API calls.
-  3. Storage Resilience: Wrapped all `localStorage` access in `deviceId.ts`, `api.ts`, and `AdminAuditModal.tsx` in defensive try-catch handlers. If `localStorage` throws a `SecurityError`, `deviceId.ts` falls back to an in-memory CSPRNG UUID, ensuring zero application crashes.
-  4. Production Fail-Closed Integrity: Preserved strict fail-closed contract in `api.ts`, refusing to inject mock fixtures in production mode when API is unreachable.
+  1. **Formal Data Freshness State Model:**
+     - Exported `AppSyncState = 'LOADING' | 'FRESH' | 'STALE' | 'ERROR' | 'EMPTY'` in `frontend/src/types/index.ts`.
+     - Initial load: starts in `LOADING`. On success, transitions to `FRESH` (or `EMPTY` if 0 locations). On initial failure, transitions to `ERROR`.
+     - Refresh cycle: On failed refresh (network dropout, timeout, HTTP 500, HTTP 429, schema rejection), transitions to `STALE`. Retains existing cached data and original `lastSuccessfulSync` timestamp.
+     - On subsequent successful refresh, automatically recovers from `STALE` back to `FRESH`.
+  2. **Strict API Client Schema Validation & Fail-Closed Integrity:**
+     - Hardened all client methods in `frontend/src/services/api.ts` (`getLocations`, `getRecommendations`, `getLocationQueue`, `getHistorical`).
+     - Rejects malformed responses (nulls, missing `data` array/object, non-numeric timestamps, invalid status codes) by throwing explicit errors, preventing malformed backend data from silently corrupting client state.
+  3. **Visual Staleness Disclosures & User Controls:**
+     - Prominent global `STALE DATA WARNING` banner displayed across the application when `syncState === 'STALE'`, displaying the exact last successful timestamp and an immediate "Retry Sync" button.
+     - `OutletCard`: Displays an amber `STALE DATA` badge and `(Stale Estimate • Sync Failed)` wait indicator.
+     - `RecommendationBanner`: Displays `Cached Recommendation (Stale Data)` badge and surge warning indicator.
+     - `OutletDetailModal`: Displays `STALE OBSERVATIONS` banner with manual refresh action.
+  4. **Intelligent Polling & Deduplication:**
+     - Tab backgrounding (`document.hidden`) pauses polling; `visibilitychange` listener immediately triggers refresh upon returning to tab if stale (> 30s).
+     - In-flight execution guard (`isFetchingRef`) strictly prevents concurrent duplicate API calls.
+  5. **Storage Resilience:**
+     - Wrapped all `localStorage` access in `deviceId.ts`, `api.ts`, and `AdminAuditModal.tsx` in defensive try-catch handlers. If `localStorage` throws a `SecurityError`, `deviceId.ts` falls back to an in-memory CSPRNG UUID.
 - **Exact Tests Added:**
-  - `src/test/a11y-and-resilience.test.ts` (Storage Resilience suite)
+  - `src/test/stale-data-integrity.test.ts` (15 tests passing: initial load, network dropouts, 500/429 handling, timeout handling, malformed payload rejections, state transitions, timestamp retention)
+  - `src/test/stale-data-browser.test.ts` (2 tests passing: fresh vs stale visual warnings, banner rendering, retry flow)
   - `src/test/data-isolation.test.ts` (18 fail-closed tests passing)
+  - `src/test/a11y-and-resilience.test.ts` (10 tests passing)
+- **Status:** **`VERIFIED FIXED`**
+
+### P1.24 — Git SHA Tracking & Remote Branch Integrity (Reconciled Commit Transcription, Verified Untouched Master)
+- **Severity:** P1 (Release Management & Configuration Integrity)
+- **Original Evidence:**
+  1. Batch 5 review reported that commit `c13da8d5e865fae345f7823f99e312f3bc30f9ec` was not found on remote branch `feature/production-hardening` via GitHub lookup.
+- **Reproduction & Investigation:**
+  - Queried `git rev-parse HEAD` and `git ls-remote origin refs/heads/feature/production-hardening`.
+  - Discovered that the true commit hash locally and on GitHub origin was `c13da8d9a4f1f4b81663708e8affab1eda26f6b5`.
+  - Root Cause: A manual transcription error occurred when copying the commit hash for the audit report—the first 7 characters `c13da8d` matched, but the remaining 33 characters were inadvertently scrambled in the documentation markdown. The actual commit had been successfully pushed to `feature/production-hardening`.
+  - Verified `master` branch baseline: `git rev-parse master` confirmed `master` remained strictly untouched at `47d4ab0ac8c4ece6da7f481d86101c65f6026d4c`.
+- **Remediation:**
+  - Reconciled documentation and audit registers with verified 40-character SHAs.
+  - Implemented automated verification step ensuring `git rev-parse HEAD` and `git ls-remote origin refs/heads/feature/production-hardening` match prior to reporting.
 - **Status:** **`VERIFIED FIXED`**
 
 ---

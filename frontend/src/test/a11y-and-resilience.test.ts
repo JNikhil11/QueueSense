@@ -268,6 +268,7 @@ describe('Accessibility (WCAG 2.2 AA), Focus Trapping & Operational Resilience',
       const reportBtn = await page.waitForSelector('header button.btn-electric');
       await reportBtn?.click();
       await page.waitForSelector('[role="dialog"]');
+      await new Promise((r) => setTimeout(r, 350));
 
       const modalButtons = await page.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('[role="dialog"] button'));

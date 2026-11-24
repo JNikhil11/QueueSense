@@ -6,6 +6,8 @@ export type ConfidenceLabel = 'HIGH' | 'MODERATE' | 'LIMITED' | 'VERY LOW' | 'NO
 
 export type DataMode = 'production' | 'demo' | 'development';
 
+export type AppSyncState = 'LOADING' | 'FRESH' | 'STALE' | 'ERROR' | 'EMPTY';
+
 export interface QueueEstimate {
   predictedWaitMinutes: number | null;
   predictedQueueLength: number | null;

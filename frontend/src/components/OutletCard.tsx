@@ -1,16 +1,18 @@
 import React from 'react';
-import { CampusLocation } from '../types';
+import { CampusLocation, AppSyncState } from '../types';
 import { CongestionBadge, FreshnessBadge, ConfidenceMeter } from './StatusBadge';
 import { Clock, Users, ArrowUpRight, Plus, AlertCircle, MapPin, CheckCircle2 } from 'lucide-react';
 
 interface OutletCardProps {
   location: CampusLocation;
+  syncState?: AppSyncState;
   onSelect: (id: string) => void;
   onReport: (id: string) => void;
 }
 
-export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onReport }) => {
+export const OutletCard: React.FC<OutletCardProps> = ({ location, syncState, onSelect, onReport }) => {
   const est = location.estimate;
+  const isStale = syncState === 'STALE';
   const hasWait = est?.predictedWaitMinutes !== null && est?.predictedWaitMinutes !== undefined;
   const isNoData = !est || est.freshness === 'NO RECENT DATA' || !hasWait;
 
@@ -23,7 +25,9 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
       : null;
 
   return (
-    <div className="outlet-card group relative rounded-3xl glass-panel glass-card-ambient p-5 sm:p-6 flex flex-col justify-between glass-specular-edge border-[#39FF14]/30 hover:border-[#39FF14]/60 min-w-0">
+    <div className={`outlet-card group relative rounded-3xl glass-panel glass-card-ambient p-5 sm:p-6 flex flex-col justify-between glass-specular-edge min-w-0 transition-all ${
+      isStale ? 'border-[#FFA028]/40 hover:border-[#FFA028]/70' : 'border-[#39FF14]/30 hover:border-[#39FF14]/60'
+    }`}>
       {/* Top Meta Header */}
       <div>
         <div className="flex items-start justify-between gap-3 mb-2.5">
@@ -37,6 +41,14 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
             >
               {location.category}
             </span>
+            {isStale && (
+              <span
+                data-testid="stale-card-badge"
+                className="text-[10px] uppercase font-mono font-bold tracking-wider px-2.5 py-0.5 rounded-full bg-[#FFA028]/25 text-[#FFA028] border border-[#FFA028]/50 shrink-0 shadow-[0_0_10px_rgba(255,160,40,0.2)]"
+              >
+                STALE DATA
+              </span>
+            )}
             {location.verificationStatus === 'STUDENT_SOURCED' && (
               <span
                 className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.04] text-[#8E9E93] border border-white/10 shrink-0"
@@ -54,7 +66,7 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
                 <span>Community Listing</span>
               </span>
             )}
-            {est && <FreshnessBadge state={est.freshness} />}
+            {est && !isStale && <FreshnessBadge state={est.freshness} />}
           </div>
           {est && (
             <div className="shrink-0">
@@ -64,7 +76,9 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
         </div>
 
         {/* Title & Landmark */}
-        <h3 className="font-display text-xl font-bold text-white group-hover:text-[#39FF14] transition-colors tracking-tight line-clamp-1">
+        <h3 className={`font-display text-xl font-bold text-white transition-colors tracking-tight line-clamp-1 ${
+          isStale ? 'group-hover:text-[#FFA028]' : 'group-hover:text-[#39FF14]'
+        }`}>
           {location.name}
         </h3>
         {location.landmarkLocation && (
@@ -79,12 +93,18 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
       </div>
 
       {/* Main Aggregated Estimate Box */}
-      <div className="my-5 p-4 rounded-2xl bg-[#090E0B]/70 border border-white/[0.06] backdrop-blur-md">
+      <div className={`my-5 p-4 rounded-2xl border backdrop-blur-md ${
+        isStale
+          ? 'bg-[#14100A]/80 border-[#FFA028]/30 shadow-[inset_0_0_15px_rgba(255,160,40,0.08)]'
+          : 'bg-[#090E0B]/70 border-white/[0.06]'
+      }`}>
         <div className="flex items-baseline justify-between">
           <div>
             <div className="text-[10px] uppercase font-mono tracking-widest text-[#8E9E93] flex items-center gap-1.5">
               <span>Aggregated Wait</span>
-              <span className="text-[9px] text-[#5A695F] font-normal">(time-decayed)</span>
+              <span className="text-[9px] text-[#5A695F] font-normal">
+                {isStale ? '(sync offline)' : '(time-decayed)'}
+              </span>
             </div>
             <div className="flex items-baseline gap-1 mt-1">
               {isNoData ? (
@@ -92,6 +112,16 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
                   --
                   <span className="text-xs font-sans text-[#5A695F] ml-1.5 font-normal">
                     (awaiting reports)
+                  </span>
+                </div>
+              ) : isStale ? (
+                <div>
+                  <div className="font-mono text-3xl sm:text-4xl font-extrabold tracking-tight text-[#FFA028] flex items-baseline gap-1.5">
+                    ~{est.predictedWaitMinutes}
+                    <span className="text-xs font-sans font-normal text-[#8E9E93]">min</span>
+                  </div>
+                  <span className="text-[10px] text-[#FFA028]/90 font-mono block mt-0.5">
+                    (Stale Estimate • Sync Failed)
                   </span>
                 </div>
               ) : (
@@ -117,7 +147,7 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
             <div className="text-[10px] uppercase font-mono tracking-widest text-[#8E9E93]">
               Queue Ahead
             </div>
-            <div className="font-mono text-lg font-bold text-[#F4F7F5] mt-1">
+            <div className={`font-mono text-lg font-bold mt-1 ${isStale ? 'text-[#FFA028]/90' : 'text-[#F4F7F5]'}`}>
               {isNoData || est.predictedQueueLength === null
                 ? '--'
                 : `~${est.predictedQueueLength} ppl`}
@@ -136,7 +166,9 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
                 <ConfidenceMeter confidence={est.confidence} label={est.confidenceLabel} />
               </div>
               <p className="text-[11px] text-[#8E9E93] line-clamp-1 italic">
-                {est.evidenceExplanation}
+                {isStale
+                  ? 'Estimates are cached from prior observation window and may be out of date.'
+                  : est.evidenceExplanation}
               </p>
               {newestAgeStr && (
                 <div className="text-[10px] font-mono text-[#7DF9FF]/80 flex items-center justify-between pt-1">
@@ -156,7 +188,7 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
 
       {/* Footer Specs & Actions: Robust Responsive Containment */}
       <div className="pt-3 border-t border-white/[0.06] flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5">
-        {/* Left Secondary Metadata: Truncates cleanly without displacing actions */}
+        {/* Left Secondary Metadata */}
         <div className="flex items-center gap-2 text-[#8E9E93] min-w-0 flex-1 basis-[150px]">
           <span
             className="inline-flex items-center gap-1 text-[11px] font-mono min-w-0 shrink"
@@ -179,7 +211,7 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
           )}
         </div>
 
-        {/* Right Action Buttons: Predictable dimensions (min 44x44px touch targets), strictly contained */}
+        {/* Right Action Buttons */}
         <div className="flex items-center gap-2 shrink-0 ml-auto">
           <button
             onClick={() => onReport(location.id)}

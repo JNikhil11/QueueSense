@@ -726,6 +726,9 @@ export function createApiClient(config: ApiClientConfig = {}) {
           const res = await fetch(`${baseUrl}/locations`);
           if (res.ok) {
             const json = await res.json();
+            if (!json || typeof json !== 'object' || !Array.isArray(json.data)) {
+              throw new Error('Malformed API response: expected locations array');
+            }
             return { data: json.data, isLive: true };
           }
           if (mode === 'production') {
@@ -763,6 +766,9 @@ export function createApiClient(config: ApiClientConfig = {}) {
           const res = await fetch(`${baseUrl}/locations/${locationId}/queue`);
           if (res.ok) {
             const json = await res.json();
+            if (!json || typeof json !== 'object' || !json.data || typeof json.data !== 'object') {
+              throw new Error('Malformed API response: expected queue data object');
+            }
             return { ...json.data, isLive: true };
           }
           if (mode === 'production') {
@@ -886,6 +892,9 @@ export function createApiClient(config: ApiClientConfig = {}) {
           const res = await fetch(`${baseUrl}/recommendations`);
           if (res.ok) {
             const json = await res.json();
+            if (!json || typeof json !== 'object' || !json.data || typeof json.data !== 'object' || Array.isArray(json.data)) {
+              throw new Error('Malformed API response: expected recommendation object');
+            }
             return { data: json.data, isLive: true };
           }
           if (mode === 'production') {
@@ -1001,6 +1010,9 @@ export function createApiClient(config: ApiClientConfig = {}) {
           const res = await fetch(`${baseUrl}/locations/${locationId}/historical`);
           if (res.ok) {
             const json = await res.json();
+            if (!json || typeof json !== 'object' || !json.data || typeof json.data !== 'object') {
+              throw new Error('Malformed API response: expected historical data object');
+            }
             return { data: json.data, isLive: true };
           }
           if (mode === 'production') {

@@ -116,7 +116,8 @@ export const ReportModal: React.FC<ReportModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-2.5 rounded-xl text-[#8E9E93] hover:text-white hover:bg-white/[0.06] transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+            className="p-2.5 rounded-xl text-[#8E9E93] hover:text-white hover:bg-white/[0.06] transition-colors min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 flex items-center justify-center"
+            style={{ minHeight: '44px', minWidth: '44px' }}
             aria-label="Close dialog"
           >
             <X className="w-5 h-5" />

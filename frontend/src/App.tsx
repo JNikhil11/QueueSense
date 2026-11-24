@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { CampusLocation, SmartRecommendation, ReportSubmissionPayload } from './types';
+import { CampusLocation, SmartRecommendation, ReportSubmissionPayload, AppSyncState } from './types';
 import { api } from './services/api';
 import { Navbar } from './components/Navbar';
 import { Hero } from './components/Hero';
@@ -11,7 +11,7 @@ import { OutletDetailModal } from './components/OutletDetailModal';
 import { AdminAuditModal } from './components/AdminAuditModal';
 import { CinematicVideoBackground } from './components/CinematicVideoBackground';
 import { BrandLogo } from './components/BrandLogo';
-import { Utensils, AlertCircle, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Utensils, AlertCircle, AlertTriangle, RefreshCw, CheckCircle2 } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [locations, setLocations] = useState<CampusLocation[]>([]);
@@ -20,6 +20,10 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Explicit Application Sync & Freshness State Model
+  const [syncState, setSyncState] = useState<AppSyncState>('LOADING');
+  const [lastSuccessfulSync, setLastSuccessfulSync] = useState<number | null>(null);
 
   // Filters & Search
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
@@ -97,12 +101,25 @@ export const App: React.FC = () => {
     setTimeout(() => setToastMsg(null), 3500);
   };
 
+  // Formatted last successful sync timestamp
+  const lastSuccessfulSyncStr = useMemo(() => {
+    if (!lastSuccessfulSync) return null;
+    const d = new Date(lastSuccessfulSync);
+    const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const elapsedMin = Math.round((Date.now() - d.getTime()) / (60 * 1000));
+    const elapsedStr = elapsedMin <= 0 ? 'just now' : `${elapsedMin}m ago`;
+    return `${timeStr} (${elapsedStr})`;
+  }, [lastSuccessfulSync, isRefreshing, syncState]);
+
   const loadData = async (isManualRefresh = false) => {
     if (isFetchingRef.current) return;
     try {
       isFetchingRef.current = true;
-      if (isManualRefresh) setIsRefreshing(true);
-      else setLoading(true);
+      if (isManualRefresh) {
+        setIsRefreshing(true);
+      } else if (syncState !== 'STALE' && syncState !== 'FRESH') {
+        setLoading(true);
+      }
 
       const [locResult, recResult] = await Promise.all([
         api.getLocations(),
@@ -113,13 +130,25 @@ export const App: React.FC = () => {
       setRecommendation(recResult.data);
       setIsLiveApi(locResult.isLive);
       setErrorMsg(null);
+      setLastSuccessfulSync(Date.now());
+      setSyncState(locResult.data.length === 0 ? 'EMPTY' : 'FRESH');
 
       if (isManualRefresh) {
         showToast('Queue estimates and observations refreshed.');
       }
     } catch (err: any) {
       console.error('Error fetching data:', err);
-      setErrorMsg('Failed to sync queue data with server.');
+      const msg = err.message || 'Failed to sync queue data with server.';
+      setErrorMsg(msg);
+      // If we previously had valid locations, transition to STALE, preserving existing data and timestamp!
+      setLocations((prevLocations) => {
+        if (prevLocations.length > 0) {
+          setSyncState('STALE');
+        } else {
+          setSyncState('ERROR');
+        }
+        return prevLocations;
+      });
     } finally {
       isFetchingRef.current = false;
       lastFetchTimeRef.current = Date.now();
@@ -258,7 +287,7 @@ export const App: React.FC = () => {
       />
 
       {/* Demo Mode Persistent Banner */}
-      {!isLiveApi && (
+      {!isLiveApi && syncState !== 'ERROR' && (
         <div className="relative z-10 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
           <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-[#FFA028]/10 border border-[#FFA028]/30 text-[#FFA028] text-xs font-mono backdrop-blur-md">
             <div className="flex items-center gap-2">
@@ -280,60 +309,104 @@ export const App: React.FC = () => {
         {/* Hero Section */}
         <Hero locations={locations} />
 
-        {/* Global Error Notice with WCAG alert role */}
-        {errorMsg && (
+        {/* PROMINENT STALE DATA WARNING BANNER: Retains cached data while warning clearly */}
+        {syncState === 'STALE' && (
           <div
             role="alert"
-            aria-live="assertive"
-            className="my-6 p-6 rounded-3xl bg-[#CC162D]/15 border border-[#CC162D]/40 text-[#FF4A60] flex flex-col sm:flex-row items-center justify-between gap-4"
+            aria-live="polite"
+            data-testid="stale-data-banner"
+            className="my-6 p-5 rounded-3xl bg-[#FFA028]/15 border border-[#FFA028]/45 text-[#FFA028] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-[0_0_25px_rgba(255,160,40,0.2)] animate-fade-in"
           >
-            <div className="flex items-start gap-3">
-              <AlertCircle className="w-6 h-6 shrink-0 text-[#FF4A60] mt-0.5" />
+            <div className="flex items-start gap-3.5">
+              <div className="p-2.5 rounded-2xl bg-[#FFA028]/20 border border-[#FFA028]/40 text-[#FFA028] shrink-0 mt-0.5">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
               <div>
-                <h4 className="font-display font-bold text-base text-white">
-                  Live Data Temporarily Unavailable
-                </h4>
-                <p className="text-xs text-[#8E9E93] mt-1">
-                  {errorMsg}. Production mode enforces data integrity and will not silently substitute mock fixtures for live cloud observations.
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-xs uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full bg-[#FFA028] text-black">
+                    STALE DATA WARNING
+                  </span>
+                  <h4 className="font-display font-bold text-base text-white">
+                    Live Server Sync Unavailable
+                  </h4>
+                </div>
+                <p className="text-xs text-[#C8D6CC] mt-1.5 leading-relaxed max-w-2xl">
+                  Real-time queue estimates could not be refreshed ({errorMsg || 'Connection offline'}). Displaying retained observations from{' '}
+                  <strong className="text-white font-mono">{lastSuccessfulSyncStr || 'prior observation window'}</strong>. Estimates may not reflect current line congestion.
                 </p>
               </div>
             </div>
             <button
               onClick={() => loadData(true)}
-              className="shrink-0 px-4 py-2.5 rounded-xl bg-[#CC162D]/30 border border-[#CC162D]/60 text-white font-mono text-xs hover:bg-[#CC162D]/50 transition-colors min-h-[44px]"
+              disabled={isRefreshing}
+              className="shrink-0 flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#FFA028] text-black font-mono text-xs font-bold uppercase tracking-wider hover:bg-[#e68f20] transition-colors min-h-[44px] shadow-[0_0_15px_rgba(255,160,40,0.3)] disabled:opacity-50"
             >
-              Retry Sync
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span>Retry Sync</span>
             </button>
           </div>
         )}
 
-        {/* Smart Recommendation Banner */}
-        <RecommendationBanner
-          recommendation={recommendation}
-          onSelectOutlet={(id) => setDetailOutletId(id)}
-          onOpenReportModal={handleOpenReportModal}
-        />
+        {/* Global Error Screen when NO cached data exists */}
+        {syncState === 'ERROR' && locations.length === 0 && (
+          <div
+            role="alert"
+            aria-live="assertive"
+            data-testid="error-state-screen"
+            className="my-10 p-8 rounded-3xl bg-[#CC162D]/15 border border-[#CC162D]/40 text-[#FF4A60] flex flex-col items-center justify-center text-center gap-4"
+          >
+            <AlertCircle className="w-10 h-10 text-[#FF4A60]" />
+            <div>
+              <h3 className="font-display font-bold text-xl text-white">
+                Unable to Load Campus Queue Data
+              </h3>
+              <p className="text-xs text-[#8E9E93] mt-2 max-w-md leading-relaxed">
+                {errorMsg || 'Connection offline'}. Production mode enforces data integrity and will never silently substitute mock fixtures for live cloud observations.
+              </p>
+            </div>
+            <button
+              onClick={() => loadData(true)}
+              disabled={isRefreshing}
+              className="mt-2 px-6 py-2.5 rounded-xl bg-[#CC162D] text-white font-mono text-xs font-bold uppercase tracking-wider hover:bg-[#b01427] transition-colors min-h-[44px] shadow-[0_0_15px_rgba(204,22,45,0.3)]"
+            >
+              {isRefreshing ? 'Retrying...' : 'Retry Connection'}
+            </button>
+          </div>
+        )}
+
+        {/* Smart Recommendation Banner with Stale Data Awareness */}
+        {syncState !== 'ERROR' && (
+          <RecommendationBanner
+            recommendation={recommendation}
+            syncState={syncState}
+            lastSuccessfulSyncStr={lastSuccessfulSyncStr}
+            onSelectOutlet={(id) => setDetailOutletId(id)}
+            onOpenReportModal={handleOpenReportModal}
+          />
+        )}
 
         {/* Filter Bar */}
-        <FilterBar
-          selectedCategory={selectedCategory}
-          onSelectCategory={setSelectedCategory}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          sortBy={sortBy}
-          onSortChange={setSortBy}
-          totalCount={filteredLocations.length}
-        />
+        {syncState !== 'ERROR' && (
+          <FilterBar
+            selectedCategory={selectedCategory}
+            onSelectCategory={setSelectedCategory}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            sortBy={sortBy}
+            onSortChange={setSortBy}
+            totalCount={filteredLocations.length}
+          />
+        )}
 
-        {/* Outlets Grid with Focused Hover Dimming */}
-        {loading ? (
+        {/* Outlets Grid with Focused Hover Dimming and Stale State Indicator */}
+        {loading && locations.length === 0 ? (
           <div className="py-24 flex flex-col items-center justify-center text-[#8E9E93] gap-3">
             <RefreshCw className="w-8 h-8 animate-spin text-[#39FF14]" />
             <span className="text-xs font-mono tracking-widest uppercase">
               Synchronizing Campus Queue Intelligence...
             </span>
           </div>
-        ) : filteredLocations.length === 0 ? (
+        ) : filteredLocations.length === 0 && syncState !== 'ERROR' ? (
           <div className="py-24 text-center rounded-3xl glass-panel border-dashed border-white/10">
             <Utensils className="w-10 h-10 text-[#5A695F] mx-auto mb-3" />
             <h3 className="text-base font-display font-bold text-white">No dining outlets match your query</h3>
@@ -341,18 +414,19 @@ export const App: React.FC = () => {
               Try adjusting your category filter or search keywords.
             </p>
           </div>
-        ) : (
+        ) : syncState !== 'ERROR' ? (
           <div className="cards-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-4">
             {filteredLocations.map((loc) => (
               <OutletCard
                 key={loc.id}
                 location={loc}
+                syncState={syncState}
                 onSelect={(id) => setDetailOutletId(id)}
                 onReport={(id) => handleOpenReportModal(id)}
               />
             ))}
           </div>
-        )}
+        ) : null}
       </main>
 
       {/* Footer & Truthful Data Source Disclosure */}
@@ -377,9 +451,13 @@ export const App: React.FC = () => {
             <div className="flex items-center gap-2">
               {isLiveApi ? (
                 <>
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#39FF14] animate-pulse" />
-                  <span className="text-[#39FF14] font-medium">Live AWS API Gateway</span>
-                  <span className="text-[#5A695F]">| Synchronized with DynamoDB ap-southeast-2</span>
+                  <span className={`w-1.5 h-1.5 rounded-full ${syncState === 'STALE' ? 'bg-[#FFA028]' : 'bg-[#39FF14] animate-pulse'}`} />
+                  <span className={`font-medium ${syncState === 'STALE' ? 'text-[#FFA028]' : 'text-[#39FF14]'}`}>
+                    {syncState === 'STALE' ? 'Live AWS API (Sync Offline)' : 'Live AWS API Gateway'}
+                  </span>
+                  <span className="text-[#5A695F]">
+                    | {syncState === 'STALE' ? `Retaining data from ${lastSuccessfulSyncStr || 'prior sync'}` : 'Synchronized with DynamoDB ap-southeast-2'}
+                  </span>
                 </>
               ) : (
                 <>
@@ -408,6 +486,8 @@ export const App: React.FC = () => {
       <OutletDetailModal
         locationId={detailOutletId}
         refreshTrigger={detailRefreshTrigger}
+        syncState={syncState}
+        lastSuccessfulSyncStr={lastSuccessfulSyncStr}
         onClose={() => setDetailOutletId(null)}
         onOpenReportModal={(id) => {
           setDetailOutletId(null);
