@@ -11,7 +11,9 @@
 A common pitfall in student hackathons is claiming serverless architectures are "100% Free Forever with guaranteed $0.00 under all conditions."  
 **QueueSense rejects this misleading claim.**
 
-QueueSense is architected for **minimal near-zero idle baseline cost (~$0.05 - $0.55/month depending on Route 53 hosted zones and CloudWatch log ingestion)** by relying on AWS On-Demand pay-per-request serverless primitives rather than continuously provisioned EC2 instances, containers, or RDS clusters. Under judge evaluation and initial campus pilot usage, request-based compute and storage stay comfortably within the **AWS Always-Free Tier**. Workload estimates for standard traffic scenarios range from **~$0.03 to ~$4.42 per month** based on published rates.
+QueueSense is architected for **minimal near-zero idle baseline cost (~$0.05 - $0.55/month depending on Route 53 hosted zones and CloudWatch log ingestion)** by relying on AWS On-Demand pay-per-request serverless primitives rather than continuously provisioned EC2 instances, containers, or RDS clusters. 
+
+Under judge evaluation and initial campus pilot usage, compute duration and static asset transfer stay comfortably within the **AWS Always-Free Tier**. Workload estimates for standard traffic scenarios range from **~$0.03 to ~$4.42 per month** based on standard published rates (and **~$0.01 to ~$0.10 per month** under the 12-Month AWS Free Tier).
 
 However, serverless costs are inherently consumption-based and depend on actual traffic; costs do not automatically remain below any fixed dollar threshold without active account-level budget monitoring and governance.
 
@@ -25,6 +27,10 @@ However, serverless costs are inherently consumption-based and depend on actual 
 - **Storage:** 25 GB free tier, then $0.25 per GB-month
 - **TTL Deletions:** $0.00 (Free of charge)
 - *QueueSense Footprint:* Each report write consumes 2 WRU (one REPORT item, one current ESTIMATE item). Each reading call consumes 1-3 RRU. Single-table storage with 30-day TTL occupies under 50 MB for the entire campus.
+
+> [!IMPORTANT]
+> **On-Demand Capacity Mode (`BillingMode: PAY_PER_REQUEST`):**  
+> `infrastructure/template.yaml` explicitly configures DynamoDB in On-Demand mode to prevent idle provisioned capacity costs and eliminate throttled writes during unexpected lunch/dinner surges. In On-Demand mode, writes and reads are metered per request unit ($1.25/M WRU, $0.25/M RRU). The AWS Always-Free Tier 25 WCU and 25 RCU allowance applies **strictly to provisioned capacity mode** and cannot be deducted from on-demand WRU/RRU usage. Only the 25 GB storage allowance applies across all capacity modes.
 
 ### 2.2 AWS Lambda (Python 3.12, 256MB Architecture)
 - **Always-Free Tier:** 1,000,000 free requests per month + 3,200,000 seconds of compute time (400,000 GB-seconds).
@@ -59,16 +65,24 @@ However, serverless costs are inherently consumption-based and depend on actual 
 - **Active Outlets:** 10 dining halls
 - **Submissions:** 500 reports/month
 - **API Read Requests:** 25,000 requests/month
-- **Estimated Monthly Cost:** **$0.00** (under Year 1 Free Tier) / **~$0.03 / month** (under Standard Rates)
+- **Estimated Monthly Cost:** **~$0.01 / month** (under Year 1 Free Tier) / **~$0.03 / month** (under Standard Rates)
 
-| Service | Volume | Free Tier Allowance | Billed Quantity | Standard Rate | Estimated Cost |
-|---|---|---|---|---|---|
-| DynamoDB Writes | 1,000 WRU | 25 GB & 25 WCU always free | 0 WRU | $1.25 / M | $0.00 |
-| DynamoDB Reads | 30,000 RRU | 25 RCU always free | 0 RRU | $0.25 / M | $0.00 |
-| Lambda Invocations | 26,000 calls | 1,000,000 calls always free | 0 calls | $0.20 / M | $0.00 |
-| HTTP API Gateway | 26,000 calls | 1,000,000 calls free (12-mo) | 0.026 M (post-free-tier) | $1.00 / M | $0.00 (Year 1) / $0.03 (Standard) |
-| CloudFront Data Transfer | 2 GB | 1,000 GB always free | 0 GB | $0.085 / GB | $0.00 |
-| **Total Net Cost** | — | — | — | — | **$0.00 / month (Year 1 Free Tier); ~$0.03 / month (Standard Rates)** |
+| Service | Volume | Free Tier Allowance | Billed Quantity (Standard) | Standard Rate | Cost (Standard) | Cost (Year 1 Free Tier) |
+|---|---|---|---|---|---|---|
+| DynamoDB WRU | 1,000 writes | 25 GB storage free (On-Demand WRUs billed) | 0.001 M | $1.25 / M | $0.00125 | $0.00125 |
+| DynamoDB RRU | 30,000 reads | 25 GB storage free (On-Demand RRUs billed) | 0.030 M | $0.25 / M | $0.00750 | $0.00750 |
+| Lambda Invocations | 26,000 calls | 1,000,000 calls & 400,000 GB-s Always-Free | 0 calls | $0.20 / M | $0.00000 | $0.00000 |
+| HTTP API Gateway | 26,000 calls | 1,000,000 calls/mo free (first 12 months) | 0.026 M | $1.00 / M | $0.02600 | $0.00000 |
+| CloudFront & S3 | 2 GB transfer | 1,000 GB transfer out Always-Free | 0 GB | $0.085 / GB | $0.00000 | $0.00000 |
+| **Total Net Cost** | — | — | — | — | **~$0.03 / month** | **~$0.01 / month** |
+
+*Arithmetic Verification:*
+- **Year 1 Free Tier Total:**
+  $$\$0.00125 \text{ (DynamoDB WRU)} + \$0.00750 \text{ (DynamoDB RRU)} + \$0.000 \text{ (Lambda)} + \$0.000 \text{ (API Gateway)} = \$0.00875 \approx \mathbf{\$0.01 / \text{month}}.$$
+  *(Under the 12-Month AWS Free Tier, HTTP API Gateway [1M free], Lambda [1M free], and CloudFront [1TB free] allowances reduce their charges to \$0.00; the remaining \$0.00875 [~\$0.01] arises from DynamoDB PAY_PER_REQUEST on-demand consumption).*
+- **Standard Rates Total (Post-Year 1):**
+  $$\$0.00875 \text{ (DynamoDB total)} + \$0.02600 \text{ (API Gateway)} = \$0.03475 \approx \mathbf{\$0.03 / \text{month}}.$$
+  *(Rounding to two decimal places: \$0.03475 rounds to \$0.03).*
 
 ---
 
@@ -130,12 +144,24 @@ However, serverless costs are inherently consumption-based and depend on actual 
 
 ---
 
-## 5. Account-Level Financial Governance with AWS Budgets
+## 5. Funding Strategy & Credit Governance ($100 AWS Credits, Strict $0 Personal Spend)
 
-1. **CloudFormation Parameter Limitations:** CloudFormation template parameters, route throttling settings, and Lambda concurrency limits cannot enforce account-level financial ceilings.
-2. **AWS Budgets Configuration:** Comprehensive cost governance requires configuring an AWS Budget in the AWS Billing Console for the target AWS account.
-3. **No Automatic Hard Stop:** An AWS Budget does not automatically guarantee a hard stop on AWS charges; it provides automated alerting via Amazon SNS / email when actual or forecasted spend reaches defined thresholds (e.g., 50%, 80%, 100% of a monthly budget limit).
-4. **Enforceable Spending Stops:** To enforce spending cutoffs, administrators must configure explicit AWS Budget Actions (e.g., triggering a custom Lambda or applying an SCP/IAM policy to restrict resource usage). These require operational deployment in a live AWS account.
+### 5.1 Project Funding Strategy
+The operational deployment of QueueSense is funded using **$100.00 in AWS promotional credits** allocated for the Techfest / AWS ShipIt Challenge 2026. The project operates under a **strict $0.00 personal out-of-pocket spend requirement** for the student operators across development, evaluation, judging, and campus testing.
+
+### 5.2 Credit Eligibility, Expiry & Terms
+Promotional AWS credits provide financial runway but carry contractual constraints that require active governance:
+1. **Service Eligibility Limitations:** AWS promotional credits do not universally cover every service or fee. In particular, Amazon Route 53 domain registrations, third-party AWS Marketplace products, and certain specialized cross-region transfer fees are excluded by AWS credit terms. QueueSense uses native AWS serverless primitives (`*.cloudfront.net`, `*.execute-api.ap-southeast-2.amazonaws.com`) to remain strictly within credit-eligible service categories.
+2. **Strict Expiration Dates:** Promotional credits carry explicit expiration windows. Unused balances expire automatically and cannot be transferred, extended, or refunded.
+3. **Automatic Draw-Down:** Billed charges on eligible services automatically draw down against the active credit balance before any underlying payment method is charged.
+
+### 5.3 AWS Budgets Operational Limitations
+1. **No Automatic Hard Spending Cap:** CloudFormation template parameters and route throttling cannot enforce account spending limits. Comprehensive cost governance requires configuring an AWS Budget in the AWS Billing Console.
+2. **Alerting vs Enforcement:** An AWS Budget **does not automatically guarantee a hard stop** on AWS charges; it provides asynchronous automated threshold alerts via Amazon SNS / email when forecasted or actual spend breaches defined tiers (e.g., $10, $25, $50, $80 of the $100 credit pool).
+3. **Strict $0 Personal Spend Protocol:** To ensure zero personal liability, operators must:
+   - Configure tiered budget alerts at 25%, 50%, 75%, and 90% of the $100 credit balance.
+   - Actively monitor the AWS Billing & Cost Management Dashboard.
+   - Be prepared to manually execute `sam delete` or configure programmatic AWS Budget Actions (e.g., custom Lambda stop-action or IAM/SCP boundary restrictions) to decommission resources before credits are exhausted or expire.
 
 ---
 

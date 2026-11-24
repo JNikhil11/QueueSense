@@ -139,13 +139,13 @@ QueueSense infrastructure is authored with dynamic CloudFormation intrinsics (`$
 |---|---|---|---|
 | **AWS Lambda** | 135,000 invocations @ 150ms avg, 256 MB = 5,184 GB-sec | 1,000,000 invocations & 400,000 GB-sec free | **$0.00** (Within Free Tier) |
 | **Amazon API Gateway** | 135,000 HTTP API calls ($1.00/million calls) | 1,000,000 calls free for first 12 months | **$0.00** ($0.14/mo after Year 1) |
-| **Amazon DynamoDB** | 120,000 RRUs ($0.25/M) + 15,000 WRUs ($1.25/M) + PITR (50 MB @ $0.20/GB) | 25 GB storage & 2.5M reads/writes free/mo | **$0.01** (PITR continuous backup) |
+| **Amazon DynamoDB** | 120,000 RRUs ($0.25/M) + 15,000 WRUs ($1.25/M) + PITR (50 MB @ $0.20/GB) | 25 GB storage free (On-Demand WRUs/RRUs billed per unit) | **~$0.06** ($0.05875) |
 | **Amazon S3** | 100 MB static assets, 1,000 PUTs/month | 5 GB standard storage & 20,000 GETs free | **$0.00** (Within Free Tier) |
 | **Amazon CloudFront** | 15 GB data transfer out + 150,000 requests | 1 TB data transfer & 10M requests free perpetually | **$0.00** (Within Free Tier) |
 | **CloudFront Functions** | 150,000 viewer-request routing calls ($0.10/M) | 2,000,000 function invocations free/mo | **$0.00** (Within Free Tier) |
 | **Amazon CloudWatch** | 8 log groups (~200 MB ingestion, 30-day retention) + 4 alarms | 5 GB ingestion & 10 custom alarms free | **$0.00** (Within Free Tier) |
 | **Amazon Cognito** | 10 administrator accounts | 50,000 MAU free perpetually | **$0.00** (Within Free Tier) |
-| **Total Baseline Monthly Cost** | — | — | **$0.01 / month** (under Free Tier); **~$0.15 - $0.30 / month** (standard pricing) |
+| **Total Baseline Monthly Cost** | — | — | **~$0.06 / month** (under Year 1 Free Tier); **~$0.20 / month** (standard pricing) |
 
 ### 4.2 High-Traffic & Sustained Abuse Scenario
 *Attack Scenario: An adversary attempts 10,000,000 requests over 48 hours (~58 req/sec) targeting `POST /locations/{id}/reports`.*
@@ -176,4 +176,5 @@ QueueSense infrastructure is authored with dynamic CloudFormation intrinsics (`$
 2. **Concurrency vs Billing:** Lambda `ReservedConcurrentExecutions` bounds *simultaneous parallel execution instances* to protect account quotas from exhaustion; it does *not* cap cumulative invocation counts or request billing over a calendar month.
 3. **API Gateway Throttled Request Fees:** While HTTP 429 throttling prevents downstream Lambda execution and database writes, API Gateway still meters and bills for evaluating incoming HTTP requests ($1.00/million).
 4. **Enforceable Account Spending Limits & AWS Budgets:** True financial caps and hard spending stops cannot be implemented solely inside CloudFormation template parameters. An AWS Budget does not inherently or automatically guarantee a hard stop on AWS charges by itself; it provides automated alerting via Amazon SNS / email when actual or forecasted spend breaches specified thresholds. To enforce spending cutoffs, administrators must configure explicit AWS Budget Actions (e.g., triggering a custom Lambda or applying an SCP/IAM policy to restrict resource usage). These require operational deployment in a live AWS account.
+5. **Funding Strategy & Strict $0 Personal Spend Requirement:** The project operates under an active $100.00 AWS promotional credit funding strategy with a strict $0.00 personal out-of-pocket spend requirement. Note that AWS credits do not universally cover every service (e.g., Route 53 domains or third-party solutions are excluded) and carry explicit expiration dates. Operators rely on tiered AWS Budgets notifications (25%, 50%, 75%, 90%) to track credit burn, recognizing that Budgets alerts are not a guaranteed hard spending cap and require manual or programmatic teardown before credits expire or deplete.
 
