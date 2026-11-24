@@ -21,7 +21,7 @@ if "/opt/python" not in sys.path:
 
 from response import create_api_response
 from database import QueueSenseDatabase, DatabasePersistenceError
-from validation import validate_location_id
+from validation import validate_location_id, validate_pagination_limit, validate_historical_days
 
 logger = logging.getLogger("queuesense.get_historical")
 logger.setLevel(logging.INFO)
@@ -61,8 +61,34 @@ def lambda_handler(event, context):
                 request_id=request_id,
             )
 
+        # Validate numeric bounds on query parameters (days: 1-14, limit: 1-1000)
+        query_params = (event or {}).get("queryStringParameters") or {}
+        days_param = query_params.get("days")
+        is_valid_days, days, days_err = validate_historical_days(
+            days_param, default=14, min_val=1, max_val=14
+        )
+        if not is_valid_days:
+            return create_api_response(
+                status_code=400,
+                error=days_err,
+                error_code="INVALID_DAYS",
+                request_id=request_id,
+            )
+
+        limit_param = query_params.get("limit")
+        is_valid_limit, limit, limit_err = validate_pagination_limit(
+            limit_param, default=1000, min_val=1, max_val=1000
+        )
+        if not is_valid_limit:
+            return create_api_response(
+                status_code=400,
+                error=limit_err,
+                error_code="INVALID_LIMIT",
+                request_id=request_id,
+            )
+
         # Retrieve historical reports (strictly enforced 14 days cutoff in DB query, bounded to 1000 reports across pages)
-        hist_result = db.get_historical_reports(location_id, days=14, limit=1000, include_metadata=True)
+        hist_result = db.get_historical_reports(location_id, days=days, limit=limit, include_metadata=True)
         reports = hist_result["reports"]
         is_capped = hist_result["is_truncated"]
 

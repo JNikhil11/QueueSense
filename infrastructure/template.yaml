@@ -342,6 +342,15 @@ Resources:
               Action:
                 - ssm:GetParameter
               Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/queuesense/${Environment}/rate_limit_salt"
+            - Sid: SubmitReportKMSDecryptionAccess
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+              Condition:
+                StringEquals:
+                  kms:CallerAccount: !Sub "${AWS::AccountId}"
+                  kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
       Events:
         SubmitObservation:
           Type: HttpApi
@@ -396,9 +405,21 @@ Resources:
     Properties:
       CodeUri: ../backend/
       Handler: functions.admin.app.lambda_handler
+      Environment:
+        Variables:
+          USER_POOL_ID: !Ref QueueSenseUserPool
+          USER_POOL_CLIENT_ID: !Ref QueueSenseUserPoolClient
       Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Sub "${TableName}-${Environment}"
+        - Statement:
+            - Sid: AdminReportsDynamoDBAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Scan
+                - dynamodb:Query
+              Resource:
+                - !GetAtt MainTable.Arn
+                - !Sub "${MainTable.Arn}/index/GSI1"
       Events:
         AdminAuditFeed:
           Type: HttpApi

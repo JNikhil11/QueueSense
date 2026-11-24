@@ -3,6 +3,7 @@ QueueSense - GET /admin/reports Lambda Handler
 Provides operational audit feed of recent reports across campus food outlets.
 Requires authenticated Cognito Administrator access (cognito:groups includes 'Admins').
 In production, static admin keys are strictly prohibited; unauthenticated access is rejected.
+Enforces defense-in-depth JWT claim validation (token_use, expiration, issuer, audience).
 """
 
 import logging
@@ -20,6 +21,8 @@ if "/opt/python" not in sys.path:
 from response import create_api_response
 from database import QueueSenseDatabase, DatabasePersistenceError
 from prediction import filter_outliers
+from validation import validate_pagination_limit
+from security import verify_cognito_jwt_claims
 
 logger = logging.getLogger("queuesense.admin")
 logger.setLevel(logging.INFO)
@@ -37,14 +40,16 @@ def check_admin_authorization(event: Dict[str, Any]) -> Tuple[bool, Optional[str
     claims = jwt.get("claims") or {}
 
     if claims:
-        # Check if user is in 'Admins' group
-        groups = claims.get("cognito:groups") or []
-        if isinstance(groups, str):
-            groups = [g.strip() for g in groups.split(",") if g.strip()]
-        if "Admins" in groups:
-            return True, claims.get("username") or claims.get("sub"), None
-        logger.warning("Authenticated user is not in 'Admins' group: sub=%s", claims.get("sub"))
-        return False, None, "FORBIDDEN_NOT_ADMIN"
+        # Defense-in-depth claim validation: token_use, exp, nbf, iss, aud, and 'Admins' group
+        is_valid, user_identity, val_err = verify_cognito_jwt_claims(
+            claims,
+            expected_user_pool_id=os.environ.get("USER_POOL_ID"),
+            expected_client_id=os.environ.get("USER_POOL_CLIENT_ID"),
+            expected_group="Admins",
+        )
+        if is_valid:
+            return True, user_identity, None
+        return False, None, val_err
 
     # 2. Check environment & data mode
     env = os.environ.get("ENVIRONMENT", "").lower()
@@ -95,12 +100,19 @@ def lambda_handler(event, context):
                 request_id=request_id,
             )
 
-        query_params = event.get("queryStringParameters") or {}
-        limit_param = query_params.get("limit", "50")
-        try:
-            limit = min(int(limit_param), 100)
-        except ValueError:
-            limit = 50
+        # Validate numeric boundary on pagination limit
+        query_params = (event or {}).get("queryStringParameters") or {}
+        limit_param = query_params.get("limit")
+        is_valid_limit, limit, limit_err = validate_pagination_limit(
+            limit_param, default=50, min_val=1, max_val=100
+        )
+        if not is_valid_limit:
+            return create_api_response(
+                status_code=400,
+                error=limit_err,
+                error_code="INVALID_LIMIT",
+                request_id=request_id,
+            )
 
         db = QueueSenseDatabase()
         report_result = db.list_all_reports(limit=limit, include_metadata=True)

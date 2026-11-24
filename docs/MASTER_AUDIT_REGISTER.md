@@ -65,6 +65,11 @@ Status Definitions:
 | **Batch 1** | **P1.5** | DynamoDB GSI1 Data Model & Global Secondary Indexing | **P1** | `infrastructure/template.yaml`, `backend/shared/database.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | `5db118c` |
 | **Batch 1** | **P1.6** | Multi-Campus Isolation & Parameterization | **P1** | `infrastructure/template.yaml`, `backend/shared/database.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | `5db118c` |
 | **Batch 1** | **P1.7** | Location Data Provenance Metadata & Internal Key Stripping | **P1** | `backend/shared/database.py`, `backend/functions/get_locations/app.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | `5db118c` |
+| **Batch 2** | **P1.8** | JWT Verification & API Gateway Authorizer Security | **P1** | `backend/shared/security.py`, `backend/functions/admin/app.py`, `backend/tests/test_batch2_security.py` | **`VERIFIED FIXED`** | `28ef95e`+ |
+| **Batch 2** | **P1.9** | IP HMAC Pseudonymization & Privacy Transparency | **P1** | `backend/shared/security.py`, `backend/tests/test_batch2_security.py` | **`VERIFIED FIXED`** | `28ef95e`+ |
+| **Batch 2** | **P1.10** | Campus NAT Collisions & Dual-Budget Rate Limiting | **P1** | `backend/shared/security.py`, `backend/functions/submit_report/app.py`, `backend/tests/test_batch2_security.py` | **`VERIFIED FIXED`** | `28ef95e`+ |
+| **Batch 2** | **P1.11** | Numeric Boundary Validation (NaN, Inf, Booleans, Query Limits) | **P1** | `backend/shared/validation.py`, `backend/functions/admin/app.py`, `backend/functions/get_historical/app.py`, `backend/tests/test_batch2_security.py` | **`VERIFIED FIXED`** | `28ef95e`+ |
+| **Batch 2** | **P1.12** | Secrets, SSM SecureString & KMS Decryption Policies | **P1** | `infrastructure/template.yaml`, `backend/shared/security.py`, `backend/tests/test_batch2_security.py` | **`VERIFIED FIXED`** | `28ef95e`+ |
 
 ---
 
@@ -513,6 +518,137 @@ Status Definitions:
   3. `test_provenance_integrity_and_forbidden_unsupported_claims`: Strictly asserts `sourceType == 'COMMUNITY_SOURCED'`, `lastVerifiedDate is None`, `verifiedBy is None`, and forbids unsupported claims like `OFFICIAL_INSTITUTIONAL_DIRECTORY` or `Campus Dining Operations`.
 - **Result:** **`VERIFIED FIXED`**
 - **Commit SHA:** `5db118c` (Refined in Final Acceptance Corrections)
+
+---
+
+## 4. Batch 2 Security, Authentication, Privacy & Abuse Hardening Audits (P1.8 – P1.12)
+
+### P1.8 — JWT Verification and API Gateway Authorizer Security
+- **Severity:** P1 (Authentication & Authorization / Access Control)
+- **Original Evidence:** API Gateway HTTP API v2 authorizer configuration forwards claims, but Lambda handlers lacked comprehensive defense-in-depth claims validation (`token_use`, `exp`, `nbf`, `iss`, `aud`), relying solely on shallow `cognito:groups` checks without algorithm constraints (`alg: none` rejection).
+- **Reproduction:** Tested craft tokens with missing expiration, expired timestamps, non-Cognito issuers, or `alg: none`. Raw tokens without algorithmic gating could theoretically bypass custom or direct invocation inspection.
+- **Root Cause:** Trust boundary ambiguity between API Gateway edge JWT authorizer and downstream Lambda handlers; lack of structural JWT parsing and claim constraint enforcement in backend code.
+- **Files Changed:** `backend/shared/security.py`, `backend/functions/admin/app.py`, `infrastructure/template.yaml`, `backend/tests/test_batch2_security.py`
+- **Implemented Remediation:**
+  1. Implemented `verify_cognito_jwt_claims()` in `backend/shared/security.py`:
+     - Enforces group membership: users lacking `"Admins"` group are immediately rejected with HTTP 403 `FORBIDDEN_NOT_ADMIN`.
+     - Validates expiration (`exp > current_timestamp`) and not-before (`nbf <= current_timestamp`).
+     - Validates `token_use` (must be `"id"` or `"access"`).
+     - Validates issuer (`iss` must match Cognito User Pool URL pattern and expected UserPool ID).
+     - Validates audience (`aud` or `client_id` must match configured UserPool Client ID).
+  2. Implemented `parse_unverified_jwt()` with strict security constraints:
+     - Enforces 3 dot-separated base64url segments.
+     - Strictly rejects tokens using algorithm `none`.
+     - Strictly restricts algorithm to asymmetric `RS256` (rejects symmetric HS256 to prevent key-confusion attacks).
+  3. Wired `USER_POOL_ID` and `USER_POOL_CLIENT_ID` into `AdminReportsFunction` in `infrastructure/template.yaml`.
+  4. In `backend/functions/admin/app.py`, unauthenticated requests in production strictly fail closed with HTTP 401 `UNAUTHORIZED_COGNITO_REQUIRED`; static dev keys are completely ignored in production.
+- **Exact Tests Added:**
+  - `test_jwt_claims_verification_valid_admin`: Valid admin claims pass.
+  - `test_jwt_claims_verification_expired_token`: Expired tokens return `UNAUTHORIZED_EXPIRED_TOKEN`.
+  - `test_jwt_claims_verification_token_not_yet_valid`: Future `nbf` returns `UNAUTHORIZED_TOKEN_NOT_YET_VALID`.
+  - `test_jwt_claims_verification_missing_expiration`: Missing `exp` returns `UNAUTHORIZED_MISSING_EXPIRATION`.
+  - `test_jwt_claims_verification_invalid_token_use`: Refresh tokens return `UNAUTHORIZED_INVALID_TOKEN_USE`.
+  - `test_jwt_claims_verification_wrong_issuer`: Rogue issuers return `UNAUTHORIZED_WRONG_ISSUER`.
+  - `test_jwt_claims_verification_wrong_audience`: Rogue audiences return `UNAUTHORIZED_WRONG_AUDIENCE`.
+  - `test_jwt_claims_verification_privilege_escalation_non_admin`: Non-admin students return `FORBIDDEN_NOT_ADMIN`.
+  - `test_jwt_unverified_parser_rejects_none_algorithm`: `alg: none` raises `JWTValidationError`.
+  - `test_jwt_unverified_parser_rejects_unsupported_algorithm`: `alg: HS256` raises `JWTValidationError`.
+  - `test_jwt_unverified_parser_rejects_malformed_structure`: Malformed tokens raise `JWTValidationError`.
+  - `test_admin_handler_production_lockdown_rejects_unauthenticated_requests`: Unauthenticated requests in production return 401.
+  - `test_admin_handler_forbidden_for_non_admin`: Non-admin authenticated user receives 403.
+- **Residual Risks:** In deployed environments, API Gateway edge authorizer drops invalid tokens before Lambda execution. If an AWS service role or private endpoint invokes Lambda directly, Lambda's defense-in-depth claims verification guarantees identical rejection.
+- **Status:** **`VERIFIED FIXED`**
+
+### P1.9 — IP HMAC Pseudonymization and Privacy Accuracy
+- **Severity:** P1 (Privacy Architecture & Regulatory Compliance)
+- **Original Evidence:** Early documentation and function names referenced "anonymous client hashing". Under GDPR (Recital 26) and India's DPDP Act 2023, keyed HMAC hashing of an IP address constitutes *pseudonymization*, not irreversible anonymization, due to dictionary re-identification feasibility across the IPv4 space.
+- **Reproduction:** Inspected data flows and retention: verified whether raw IP addresses were stored, whether salts could be compromised, and whether data retention was bounded.
+- **Root Cause:** Imprecise privacy taxonomy and lack of explicit architectural disclosures regarding re-identification bounds and salt rotation.
+- **Files Changed:** `backend/shared/security.py`, `backend/tests/test_batch2_security.py`
+- **Implemented Remediation:**
+  1. Updated `security.py` documentation and function contracts: explicitly defined that client identity hashing is **HMAC-SHA256 Pseudonymization**, not absolute mathematical anonymity.
+  2. Documented residual re-identification risks: an attacker with salt knowledge could brute-force the $2^{32}$ IPv4 space; mitigated by storing `RATE_LIMIT_SALT` in SSM Parameter Store as an encrypted `SecureString` with KMS encryption and zero plaintext logging.
+  3. Verified zero plaintext IP persistence: raw IP addresses are never logged or stored in DynamoDB.
+  4. Verified data retention: DynamoDB rate limit records carry an explicit TTL of $2 \times \text{window\_seconds} = 600\text{s}$ (10 minutes), after which records are automatically deleted.
+  5. Implemented `compute_pseudonymous_client_hash()` (aliasing `compute_anonymous_client_hash` for backwards compatibility).
+- **Exact Tests Added:**
+  - `test_hmac_pseudonym_generation_and_length`: Output is a 16-character hex string.
+  - `test_raw_ip_is_never_leaked_in_pseudonym_or_response`: Raw IP is absent from pseudonym.
+  - `test_salt_isolation_produces_distinct_pseudonyms`: Different salts yield distinct pseudonyms for identical IPs.
+  - `test_weak_and_missing_salt_fails_closed_in_production`: Missing salt or weak salt (<32 chars or dictionary words) fails closed.
+- **Residual Risks:** Compromise of the KMS key or SSM parameter would allow offline dictionary attacks against IPv4 addresses. Mitigated by least-privilege IAM policies, KMS decryption conditions, and rotation procedures.
+- **Status:** **`VERIFIED FIXED`**
+
+### P1.10 — NAT Collisions and Rate-Limiting Fairness
+- **Severity:** P1 (Fairness, Abuse Resistance & Availability)
+- **Original Evidence:** A single client rate limit based purely on `sourceIp` causes multi-user starvation when hundreds of campus students share the same public Wi-Fi or carrier NAT egress IP. Conversely, trusting `X-Forwarded-For` allows attackers to trivially bypass rate limits by header spoofing.
+- **Reproduction:** Simulated two clients on IP `103.21.124.50`: with naive IP-only hashing, client 2 was blocked after client 1 submitted 5 requests. Simulated rotating `X-Forwarded-For` headers: confirmed that without server-authoritative IP extraction, spoofing was possible.
+- **Root Cause:** Absence of dual-signal identity modeling that distinguishes individual client instances while enforcing public-IP volumetric ceilings.
+- **Files Changed:** `backend/shared/security.py`, `backend/functions/submit_report/app.py`, `backend/tests/test_batch2_security.py`
+- **Implemented Remediation:**
+  1. **Dual-Budget Architecture:**
+     - **Tier 1 (Client Device Pseudonym):** Client supplies optional `X-Device-ID` / `X-Client-Instance-ID` (validated as a safe high-entropy token `^[a-zA-Z0-9_-]{16,64}$`). Pseudonym is computed as `HMAC(salt, "ip::<ip>::dev::<device_id>")`. Each student receives an independent 5 reports / 5 minutes budget.
+     - **Tier 2 (Shared Campus NAT Ceiling):** To prevent an attacker on a single IP from generating thousands of device IDs, `submit_report/app.py` checks an IP-level safety ceiling `HMAC(salt, "ip::<ip>")` capped at 30 requests / 5 minutes. If exceeded, returns HTTP 429 `NAT_RATE_LIMIT_EXCEEDED`.
+  2. **Spoofing Prevention:** Source IP is extracted exclusively from `requestContext.http.sourceIp`. Client-supplied `X-Forwarded-For` and `Client-IP` headers are strictly ignored.
+  3. **Architectural Disclosure:** Documented that without authenticated student login (SSO), an adversary distributing requests across residential proxy pools cannot be mathematically distinguished from campus users.
+- **Exact Tests Added:**
+  - `test_shared_nat_multi_client_fairness`: Two students on same IP with different device IDs have independent rate-limit budgets.
+  - `test_adversarial_device_id_rotation_blocked_by_nat_ceiling`: Flooding via rotated device IDs triggers NAT ceiling at 30 requests and returns HTTP 429 `NAT_RATE_LIMIT_EXCEEDED`.
+  - `test_client_forwarded_headers_spoofing_prevented`: Spoofed `X-Forwarded-For` headers do not alter client pseudonym.
+  - `test_malformed_device_id_sanitized_or_ignored`: Malformed/injection device IDs fall back safely to IP pseudonym.
+- **Residual Risks:** An adversary with a botnet or distributed proxy pool can bypass IP-based ceilings. Comprehensive defense against distributed botnets requires institutional SSO authentication.
+- **Status:** **`VERIFIED FIXED`**
+
+### P1.11 — Numeric Boundary Validation
+- **Severity:** P1 (Input Validation, Precision & Data Integrity)
+- **Original Evidence:** In `validation.py`, `float("nan")` succeeded in `float(body["reportedWaitMinutes"])` because `nan < 0` and `nan > 120` both evaluate to `False` in Python. Booleans (`True`, `False`) inherit from `int` and coerced to numeric values (`1.0`, `0`). `queueLength` allowed fractional values (`2.5` people). Query parameter `limit` in `admin/app.py` and `days`/`limit` in `get_historical/app.py` accepted negative, zero, or unvalidated values.
+- **Reproduction:** Tested payloads `{"reportedWaitMinutes": "NaN"}`, `{"reportedWaitMinutes": True}`, `{"queueLength": 2.5}`, and query params `?limit=-5` and `?days=0`. All bypassed earlier validation or caused unexpected behavior.
+- **Root Cause:** Incomplete type checks that failed to guard against `math.isnan()`, `math.isinf()`, Python boolean-to-int inheritance, fractional quantities of people, and negative pagination parameters.
+- **Files Changed:** `backend/shared/validation.py`, `backend/functions/admin/app.py`, `backend/functions/get_historical/app.py`, `backend/tests/test_batch2_security.py`
+- **Implemented Remediation:**
+  1. Updated `validate_report_payload()`:
+     - Explicitly rejected booleans (`isinstance(v, bool)`).
+     - Explicitly rejected NaN, Infinity, -Infinity (`math.isnan()`, `math.isinf()`, and string equivalents).
+     - Enforced strict bounds for `reportedWaitMinutes`: `[0.0, 120.0]`.
+     - Enforced whole integer requirements for `queueLength`: `[0, 300]` (fractional people like `2.5` are rejected).
+  2. Implemented `validate_pagination_limit(limit_val, default=50, min_val=1, max_val=100)`:
+     - Rejects negative numbers, zero, booleans, NaN, Infinity, non-integer floats, and out-of-range values.
+  3. Implemented `validate_historical_days(days_val, default=14, min_val=1, max_val=14)`:
+     - Enforces lookback range between 1 and 14 days.
+  4. Wired validators into `admin/app.py` (rejecting invalid limits with HTTP 400 `INVALID_LIMIT`) and `get_historical/app.py` (rejecting invalid days with HTTP 400 `INVALID_DAYS` and invalid limits with HTTP 400 `INVALID_LIMIT`).
+- **Exact Tests Added:**
+  - `test_validate_report_payload_nan_and_infinity_rejected`: Rejection of NaN, string 'NaN', Infinity, -Infinity.
+  - `test_validate_report_payload_booleans_rejected`: Rejection of `True` and `False`.
+  - `test_validate_report_payload_wait_minutes_boundaries`: Exact boundaries `0.0`, `120.0`, `-0.1`, `120.1`.
+  - `test_validate_report_payload_queue_length_boundaries_and_integers`: Rejection of fractional people `2.5`, bounds `0`, `300`, `-1`, `301`.
+  - `test_validate_pagination_limit_boundaries`: Validator tests across all boundary values.
+  - `test_admin_handler_numeric_limit_boundary_enforcement`: HTTP 400 `INVALID_LIMIT` on negative, zero, over-max, or NaN limits.
+  - `test_get_historical_numeric_boundary_enforcement`: HTTP 400 `INVALID_DAYS` and `INVALID_LIMIT` on invalid query params.
+- **Residual Risks:** None. All inputs are bounded, type-checked, and validated before persistence or estimation.
+- **Status:** **`VERIFIED FIXED`**
+
+### P1.12 — Secrets, Historical Exposure and KMS
+- **Severity:** P1 (Cryptographic Security, IAM & Key Management)
+- **Original Evidence:** In `infrastructure/template.yaml`, `SubmitReportFunction` had IAM permission `ssm:GetParameter` for `/queuesense/${Environment}/rate_limit_salt`, but lacked `kms:Decrypt` permission. In AWS runtime, fetching an encrypted SSM SecureString fails with `AccessDeniedException` on KMS decryption. In Git history, early placeholder examples in `.env.example` contained example strings.
+- **Reproduction:** Simulated SSM SecureString retrieval with KMS decryption; verified IAM policy requirements in CloudFormation template. Scanned full Git history and working tree for active AWS keys or credentials.
+- **Root Cause:** Incomplete IAM policy definition for KMS decryption of SSM SecureString parameters.
+- **Files Changed:** `infrastructure/template.yaml`, `backend/shared/security.py`, `backend/tests/test_batch2_security.py`
+- **Implemented Remediation:**
+  1. Updated `infrastructure/template.yaml`:
+     - Added least-privilege `kms:Decrypt` statement to `SubmitReportFunction` scoped to KMS key used by SSM (`kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"`).
+     - Updated `AdminReportsFunction` DynamoDB policy to include both `!GetAtt MainTable.Arn` and `!Sub "${MainTable.Arn}/index/GSI1"`.
+     - Added `USER_POOL_ID` and `USER_POOL_CLIENT_ID` environment variables to `AdminReportsFunction`.
+  2. Reinforced secret safety in `backend/shared/security.py`:
+     - Secrets are never logged, formatted into exception messages, or exposed in error responses.
+     - Documented secret rotation procedure: generating 256-bit hex secret via `openssl rand -hex 32` and updating SSM SecureString with rolling 10-minute transition.
+  3. Performed full Git repository scan: confirmed zero active AWS access keys (`AKIA...`), secret access keys, or production credentials exist in the codebase.
+- **Exact Tests Added:**
+  - `test_template_submit_report_has_kms_decrypt_policy`: Verifies template grants `kms:Decrypt` with `kms:ViaService: ssm.<region>.amazonaws.com`.
+  - `test_template_admin_reports_has_gsi1_and_userpool_wiring`: Verifies template wires `USER_POOL_ID`, `USER_POOL_CLIENT_ID`, and read access on `MainTable` and `MainTable/index/GSI1`.
+  - `test_secret_retrieval_failure_does_not_leak_secrets_in_errors_or_logs`: Asserts error messages never leak secrets.
+  - `test_no_hardcoded_aws_credentials_in_repository`: Scans all tracked repo files to assert no `AKIA` or `ASIA` keys are committed.
+- **Residual Risks:** Production deployments must ensure the SSM SecureString parameter `/queuesense/prod/rate_limit_salt` is provisioned prior to stack deployment.
+- **Status:** **`VERIFIED FIXED`**
 
 ---
 

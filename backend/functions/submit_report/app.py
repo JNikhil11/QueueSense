@@ -29,6 +29,8 @@ from validation import validate_location_id, validate_report_payload
 from prediction import calculate_queue_estimate
 from security import (
     compute_anonymous_client_hash,
+    compute_pseudonymous_client_hash,
+    extract_client_instance_id,
     extract_idempotency_key,
     SecurityConfigurationError,
 )
@@ -89,10 +91,27 @@ def lambda_handler(event, context):
 
         db = QueueSenseDatabase()
 
-        # 4. Enforce Privacy-Preserving Rate Limiting (5 reports per 5 minutes per client hash)
+        # 4. Enforce Privacy-Preserving Rate Limiting (Dual-Budget: Device & Shared NAT Ceiling)
         try:
-            client_hash = compute_anonymous_client_hash(event)
+            device_id = extract_client_instance_id(event)
+            client_hash = compute_pseudonymous_client_hash(event, include_device_id=True)
+            # Tier 1: Client device rate limit (5 reports per 5 minutes)
             is_allowed = db.check_rate_limit(client_hash=client_hash, window_seconds=300, max_requests=5)
+
+            # Tier 2: Shared Campus NAT IP Ceiling (30 reports per 5 minutes per public IP)
+            # Active when device-id is provided to prevent single-origin automated floods via device-ID rotation
+            if is_allowed and device_id:
+                nat_hash = compute_pseudonymous_client_hash(event, include_device_id=False)
+                if nat_hash != client_hash:
+                    is_allowed_nat = db.check_rate_limit(client_hash=nat_hash, window_seconds=300, max_requests=30)
+                    if not is_allowed_nat:
+                        logger.warning("Shared NAT rate limit cap exceeded for IP hash: %s", nat_hash)
+                        return create_api_response(
+                            status_code=429,
+                            error="Network submission rate limit reached. Shared campus network burst cap active.",
+                            error_code="NAT_RATE_LIMIT_EXCEEDED",
+                            request_id=request_id,
+                        )
         except SecurityConfigurationError:
             raise
         except DatabasePersistenceError as db_err:
