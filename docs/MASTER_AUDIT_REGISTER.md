@@ -75,6 +75,12 @@ Status Definitions:
 | **Batch 3** | **P1.15** | Dynamic Evidence-Weighting Normalization (45/35/20) | **P1** | `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py` | **`VERIFIED FIXED`** | Current HEAD |
 | **Batch 3** | **P1.16** | Recommendation Confidence, Freshness & Operational Thresholds | **P1** | `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py` | **`VERIFIED FIXED`** | Current HEAD |
 | **Batch 3** | **P1.17** | Physical Sensor Ground-Truth Absence & Validation Framework | **P1** | `docs/STATISTICAL_VALIDATION_PROTOCOL.md`, `backend/shared/prediction.py`, `backend/tests/test_batch3_statistics.py` | **`BLOCKED BY MISSING REAL-WORLD DATA`** | Current HEAD |
+| **Batch 4** | **P1.18** | Observability, Privacy-Preserving Access Logging & Incident Alerting | **P1** | `infrastructure/template.yaml`, `backend/tests/test_batch4_infrastructure.py` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 4** | **P1.19** | Log Retention, Data Recovery and Persistence Safety | **P1** | `infrastructure/template.yaml`, `backend/tests/test_batch4_infrastructure.py`, `frontend/src/test/spa-routing.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 4** | **P1.20** | Cost Controls and Denial-of-Wallet Resilience | **P1** | `infrastructure/template.yaml`, `backend/tests/test_batch4_infrastructure.py`, `docs/COST_MODEL.md` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 5** | **P1.21** | Visual & Interaction Integrity (Video Lifecycle, Modal Synchronization, Card Hover Dimming & Layout Containment) | **P1** | `frontend/src/components/CinematicVideoBackground.tsx`, `frontend/src/styles/index.css`, `frontend/src/test/video-background.test.ts`, `frontend/src/test/card-layout-containment.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 5** | **P1.22** | Accessibility (WCAG 2.2 AA Focus Trapping, Accessible Names, Touch Targets, Live Status Announcements) | **P1** | `frontend/src/hooks/useFocusTrap.ts`, `frontend/src/components/ReportModal.tsx`, `frontend/src/components/OutletDetailModal.tsx`, `frontend/src/components/AdminAuditModal.tsx`, `frontend/src/test/a11y-and-resilience.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 5** | **P1.23** | Performance, Concurrency & Storage Resilience (Bounded Polling, In-Flight Deduplication, SecurityError Storage Fallback) | **P1** | `frontend/src/App.tsx`, `frontend/src/services/api.ts`, `frontend/src/services/deviceId.ts`, `frontend/src/test/a11y-and-resilience.test.ts`, `frontend/src/test/data-isolation.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
 
 ---
 
@@ -911,6 +917,60 @@ Status Definitions:
 - **Exact Tests Added:**
   - `test_semantic_lambda_concurrency_ceilings`, `test_semantic_api_gateway_throttling_settings`, `test_semantic_submit_report_kms_least_privilege`, `test_semantic_iam_no_wildcards_in_any_policy`, `test_semantic_cognito_mfa_and_admin_security`, `test_semantic_cloudfront_csp_and_security_headers`, `test_negative_wildcard_iam_action_detected`, `test_negative_optional_mfa_fails_enforcement_check`.
 - **Residual Risks:** In extreme traffic surges exceeding 50 req/sec, legitimate users may receive HTTP 429 throttling responses until queue volume stabilizes. Account-level financial caps require configuring AWS Budgets in the AWS Billing Console.
+- **Status:** **`VERIFIED FIXED`**
+
+### P1.21 — Visual & Interaction Integrity (Video Lifecycle, Modal Synchronization, Card Hover Dimming & Layout Containment)
+- **Severity:** P1 (Visual Quality, Usability & User Experience)
+- **Original Evidence:**
+  1. Card hover dimming lacked strict modal suspension, allowing underlying cards to dim or scale even while dialogs were open. Sibling cards dimmed to an uncalibrated 0.52 opacity rather than 0.45.
+  2. Potential layout shift / horizontal scrolling on narrow viewports (320px–375px) due to unconstrained flex basis.
+  3. Background video playback continuity required rigorous assertion across chained modal transitions.
+- **Reproduction:** Verified with automated Puppeteer browser tests across responsive viewports.
+- **Files Changed:** `frontend/src/components/CinematicVideoBackground.tsx`, `frontend/src/styles/index.css`, `frontend/src/App.tsx`, `frontend/src/test/video-background.test.ts`, `frontend/src/test/card-layout-containment.test.ts`.
+- **Implemented Remediation:**
+  1. Tuned cards-grid hover dimming to exact 0.45 opacity with smooth 0.25s cubic-bezier transition, scaling hovered card to 1.02 with enhanced dual-layer specular glow.
+  2. Implemented modal overlay synchronization: added `has-active-modal` class and `:has([role="dialog"])` CSS rules that immediately suspend card dimming and scaling when any modal is open.
+  3. Video background controller immediately pauses playback and sets `display: none` upon modal open; on modal close, instantly reveals video and resumes playback without resetting currentTime.
+  4. Verified zero horizontal scroll and strict element containment across 9 responsive breakpoints (320px to 1440px).
+- **Exact Tests Added:**
+  - `src/test/video-background.test.ts` (7 tests passing)
+  - `src/test/card-layout-containment.test.ts` (6 tests passing)
+- **Status:** **`VERIFIED FIXED`**
+
+### P1.22 — Accessibility (WCAG 2.2 AA Focus Trapping, Accessible Names, Touch Targets, Live Status Announcements)
+- **Severity:** P1 (Accessibility & Compliance Standard)
+- **Original Evidence:**
+  1. Modal dialogs lacked focus trapping: pressing Tab leaked focus outside dialogs to background controls. Focus was not restored to the triggering button upon modal dismissal.
+  2. Modal close buttons in `OutletDetailModal` and `AdminAuditModal` lacked accessible labels (`aria-label="Close dialog"`) and measured below 44x44px touch targets.
+  3. `aria-labelledby` IDs in `OutletDetailModal` (`outlet-detail-title`) and `AdminAuditModal` (`admin-audit-title`) did not match existing heading IDs.
+  4. Status toasts and global error notices lacked ARIA live region attributes.
+- **Reproduction:** Automated WCAG 2.2 AA accessibility audit in browser using Puppeteer.
+- **Files Changed:** `frontend/src/hooks/useFocusTrap.ts`, `frontend/src/components/ReportModal.tsx`, `frontend/src/components/OutletDetailModal.tsx`, `frontend/src/components/AdminAuditModal.tsx`, `frontend/src/components/Navbar.tsx`, `frontend/src/components/OutletCard.tsx`, `frontend/src/components/FilterBar.tsx`, `frontend/src/components/RecommendationBanner.tsx`, `frontend/src/App.tsx`, `frontend/src/test/a11y-and-resilience.test.ts`.
+- **Implemented Remediation:**
+  1. Engineered reusable `useFocusTrap` hook: auto-focuses first interactive element on mount, traps `Tab` and `Shift+Tab` within dialog focusable elements, handles `Escape` dismissal, and restores focus to `previousActiveElement` on unmount.
+  2. Matched all `aria-labelledby` targets to concrete heading IDs (`report-dialog-title`, `outlet-detail-title`, `admin-audit-title`).
+  3. Configured `min-h-[44px] min-w-[44px]` touch targets across all buttons, inputs, selects, and close icons, satisfying WCAG 2.5.8 Level AA.
+  4. Added `role="status"` and `aria-live="polite"` to toast announcements; added `role="alert"` and `aria-live="assertive"` to global error banner.
+- **Exact Tests Added:**
+  - `src/test/a11y-and-resilience.test.ts` (10 tests passing)
+- **Status:** **`VERIFIED FIXED`**
+
+### P1.23 — Performance, Concurrency & Storage Resilience (Bounded Polling, In-Flight Deduplication, SecurityError Storage Fallback)
+- **Severity:** P1 (Runtime Stability, Security & Failure Resilience)
+- **Original Evidence:**
+  1. Polling interval fired unconditionally every 30s even when browser tab was hidden or backgrounded, wasting client and backend network resources.
+  2. Overlapping in-flight network requests could cause race conditions.
+  3. If browser storage threw a `SecurityError` (e.g. private browsing with blocked third-party storage), accessing `localStorage` directly could throw uncaught exceptions.
+- **Reproduction:** Simulated network races, tab backgrounding (`document.hidden`), and storage SecurityError in automated Vitest tests.
+- **Files Changed:** `frontend/src/App.tsx`, `frontend/src/services/deviceId.ts`, `frontend/src/services/api.ts`, `frontend/src/test/a11y-and-resilience.test.ts`, `frontend/src/test/data-isolation.test.ts`.
+- **Implemented Remediation:**
+  1. Intelligent Polling: Tab backgrounding (`document.hidden`) pauses polling; `visibilitychange` listener immediately triggers refresh upon returning to tab if stale (> 30s).
+  2. Request Deduplication: In-flight execution guard (`isFetchingRef`) strictly prevents concurrent duplicate API calls.
+  3. Storage Resilience: Wrapped all `localStorage` access in `deviceId.ts`, `api.ts`, and `AdminAuditModal.tsx` in defensive try-catch handlers. If `localStorage` throws a `SecurityError`, `deviceId.ts` falls back to an in-memory CSPRNG UUID, ensuring zero application crashes.
+  4. Production Fail-Closed Integrity: Preserved strict fail-closed contract in `api.ts`, refusing to inject mock fixtures in production mode when API is unreachable.
+- **Exact Tests Added:**
+  - `src/test/a11y-and-resilience.test.ts` (Storage Resilience suite)
+  - `src/test/data-isolation.test.ts` (18 fail-closed tests passing)
 - **Status:** **`VERIFIED FIXED`**
 
 ---

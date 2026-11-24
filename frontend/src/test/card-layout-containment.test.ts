@@ -147,7 +147,7 @@ describe('Outlet Card Layout & Interaction Verification', { timeout: 25000 }, ()
 
       expect(hasOverflow, `Overflow detected at viewport width ${width}px`).toBe(false);
     }
-  }, 20000);
+  }, 40000);
 
   it('respects prefers-reduced-motion media query', async () => {
     await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);

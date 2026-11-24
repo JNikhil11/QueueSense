@@ -3,6 +3,7 @@ import { CampusLocation, QueueEstimate, QueueReport, HistoricalData } from '../t
 import { api } from '../services/api';
 import { CongestionBadge, FreshnessBadge, ConfidenceMeter } from './StatusBadge';
 import { X, Clock, Users, Plus, AlertCircle, History, RefreshCw, MapPin, CheckCircle2, TrendingUp } from 'lucide-react';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 
 interface OutletDetailModalProps {
   locationId: string | null;
@@ -23,6 +24,13 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
   const [reports, setReports] = useState<QueueReport[]>([]);
   const [historical, setHistorical] = useState<HistoricalData | null>(null);
   const [isLive, setIsLive] = useState<boolean>(false);
+
+  // WCAG 2.2 AA Focus Trapping & Restoration
+  const containerRef = useFocusTrap<HTMLDivElement>({
+    isOpen: Boolean(locationId),
+    onClose,
+    autoFocusSelector: 'button[aria-label="Close dialog"]',
+  });
 
   const fetchData = async () => {
     if (!locationId) return;
@@ -53,18 +61,6 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
     fetchData();
   }, [locationId, refreshTrigger]);
 
-  // Keyboard navigation & accessibility: Close modal on Escape
-  useEffect(() => {
-    if (!locationId) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [locationId, onClose]);
-
   if (!locationId) return null;
 
   const latestReport = reports.length > 0 ? reports[0] : null;
@@ -89,6 +85,7 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
 
   return (
     <div
+      ref={containerRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="outlet-detail-title"
@@ -120,7 +117,7 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
               {estimate && <FreshnessBadge state={estimate.freshness} />}
               {estimate && <CongestionBadge level={estimate.congestion} />}
             </div>
-            <h2 className="font-display text-2xl font-extrabold text-white tracking-tight">
+            <h2 id="outlet-detail-title" className="font-display text-2xl font-extrabold text-white tracking-tight">
               {location?.name || 'Loading outlet...'}
             </h2>
             {location?.landmarkLocation && (
@@ -135,7 +132,8 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-[#8E9E93] hover:text-white hover:bg-white/[0.06] transition-colors"
+            className="p-2.5 rounded-xl text-[#8E9E93] hover:text-white hover:bg-white/[0.06] transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+            aria-label="Close dialog"
           >
             <X className="w-5 h-5" />
           </button>
@@ -421,7 +419,7 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
         <div className="p-4 border-t border-white/[0.08] bg-[#070A08]/90 flex items-center justify-between">
           <button
             onClick={fetchData}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono text-[#8E9E93] hover:text-white hover:bg-white/[0.04] transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-mono text-[#8E9E93] hover:text-white hover:bg-white/[0.04] transition-colors min-h-[44px]"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Refresh</span>
@@ -432,7 +430,7 @@ export const OutletDetailModal: React.FC<OutletDetailModalProps> = ({
               onClose();
               onOpenReportModal(locationId);
             }}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-mono text-xs uppercase tracking-wider font-bold bg-[#39FF14] text-black shadow-[0_0_20px_rgba(57,255,20,0.4)] hover:bg-[#32e012] transition-colors"
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-mono text-xs uppercase tracking-wider font-bold bg-[#39FF14] text-black shadow-[0_0_20px_rgba(57,255,20,0.4)] hover:bg-[#32e012] transition-colors min-h-[44px]"
           >
             <Plus className="w-4 h-4" />
             <span>Submit Observation</span>

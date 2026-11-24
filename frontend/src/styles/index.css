@@ -235,11 +235,11 @@
 @media (hover: hover) and (pointer: fine) {
   /* Outlets Grid: Dim non-hovered cards when any card is hovered (pure opacity, zero filter saturation overhead) */
   .cards-grid:has(.outlet-card:hover) .outlet-card:not(:hover) {
-    opacity: 0.52;
+    opacity: 0.45;
     transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  /* Outlet Card Elevation & Subtle Depth (NO extra brightness/neon bloom, NO layout-triggering scale) */
+  /* Outlet Card Elevation & Subtle Depth with Scale 1.02 and Enhanced Glow */
   .outlet-card {
     contain: layout style;
     transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
@@ -250,10 +250,21 @@
   }
 
   .outlet-card:hover {
-    transform: translateY(-4px);
+    transform: translateY(-4px) scale(1.02);
     z-index: 10;
-    /* Soft electric blue depth shadow, thin green boundary preserved */
-    box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.75), 0 0 28px -4px rgba(0, 150, 255, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
+    /* Soft electric blue depth shadow, enhanced glow */
+    box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.75), 0 0 32px -2px rgba(0, 150, 255, 0.35), 0 0 16px -2px rgba(57, 255, 20, 0.2), inset 0 1px 0 0 rgba(255, 255, 255, 0.2);
+  }
+
+  /* Suspend dimming and scaling when any modal is open */
+  body:has([role="dialog"]) .cards-grid:has(.outlet-card:hover) .outlet-card:not(:hover),
+  .has-active-modal .cards-grid:has(.outlet-card:hover) .outlet-card:not(:hover) {
+    opacity: 1 !important;
+  }
+  body:has([role="dialog"]) .outlet-card:hover,
+  .has-active-modal .outlet-card:hover {
+    transform: none !important;
+    box-shadow: none !important;
   }
 
   /* Stats Grid: Dim non-hovered stat cards */

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CampusLocation, SmartRecommendation, ReportSubmissionPayload } from './types';
 import { api } from './services/api';
 import { Navbar } from './components/Navbar';
@@ -36,8 +36,12 @@ export const App: React.FC = () => {
   // Toast notification
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
+  // Performance & Concurrency Guards
+  const isFetchingRef = useRef<boolean>(false);
+  const lastFetchTimeRef = useRef<number>(Date.now());
+
   // Dedicated ref for subtle pointer ambient lighting (zero layout thrashing, zero React re-renders)
-  const ambientRef = React.useRef<HTMLDivElement>(null);
+  const ambientRef = useRef<HTMLDivElement>(null);
 
   // High-performance cursor ambient light tracking (only for fine pointer desktop, zero layout reflows)
   useEffect(() => {
@@ -94,7 +98,9 @@ export const App: React.FC = () => {
   };
 
   const loadData = async (isManualRefresh = false) => {
+    if (isFetchingRef.current) return;
     try {
+      isFetchingRef.current = true;
       if (isManualRefresh) setIsRefreshing(true);
       else setLoading(true);
 
@@ -115,18 +121,36 @@ export const App: React.FC = () => {
       console.error('Error fetching data:', err);
       setErrorMsg('Failed to sync queue data with server.');
     } finally {
+      isFetchingRef.current = false;
+      lastFetchTimeRef.current = Date.now();
       setLoading(false);
       setIsRefreshing(false);
     }
   };
 
-  // Initial fetch and automatic refresh interval (every 30s)
+  // Initial fetch and intelligent polling: paused when tab is backgrounded
   useEffect(() => {
     loadData();
+
+    // 30s bounded polling interval
     const interval = setInterval(() => {
+      if (document.hidden) return; // Pause polling when tab is hidden
       loadData(true);
     }, 30000);
-    return () => clearInterval(interval);
+
+    // Refresh immediately when returning to tab if stale (> 30s)
+    const handleVisibilityChange = () => {
+      if (!document.hidden && Date.now() - lastFetchTimeRef.current > 30000) {
+        loadData(true);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   // Filtered & Sorted Outlets
@@ -192,7 +216,9 @@ export const App: React.FC = () => {
 
   return (
     <div
-      className="min-h-screen flex flex-col bg-[#070A08] text-[#F4F7F5] relative selection:bg-[#39FF14] selection:text-[#070A08] overflow-x-hidden"
+      className={`min-h-screen flex flex-col bg-[#070A08] text-[#F4F7F5] relative selection:bg-[#39FF14] selection:text-[#070A08] overflow-x-hidden ${
+        isOverlayActive ? 'has-active-modal' : ''
+      }`}
     >
       {/* Persistent Global Cinematic Video Background Engine */}
       <CinematicVideoBackground isOverlayActive={isOverlayActive} />
@@ -210,9 +236,13 @@ export const App: React.FC = () => {
       <div className="fixed top-0 left-1/4 w-[600px] h-[300px] bg-[#39FF14]/[0.06] rounded-full blur-[140px] pointer-events-none z-[1]" />
       <div className="fixed top-1/3 right-10 w-[500px] h-[350px] bg-[#7DF9FF]/[0.04] rounded-full blur-[160px] pointer-events-none z-[1]" />
 
-      {/* Toast Notification */}
+      {/* Toast Notification with WCAG live announcement */}
       {toastMsg && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl glass-panel-elevated border-[#39FF14]/40 shadow-[0_10px_35px_-5px_rgba(0,0,0,0.8),0_0_25px_rgba(57,255,20,0.3)] text-xs font-mono font-medium text-white animate-bounce-subtle">
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl glass-panel-elevated border-[#39FF14]/40 shadow-[0_10px_35px_-5px_rgba(0,0,0,0.8),0_0_25px_rgba(57,255,20,0.3)] text-xs font-mono font-medium text-white animate-bounce-subtle"
+        >
           <CheckCircle2 className="w-4 h-4 text-[#39FF14]" />
           <span>{toastMsg}</span>
         </div>
@@ -250,9 +280,13 @@ export const App: React.FC = () => {
         {/* Hero Section */}
         <Hero locations={locations} />
 
-        {/* Global Error Notice if any */}
+        {/* Global Error Notice with WCAG alert role */}
         {errorMsg && (
-          <div className="my-6 p-6 rounded-3xl bg-[#CC162D]/15 border border-[#CC162D]/40 text-[#FF4A60] flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div
+            role="alert"
+            aria-live="assertive"
+            className="my-6 p-6 rounded-3xl bg-[#CC162D]/15 border border-[#CC162D]/40 text-[#FF4A60] flex flex-col sm:flex-row items-center justify-between gap-4"
+          >
             <div className="flex items-start gap-3">
               <AlertCircle className="w-6 h-6 shrink-0 text-[#FF4A60] mt-0.5" />
               <div>
@@ -266,7 +300,7 @@ export const App: React.FC = () => {
             </div>
             <button
               onClick={() => loadData(true)}
-              className="shrink-0 px-4 py-2 rounded-xl bg-[#CC162D]/30 border border-[#CC162D]/60 text-white font-mono text-xs hover:bg-[#CC162D]/50 transition-colors"
+              className="shrink-0 px-4 py-2.5 rounded-xl bg-[#CC162D]/30 border border-[#CC162D]/60 text-white font-mono text-xs hover:bg-[#CC162D]/50 transition-colors min-h-[44px]"
             >
               Retry Sync
             </button>

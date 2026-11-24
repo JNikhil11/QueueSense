@@ -38,7 +38,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={onRefresh}
             disabled={isRefreshing}
             title="Refresh queue estimates"
-            className="p-2.5 rounded-xl btn-glass flex items-center justify-center disabled:opacity-50 transition-transform active:scale-95 min-h-[40px] min-w-[40px]"
+            className="p-2.5 rounded-xl btn-glass flex items-center justify-center disabled:opacity-50 transition-transform active:scale-95 min-h-[44px] min-w-[44px]"
             aria-label="Refresh data"
           >
             <RefreshCw
@@ -49,8 +49,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Audit Feed Modal Trigger */}
           <button
             onClick={onOpenAdminModal}
-            className="hidden sm:flex items-center gap-2 px-3.5 py-2 text-xs font-mono uppercase tracking-wider rounded-xl btn-glass hover:border-[#7DF9FF]/40 transition-colors min-h-[40px]"
+            className="hidden sm:flex items-center gap-2 px-3.5 py-2 text-xs font-mono uppercase tracking-wider rounded-xl btn-glass hover:border-[#7DF9FF]/40 transition-colors min-h-[44px]"
             title="View live campus observation stream"
+            aria-label="View live campus observation audit stream"
           >
             <ShieldCheck className="w-3.5 h-3.5 text-[#7DF9FF]" />
             <span className="text-[#F4F7F5]">Audit Stream</span>
@@ -59,7 +60,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Primary Report CTA */}
           <button
             onClick={onOpenReportModal}
-            className="flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm btn-electric min-h-[40px]"
+            className="flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 text-xs sm:text-sm btn-electric min-h-[44px]"
+            aria-label="Report current queue"
           >
             <Plus className="w-4 h-4 stroke-[2.5]" />
             <span className="font-semibold tracking-tight">

@@ -179,11 +179,11 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
           )}
         </div>
 
-        {/* Right Action Buttons: Predictable dimensions, strictly contained inside card */}
+        {/* Right Action Buttons: Predictable dimensions (min 44x44px touch targets), strictly contained */}
         <div className="flex items-center gap-2 shrink-0 ml-auto">
           <button
             onClick={() => onReport(location.id)}
-            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl btn-glass hover:border-[#39FF14]/50 hover:text-white text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#39FF14] transition-all"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl btn-glass hover:border-[#39FF14]/50 hover:text-white text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#39FF14] transition-all min-h-[44px]"
             title="Submit a queue observation"
             aria-label={`Submit observation for ${location.name}`}
           >
@@ -193,7 +193,7 @@ export const OutletCard: React.FC<OutletCardProps> = ({ location, onSelect, onRe
 
           <button
             onClick={() => onSelect(location.id)}
-            className="inline-flex items-center justify-center w-8 h-8 rounded-xl btn-glass hover:border-[#7DF9FF]/50 hover:text-[#7DF9FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7DF9FF] transition-all shrink-0"
+            className="inline-flex items-center justify-center w-11 h-11 rounded-xl btn-glass hover:border-[#7DF9FF]/50 hover:text-[#7DF9FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7DF9FF] transition-all shrink-0 min-h-[44px] min-w-[44px]"
             title="View details and history"
             aria-label={`View details and history for ${location.name}`}
           >

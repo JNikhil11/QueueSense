@@ -39,7 +39,8 @@ export const RecommendationBanner: React.FC<RecommendationBannerProps> = ({
 
           <button
             onClick={() => onOpenReportModal()}
-            className="shrink-0 flex items-center gap-2 px-4 py-2 text-xs font-mono uppercase tracking-wider rounded-xl btn-glass hover:border-[#39FF14]/40"
+            className="shrink-0 flex items-center gap-2 px-4 py-2.5 text-xs font-mono uppercase tracking-wider rounded-xl btn-glass hover:border-[#39FF14]/40 min-h-[44px]"
+            aria-label="Be the first to submit a queue observation"
           >
             <span>Be first to submit</span>
             <ArrowRight className="w-3.5 h-3.5 text-[#39FF14]" />
@@ -108,7 +109,8 @@ export const RecommendationBanner: React.FC<RecommendationBannerProps> = ({
 
           <button
             onClick={() => onSelectOutlet(recommendation.recommendedLocationId!)}
-            className="flex items-center gap-2 px-5 py-3 text-xs sm:text-sm font-semibold btn-electric group"
+            className="flex items-center gap-2 px-5 py-3 text-xs sm:text-sm font-semibold btn-electric group min-h-[44px]"
+            aria-label={`View details for recommended outlet ${recommendation.recommendedLocationName}`}
           >
             <span>View Outlet</span>
             <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />

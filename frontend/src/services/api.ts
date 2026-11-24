@@ -1077,10 +1077,16 @@ export function createApiClient(config: ApiClientConfig = {}) {
     async getAdminReports(bearerToken?: string): Promise<{ reports: QueueReport[]; isLive: boolean }> {
       const mode = getDataMode();
       const baseUrl = getBaseUrl();
-      const token =
-        bearerToken ||
-        (typeof localStorage !== 'undefined' ? localStorage.getItem('queuesense_admin_token') : null) ||
-        '';
+      let token = bearerToken || '';
+      if (!token) {
+        try {
+          if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+            token = localStorage.getItem('queuesense_admin_token') || '';
+          }
+        } catch {
+          // Graceful fallback if storage throws SecurityError
+        }
+      }
 
       if (this.isLiveApiConfigured()) {
         if (!token || !token.trim()) {

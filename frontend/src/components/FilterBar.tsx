@@ -29,14 +29,16 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   return (
     <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 py-4">
       {/* Category Glass Capsule Tabs */}
-      <div className="flex items-center gap-1.5 p-1 rounded-2xl glass-panel border-white/10 overflow-x-auto scrollbar-none">
+      <div className="flex items-center gap-1.5 p-1 rounded-2xl glass-panel border-white/10 overflow-x-auto scrollbar-none" role="tablist" aria-label="Outlet category filters">
         {categories.map((c) => {
           const isActive = selectedCategory === c.id;
           return (
             <button
               key={c.id}
+              role="tab"
+              aria-selected={isActive}
               onClick={() => onSelectCategory(c.id)}
-              className={`px-4 py-2 text-xs font-mono font-medium rounded-xl whitespace-nowrap transition-all duration-200 ${
+              className={`px-4 py-2 text-xs font-mono font-medium rounded-xl whitespace-nowrap transition-all duration-200 min-h-[44px] flex items-center justify-center ${
                 isActive
                   ? 'bg-[#39FF14] text-[#070A08] font-bold shadow-[0_0_15px_rgba(57,255,20,0.4)]'
                   : 'text-[#8E9E93] hover:text-[#F4F7F5] hover:bg-white/[0.04]'
@@ -59,20 +61,22 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           <Search className="w-4 h-4 text-[#8E9E93] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
+            aria-label="Search dining halls and cafes"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search dining halls & cafes..."
-            className="w-full pl-10 pr-3.5 py-2.5 text-base sm:text-sm rounded-xl glass-panel text-[#F4F7F5] placeholder-[#5A695F] focus:outline-none focus:border-[#7DF9FF]/60 focus:shadow-[0_0_15px_rgba(125,249,255,0.2)] transition-all min-h-[44px] sm:min-h-0"
+            className="w-full pl-10 pr-3.5 py-2.5 text-base sm:text-sm rounded-xl glass-panel text-[#F4F7F5] placeholder-[#5A695F] focus:outline-none focus:border-[#7DF9FF]/60 focus:shadow-[0_0_15px_rgba(125,249,255,0.2)] transition-all min-h-[44px]"
           />
         </div>
 
         {/* Sort Dropdown */}
-        <div className="relative shrink-0 flex items-center gap-2 rounded-xl glass-panel px-3 py-2 border-white/10 min-h-[44px] sm:min-h-0">
+        <div className="relative shrink-0 flex items-center gap-2 rounded-xl glass-panel px-3 py-2 border-white/10 min-h-[44px]">
           <SlidersHorizontal className="w-3.5 h-3.5 text-[#7DF9FF]" />
           <select
             value={sortBy}
+            aria-label="Sort outlets by"
             onChange={(e) => onSortChange(e.target.value)}
-            className="bg-transparent text-base sm:text-xs font-mono text-[#F4F7F5] focus:outline-none cursor-pointer pr-1"
+            className="bg-transparent text-base sm:text-xs font-mono text-[#F4F7F5] focus:outline-none cursor-pointer pr-1 min-h-[36px]"
           >
             <option value="wait-asc" className="bg-[#0D140F] text-[#F4F7F5]">
               Shortest Wait

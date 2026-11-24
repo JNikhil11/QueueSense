@@ -74,12 +74,14 @@ export function generateRandomDeviceId(): string | null {
  */
 function isLocalStorageAvailable(): boolean {
   try {
-    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    if (typeof window === 'undefined') {
       return false;
     }
+    const storage = window.localStorage;
+    if (!storage) return false;
     const testKey = '__queuesense_storage_test__';
-    localStorage.setItem(testKey, '1');
-    localStorage.removeItem(testKey);
+    storage.setItem(testKey, '1');
+    storage.removeItem(testKey);
     return true;
   } catch {
     return false;

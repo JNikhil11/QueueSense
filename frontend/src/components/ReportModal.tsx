@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CampusLocation, ReportSubmissionPayload } from '../types';
 import { X, Send, AlertTriangle, CheckCircle2, Clock, Users } from 'lucide-react';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 
 interface ReportModalProps {
   isOpen: boolean;
@@ -27,6 +28,13 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // WCAG 2.2 AA Focus Trapping & Restoration
+  const containerRef = useFocusTrap<HTMLDivElement>({
+    isOpen,
+    onClose,
+    autoFocusSelector: 'select, button[aria-label="Close dialog"]',
+  });
+
   useEffect(() => {
     if (initialLocationId) {
       setSelectedLocationId(initialLocationId);
@@ -35,18 +43,6 @@ export const ReportModal: React.FC<ReportModalProps> = ({
     }
   }, [initialLocationId, locations]);
 
-  // Keyboard navigation & accessibility: Close modal on Escape
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
   if (!isOpen) return null;
 
   const quickWaits = [2, 5, 8, 12, 15, 20];
@@ -54,6 +50,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return; // Prevent double submission
     setErrorMsg(null);
     setSuccessMsg(null);
 
@@ -94,6 +91,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
 
   return (
     <div
+      ref={containerRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="report-dialog-title"
@@ -128,14 +126,14 @@ export const ReportModal: React.FC<ReportModalProps> = ({
         {/* Form Body with internal scrolling */}
         <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1">
           {errorMsg && (
-            <div className="p-3.5 rounded-2xl bg-[#CC162D]/15 border border-[#CC162D]/40 text-[#FF4A60] text-xs flex items-center gap-2.5">
+            <div role="alert" className="p-3.5 rounded-2xl bg-[#CC162D]/15 border border-[#CC162D]/40 text-[#FF4A60] text-xs flex items-center gap-2.5">
               <AlertTriangle className="w-4 h-4 shrink-0 text-[#FF4A60]" />
               <span>{errorMsg}</span>
             </div>
           )}
 
           {successMsg && (
-            <div className="p-3.5 rounded-2xl bg-[#39FF14]/15 border border-[#39FF14]/40 text-[#39FF14] text-xs flex items-center gap-2.5 shadow-[0_0_15px_rgba(57,255,20,0.25)]">
+            <div role="status" aria-live="polite" className="p-3.5 rounded-2xl bg-[#39FF14]/15 border border-[#39FF14]/40 text-[#39FF14] text-xs flex items-center gap-2.5 shadow-[0_0_15px_rgba(57,255,20,0.25)]">
               <CheckCircle2 className="w-4 h-4 shrink-0 text-[#39FF14]" />
               <span>{successMsg}</span>
             </div>
@@ -143,10 +141,11 @@ export const ReportModal: React.FC<ReportModalProps> = ({
 
           {/* Location Selector */}
           <div>
-            <label className="block text-xs font-mono font-semibold uppercase tracking-wider text-[#8E9E93] mb-2">
+            <label htmlFor="report-location-select" className="block text-xs font-mono font-semibold uppercase tracking-wider text-[#8E9E93] mb-2">
               Campus Outlet
             </label>
             <select
+              id="report-location-select"
               value={selectedLocationId}
               onChange={(e) => setSelectedLocationId(e.target.value)}
               className="w-full px-4 py-3 rounded-2xl bg-[#090E0B] border border-white/[0.1] text-base sm:text-sm text-white focus:outline-none focus:border-[#39FF14]/60 transition-colors cursor-pointer min-h-[44px]"
@@ -169,7 +168,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
           {/* Observed Wait Time */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-mono font-semibold uppercase tracking-wider text-[#8E9E93] flex items-center gap-1.5">
+              <label htmlFor="wait-time-range" className="text-xs font-mono font-semibold uppercase tracking-wider text-[#8E9E93] flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-[#39FF14]" />
                 <span>Observed Wait Time</span>
               </label>
@@ -179,7 +178,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             </div>
 
             {/* Segmented Quick Presets */}
-            <div className="grid grid-cols-6 gap-1.5 mb-3">
+            <div className="grid grid-cols-6 gap-1.5 mb-3" role="group" aria-label="Quick wait time options">
               {quickWaits.map((val) => {
                 const isSelected = waitMinutes === val;
                 return (
@@ -187,7 +186,9 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                     type="button"
                     key={val}
                     onClick={() => setWaitMinutes(val)}
-                    className={`py-2 text-xs font-mono rounded-xl border transition-all min-h-[40px] flex items-center justify-center ${
+                    aria-pressed={isSelected}
+                    aria-label={`${val} minutes wait`}
+                    className={`py-2 text-xs font-mono rounded-xl border transition-all min-h-[44px] flex items-center justify-center ${
                       isSelected
                         ? 'bg-[#39FF14] text-[#070A08] border-[#39FF14] font-bold shadow-[0_0_15px_rgba(57,255,20,0.4)]'
                         : 'bg-[#090E0B]/80 text-[#8E9E93] border-white/[0.08] hover:border-white/20 hover:text-white'
@@ -200,12 +201,14 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             </div>
 
             <input
+              id="wait-time-range"
               type="range"
               min="0"
               max="45"
               step="1"
               value={waitMinutes}
               onChange={(e) => setWaitMinutes(Number(e.target.value))}
+              aria-label="Observed wait time in minutes"
               className="w-full accent-[#39FF14] cursor-pointer h-2 bg-[#17221A] rounded-lg"
             />
           </div>
@@ -213,7 +216,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
           {/* Queue Length Ahead */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-mono font-semibold uppercase tracking-wider text-[#8E9E93] flex items-center gap-1.5">
+              <label htmlFor="queue-length-range" className="text-xs font-mono font-semibold uppercase tracking-wider text-[#8E9E93] flex items-center gap-1.5">
                 <Users className="w-3.5 h-3.5 text-[#7DF9FF]" />
                 <span>People in Line Ahead</span>
               </label>
@@ -223,7 +226,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             </div>
 
             {/* Segmented Quick Presets */}
-            <div className="grid grid-cols-6 gap-1.5 mb-3">
+            <div className="grid grid-cols-6 gap-1.5 mb-3" role="group" aria-label="Quick queue length options">
               {quickQueues.map((val) => {
                 const isSelected = queueLength === val;
                 return (
@@ -231,7 +234,9 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                     type="button"
                     key={val}
                     onClick={() => setQueueLength(val)}
-                    className={`py-2 text-xs font-mono rounded-xl border transition-all min-h-[40px] flex items-center justify-center ${
+                    aria-pressed={isSelected}
+                    aria-label={`${val} people in line`}
+                    className={`py-2 text-xs font-mono rounded-xl border transition-all min-h-[44px] flex items-center justify-center ${
                       isSelected
                         ? 'bg-[#7DF9FF] text-[#070A08] border-[#7DF9FF] font-bold shadow-[0_0_15px_rgba(125,249,255,0.4)]'
                         : 'bg-[#090E0B]/80 text-[#8E9E93] border-white/[0.08] hover:border-white/20 hover:text-white'
@@ -244,12 +249,14 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             </div>
 
             <input
+              id="queue-length-range"
               type="range"
               min="0"
               max="60"
               step="1"
               value={queueLength}
               onChange={(e) => setQueueLength(Number(e.target.value))}
+              aria-label="Observed queue length in number of people"
               className="w-full accent-[#7DF9FF] cursor-pointer h-2 bg-[#17221A] rounded-lg"
             />
           </div>
@@ -257,7 +264,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
           {/* Optional Short Note */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-mono font-semibold uppercase tracking-wider text-[#8E9E93]">
+              <label htmlFor="report-note-input" className="text-xs font-mono font-semibold uppercase tracking-wider text-[#8E9E93]">
                 Operational Note (Optional)
               </label>
               <span className="text-[10px] font-mono text-[#5A695F]">
@@ -265,6 +272,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
               </span>
             </div>
             <input
+              id="report-note-input"
               type="text"
               maxLength={140}
               value={note}

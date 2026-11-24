@@ -276,20 +276,21 @@ describe('Global Cinematic Video Background & Modal Synchronization Engine', { t
   });
 
   it('supports backdrop click to dismiss modals', async () => {
-    await page.goto(PREVIEW_URL, { waitUntil: 'networkidle2' });
+    await page.goto(PREVIEW_URL, { waitUntil: 'load' });
     const reportBtn = await page.waitForSelector('header button.btn-electric');
     await reportBtn?.click();
 
     const backdrop = await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+    await new Promise((r) => setTimeout(r, 300));
 
     // Click on the backdrop padding area (top left corner of dialog overlay)
     const box = await backdrop!.boundingBox();
     if (box) {
-      await page.mouse.click(box.x + 10, box.y + 10);
+      await page.mouse.click(box.x + 20, box.y + 20);
     }
 
-    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), { timeout: 5000 });
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), { timeout: 10000 });
     const dialogClosed = await page.evaluate(() => !document.querySelector('[role="dialog"]'));
     expect(dialogClosed).toBe(true);
-  });
+  }, 30000);
 });

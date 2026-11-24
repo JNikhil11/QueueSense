@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { QueueReport } from '../types';
 import { api } from '../services/api';
 import { X, ShieldCheck, RefreshCw, Key, AlertCircle, Lock } from 'lucide-react';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 
 interface AdminAuditModalProps {
   isOpen: boolean;
@@ -14,12 +15,23 @@ export const AdminAuditModal: React.FC<AdminAuditModalProps> = ({ isOpen, onClos
   const [isLive, setIsLive] = useState<boolean>(false);
   const [isUnauthorized, setIsUnauthorized] = useState<boolean>(false);
   const [adminToken, setAdminToken] = useState<string>(() => {
-    return (
-      (typeof localStorage !== 'undefined' ? localStorage.getItem('queuesense_admin_token') : '') ||
-      ''
-    );
+    try {
+      if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+        return localStorage.getItem('queuesense_admin_token') || '';
+      }
+    } catch {
+      // Storage access blocked or throws SecurityError
+    }
+    return '';
   });
   const [authError, setAuthError] = useState<string | null>(null);
+
+  // WCAG 2.2 AA Focus Trapping & Restoration
+  const containerRef = useFocusTrap<HTMLDivElement>({
+    isOpen,
+    onClose,
+    autoFocusSelector: 'input[type="password"], button[aria-label="Close dialog"]',
+  });
 
   const fetchReports = async (tokenToUse?: string) => {
     try {
@@ -43,8 +55,12 @@ export const AdminAuditModal: React.FC<AdminAuditModalProps> = ({ isOpen, onClos
   const handleTokenSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!adminToken.trim()) return;
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('queuesense_admin_token', adminToken.trim());
+    try {
+      if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+        localStorage.setItem('queuesense_admin_token', adminToken.trim());
+      }
+    } catch {
+      // Safe fallback if storage throws SecurityError
     }
     fetchReports(adminToken.trim());
   };
@@ -55,22 +71,11 @@ export const AdminAuditModal: React.FC<AdminAuditModalProps> = ({ isOpen, onClos
     }
   }, [isOpen]);
 
-  // Keyboard navigation & accessibility: Close modal on Escape
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
   if (!isOpen) return null;
 
   return (
     <div
+      ref={containerRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="admin-audit-title"
@@ -88,7 +93,7 @@ export const AdminAuditModal: React.FC<AdminAuditModalProps> = ({ isOpen, onClos
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-display text-xl font-extrabold text-white tracking-tight">
+                <h3 id="admin-audit-title" className="font-display text-xl font-extrabold text-white tracking-tight">
                   Campus Queue Audit Stream
                 </h3>
                 <span className="text-[10px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-[#7DF9FF]/15 text-[#7DF9FF] border border-[#7DF9FF]/40">
@@ -102,7 +107,8 @@ export const AdminAuditModal: React.FC<AdminAuditModalProps> = ({ isOpen, onClos
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-[#8E9E93] hover:text-white hover:bg-white/[0.06] transition-colors"
+            className="p-2.5 rounded-xl text-[#8E9E93] hover:text-white hover:bg-white/[0.06] transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+            aria-label="Close dialog"
           >
             <X className="w-5 h-5" />
           </button>
@@ -127,7 +133,7 @@ export const AdminAuditModal: React.FC<AdminAuditModalProps> = ({ isOpen, onClos
           {!isUnauthorized && (
             <button
               onClick={() => fetchReports()}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-xl btn-glass hover:border-[#7DF9FF]/40 text-xs text-[#7DF9FF] transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-xl btn-glass hover:border-[#7DF9FF]/40 text-xs text-[#7DF9FF] transition-colors min-h-[44px]"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               <span>Sync</span>
@@ -153,30 +159,31 @@ export const AdminAuditModal: React.FC<AdminAuditModalProps> = ({ isOpen, onClos
 
               <form onSubmit={handleTokenSubmit} className="w-full space-y-3 pt-2">
                 <div className="relative">
-                  <Key className="w-4 h-4 text-[#8E9E93] absolute left-3 top-3" />
+                  <Key className="w-4 h-4 text-[#8E9E93] absolute left-3 top-3.5" />
                   <input
                     type="password"
+                    aria-label="Cognito Operator Bearer Token"
                     placeholder="Enter Cognito Operator Bearer Token..."
                     value={adminToken}
                     onChange={(e) => setAdminToken(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2.5 bg-black/50 border border-white/15 rounded-xl text-white font-mono text-xs focus:outline-none focus:border-[#7DF9FF]"
+                    className="w-full pl-9 pr-3 py-2.5 bg-black/50 border border-white/15 rounded-xl text-white font-mono text-xs focus:outline-none focus:border-[#7DF9FF] min-h-[44px]"
                   />
                 </div>
                 <button
                   type="submit"
-                  className="w-full py-2.5 px-4 rounded-xl bg-[#7DF9FF] text-black font-mono text-xs font-bold uppercase tracking-wider hover:bg-[#68e0e6] transition-colors shadow-[0_0_15px_rgba(125,249,255,0.3)]"
+                  className="w-full py-2.5 px-4 rounded-xl bg-[#7DF9FF] text-black font-mono text-xs font-bold uppercase tracking-wider hover:bg-[#68e0e6] transition-colors shadow-[0_0_15px_rgba(125,249,255,0.3)] min-h-[44px] flex items-center justify-center"
                 >
                   Verify Cognito Token & Unlock
                 </button>
               </form>
             </div>
           ) : authError ? (
-            <div className="py-12 text-center text-[#FF4A60] text-xs font-mono space-y-2">
+            <div role="alert" className="py-12 text-center text-[#FF4A60] text-xs font-mono space-y-2">
               <AlertCircle className="w-6 h-6 mx-auto text-[#FF4A60]" />
               <div>{authError}</div>
               <button
                 onClick={() => fetchReports()}
-                className="mt-3 px-4 py-1.5 rounded-xl btn-glass text-white text-xs"
+                className="mt-3 px-4 py-2 rounded-xl btn-glass text-white text-xs min-h-[44px]"
               >
                 Retry
               </button>
