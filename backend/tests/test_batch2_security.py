@@ -806,11 +806,21 @@ def test_no_hardcoded_aws_credentials_in_repository():
 
 def test_git_history_contains_zero_credentials_or_private_keys():
     """
-    P1.12: Deep git history audit. Verifies across all commits that zero AWS access keys,
-    secret keys, or RSA private keys were committed to git history.
+    P1.12: Git history credential heuristic audit.
+    
+    Audit Scope & Verification Boundaries:
+    - Scans available local Git commit history (via `git log --all -p`) for common credential patterns.
+    - Important Security Limitation: A heuristic regex scan across available local commits is a
+      defense-in-depth verification; it does NOT mathematically prove that zero secrets were ever
+      committed (e.g. encrypted payloads, encoded binaries, or unreferenced dangling commits).
+      A comprehensive audit requires specialized AST / entropy tooling across remote reflogs.
+    - Test Integrity: Fails honestly if git execution fails (non-zero returncode or timeout),
+      or explicitly skips with a clear reason if the git CLI binary is not installed on system PATH.
+      Never silently passes when the scan cannot execute.
     """
     import subprocess
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
     try:
         proc = subprocess.run(
             ["git", "log", "--all", "-p"],
@@ -818,21 +828,40 @@ def test_git_history_contains_zero_credentials_or_private_keys():
             capture_output=True,
             text=True,
             errors="ignore",
-            timeout=30,
+            timeout=60,
         )
-        assert proc.returncode == 0
-        diff_output = proc.stdout
+    except FileNotFoundError:
+        pytest.skip("Git CLI binary ('git') not found on system PATH; git history audit skipped.")
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(f"git log --all -p timed out after 60 seconds: {exc}")
 
-        # Search for AWS Access Key pattern
-        aws_keys = re.findall(r"(?:AKIA|ASIA)[0-9A-Z]{16}", diff_output)
-        assert len(aws_keys) == 0, f"Found AWS access key pattern in git history: {aws_keys}"
+    # Check process return code and capture stderr
+    assert proc.returncode == 0, (
+        f"git log --all -p failed with return code {proc.returncode}.\n"
+        f"stderr: {proc.stderr}"
+    )
 
-        # Search for private key headers
-        private_keys = re.findall(r"-----BEGIN (?:RSA )?PRIVATE KEY-----", diff_output)
-        assert len(private_keys) == 0, f"Found private key header in git history: {private_keys}"
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        # Fall back gracefully if git CLI is unavailable in restricted test runner
-        pass
+    diff_output = proc.stdout
+    assert len(diff_output) > 0, "git log --all -p produced empty output; commit history could not be read."
+
+    # 1. AWS Access Key IDs (AKIA or ASIA standard prefixes followed by 16 alphanumeric characters)
+    aws_keys = re.findall(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b", diff_output)
+    assert len(aws_keys) == 0, f"Potential AWS access key pattern found in git history: {aws_keys}"
+
+    # 2. AWS Secret Access Key assignments (e.g. aws_secret_access_key = '...', secret_key = '...')
+    aws_secrets = re.findall(
+        r"(?i)(?:aws_secret_access_key|aws_session_token)\s*[:=]\s*['\"][A-Za-z0-9/+=]{30,}['\"]",
+        diff_output,
+    )
+    assert len(aws_secrets) == 0, f"Potential AWS secret access key assignment found in git history: {aws_secrets}"
+
+    # 3. Private Key Headers (RSA, EC, DSA, OPENSSH, PGP, ENCRYPTED)
+    private_keys = re.findall(
+        r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----",
+        diff_output,
+    )
+    assert len(private_keys) == 0, f"Potential private key header found in git history: {private_keys}"
+
 
 
 def test_admin_handler_direct_invocation_defense_fails_closed(monkeypatch):

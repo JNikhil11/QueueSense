@@ -598,13 +598,15 @@ Status Definitions:
 - **Files Changed:** `frontend/src/services/deviceId.ts`, `frontend/src/services/api.ts`, `infrastructure/template.yaml`, `backend/shared/security.py`, `backend/functions/submit_report/app.py`, `frontend/src/test/device-identity.test.ts`, `backend/tests/test_batch2_security.py`
 - **Implemented Remediation:**
   1. **Frontend Device Identifier (`frontend/src/services/deviceId.ts`):**
-     - Generates a cryptographically strong UUIDv4 using `crypto.randomUUID()` (or CSPRNG fallback `crypto.getRandomValues`) matching regex `^[a-zA-Z0-9_-]{16,64}$`.
+     - Generates a cryptographically strong UUIDv4 using `crypto.randomUUID()` or `crypto.getRandomValues()` matching regex `^[a-zA-Z0-9_-]{16,64}$`.
+     - **Strictly No Insecure Fallback:** Removed any `Math.random()` fallback. If secure randomness (CSPRNG) is unavailable in the environment and no valid stored identifier exists, returns `null` rather than generating a predictable identifier.
      - Zero personal information: contains no names, emails, roll numbers, student IDs, or IP addresses.
      - Persists in `localStorage` under `queuesense_client_device_id_v1` across normal browser sessions.
-     - Safe fallback: If `localStorage` is disabled or throws (e.g. private browsing, Safari ITP, storage quota), gracefully falls back to an in-memory session variable. Submissions never fail due to storage unavailability.
+     - Safe fallback: If `localStorage` is disabled or throws (e.g. private browsing, Safari ITP, storage quota), gracefully falls back to an in-memory session variable when CSPRNG is available. Existing valid stored IDs remain usable even if crypto APIs are unavailable.
+     - Submissions never fail due to storage or crypto unavailability: when `deviceId` is null, `X-Device-ID` is omitted and the backend's trusted IP-based rate limiter applies.
      - Provides `rotateDeviceId()` and `resetDeviceId()` allowing users to unlink future activity from past rate-limiting history at will.
   2. **Frontend-to-Backend Integration (`frontend/src/services/api.ts`):**
-     - `submitReport` automatically includes `X-Device-ID` header in live API submissions.
+     - `submitReport` automatically includes `X-Device-ID` header when a valid CSPRNG device ID is available, and omits it gracefully when absent without throwing.
   3. **API Gateway CORS AllowHeaders (`infrastructure/template.yaml`):**
      - Added `X-Device-ID` and `X-Client-Instance-ID` to `QueueSenseHttpApi.CorsConfiguration.AllowHeaders`.
   4. **Dual-Budget Backend Architecture (`backend/functions/submit_report/app.py`):**
@@ -614,12 +616,16 @@ Status Definitions:
   6. **Architectural Disclosure:** Documented that without authenticated student login (SSO), an adversary distributing requests across residential proxy pools cannot be mathematically distinguished from campus users.
 - **Exact Tests Added:**
   - `frontend/src/test/device-identity.test.ts`:
-    - Stable pseudonymous generation matching `^[a-zA-Z0-9_-]{16,64}$`.
+    - `crypto.randomUUID()` generates a valid ID matching `^[a-zA-Z0-9_-]{16,64}$`.
+    - `crypto.getRandomValues()` generates a valid ID when `randomUUID` is unavailable.
+    - Both crypto APIs unavailable: returns `null` without generating insecure IDs.
+    - Existing valid stored ID remains usable when crypto APIs are unavailable.
+    - Report submission succeeds without `X-Device-ID` when secure randomness is unavailable.
+    - Zero code paths use `Math.random()` for security-sensitive identity generation.
     - Zero personal information embedded.
     - Stability across normal browser sessions.
     - `rotateDeviceId` and `resetDeviceId` functionality.
     - Safe in-memory fallback when `localStorage` throws.
-    - Report submission includes `X-Device-ID` header.
   - `backend/tests/test_batch2_security.py`:
     - `test_frontend_request_headers_and_dual_budget_integration`: Simulates full frontend request contract, verifies independent 5-req budgets for students on same NAT IP, and Tier-1 429 rate limit.
     - `test_shared_nat_multi_client_fairness`: Two students on same IP with different device IDs have independent rate-limit budgets.
@@ -675,16 +681,17 @@ Status Definitions:
      - Documented secret rotation procedure: generating 256-bit hex secret via `openssl rand -hex 32` and updating SSM SecureString with rolling 10-minute transition.
   3. **Exhaustive Git History Secret Audit:**
      - Executed comprehensive regex and entropy scans across the entire git commit history (`git log --all -p`):
-       - AWS Access Key Pattern (`AKIA[0-9A-Z]{16}` / `ASIA[0-9A-Z]{16}`): **0 matches** across all commits and branches.
-       - Secret Access Keys & RSA Private Keys (`BEGIN RSA PRIVATE KEY`, `BEGIN PRIVATE KEY`, `aws_secret_access_key`): **0 matches**.
+       - AWS Access Key Pattern (`\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`): **0 matches** across all commits and branches.
+       - Secret Access Keys & RSA Private Keys (`(?i)aws_secret_access_key\s*[:=]`, `-----BEGIN (RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----`): **0 matches**.
        - Production Salt Commit Audit (`git log --all -S "RATE_LIMIT_SALT" -p`): Verified that no live production secrets were ever committed to version control.
      - Added automated regression tests `test_no_hardcoded_aws_credentials_in_repository` and `test_git_history_contains_zero_credentials_or_private_keys` in `test_batch2_security.py`.
+     - **Test Integrity & Verification Boundaries:** `test_git_history_contains_zero_credentials_or_private_keys` explicitly enforces honest failure semantics: if git execution fails or times out, the test fails; if the git CLI binary is missing from PATH, it is explicitly marked skipped (never passed). Furthermore, the documentation notes that a regex scan over local commits is a heuristic defense-in-depth verification and does not mathematically prove no encrypted or unreferenced secrets exist.
 - **Exact Tests Added:**
   - `test_template_submit_report_has_kms_decrypt_policy`: Verifies template grants `kms:Decrypt` with `kms:ViaService: ssm.<region>.amazonaws.com`.
   - `test_template_admin_reports_has_gsi1_and_userpool_wiring`: Verifies template wires `USER_POOL_ID`, `USER_POOL_CLIENT_ID`, and read access on `MainTable` and `MainTable/index/GSI1`.
   - `test_secret_retrieval_failure_does_not_leak_secrets_in_errors_or_logs`: Asserts error messages never leak secrets.
   - `test_no_hardcoded_aws_credentials_in_repository`: Scans all tracked repo files to assert no `AKIA` or `ASIA` keys are committed.
-  - `test_git_history_contains_zero_credentials_or_private_keys`: Scans all historical commits via git log to guarantee zero historical credential leaks.
+  - `test_git_history_contains_zero_credentials_or_private_keys`: Fails honestly if git fails/times out, skips with visible reason if git missing, captures stderr, and scans local history for access keys, secret keys, and private key headers.
 - **Residual Risks:** Production deployments must ensure the SSM SecureString parameter `/queuesense/prod/rate_limit_salt` is provisioned prior to stack deployment.
 - **Status:** **`VERIFIED FIXED`**
 

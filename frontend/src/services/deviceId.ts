@@ -6,15 +6,19 @@
  * - Purpose: Provides individual rate-limiting fairness on shared NAT gateways (e.g. campus Wi-Fi
  *   at IIT Bombay), ensuring one active student does not exhaust the rate limit for an entire wing.
  *
- * Privacy Guarantees:
- * 1. Zero Personal Data: The identifier is generated purely from cryptographically secure random
- *    values (UUIDv4). It contains NO names, emails, roll numbers, student IDs, IP addresses,
- *    or hardware/fingerprinting attributes.
- * 2. Unlinkability & Rotation: Users can rotate or reset their device identifier at any time using
+ * Cryptographic & Privacy Guarantees:
+ * 1. Cryptographically Secure Randomness Only: The identifier is generated strictly using CSPRNG
+ *    (crypto.randomUUID() or crypto.getRandomValues()). NO Math.random() or predictable fallbacks
+ *    are ever used. If secure randomness is unavailable in the execution environment and no valid
+ *    persisted identifier exists, no device ID is generated (returns null).
+ * 2. Zero Personal Data: The identifier contains NO names, emails, roll numbers, student IDs,
+ *    IP addresses, or hardware/fingerprinting attributes.
+ * 3. Graceful Backend Fallback: If no device ID is sent, the backend safely falls back to its
+ *    trusted IP rate-limiting budget. Report submissions never fail when secure randomness is absent.
+ * 4. Unlinkability & Rotation: Users can rotate or reset their device identifier at any time using
  *    `rotateDeviceId()` or `resetDeviceId()`, unlinking future observations from previous rate-limit budgets.
- * 3. Graceful Storage Fallback: If browser storage (localStorage) is disabled, restricted (e.g. private
- *    browsing, Safari ITP), or throws a SecurityError, an in-memory session identifier is used. Report
- *    submissions NEVER fail due to storage unavailability.
+ * 5. Safe Storage Fallback: If browser storage (localStorage) is disabled or throws a SecurityError,
+ *    an in-memory session identifier is used if CSPRNG is available.
  */
 
 export const DEVICE_ID_STORAGE_KEY = 'queuesense_client_device_id_v1';
@@ -26,28 +30,43 @@ const DEVICE_ID_REGEX = /^[a-zA-Z0-9_-]{16,64}$/;
 let inMemoryDeviceId: string | null = null;
 
 /**
- * Generates a cryptographically strong UUIDv4 or random string matching ^[a-zA-Z0-9_-]{16,64}$.
- * Does NOT incorporate any user or device fingerprinting data.
+ * Generates a cryptographically strong UUIDv4 using available CSPRNG APIs.
+ * Returns null if neither crypto.randomUUID nor crypto.getRandomValues is available.
+ * Never falls back to Math.random() or insecure pseudo-random generators.
  */
-export function generateRandomDeviceId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
+export function generateRandomDeviceId(): string | null {
+  if (typeof crypto !== 'undefined') {
+    if (typeof crypto.randomUUID === 'function') {
+      try {
+        const id = crypto.randomUUID();
+        if (DEVICE_ID_REGEX.test(id)) {
+          return id;
+        }
+      } catch {
+        // Fall through to getRandomValues
+      }
+    }
+
+    if (typeof crypto.getRandomValues === 'function') {
+      try {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        // Set UUIDv4 version (4) and variant (10xx)
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+        const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+        if (DEVICE_ID_REGEX.test(id)) {
+          return id;
+        }
+      } catch {
+        // CSPRNG failure
+      }
+    }
   }
 
-  // Fallback using crypto.getRandomValues if randomUUID is unavailable
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
-    // Set UUIDv4 version (4) and variant (10xx)
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-  }
-
-  // Pure Math.random fallback (e.g. ancient headless environments)
-  const s4 = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
-  return `${s4()}${s4()}-${s4()}-4${s4().substring(1)}-a${s4().substring(1)}-${s4()}${s4()}${s4()}`;
+  // Strictly no insecure fallback: return null when CSPRNG is unavailable
+  return null;
 }
 
 /**
@@ -68,11 +87,13 @@ function isLocalStorageAvailable(): boolean {
 }
 
 /**
- * Retrieves the current stable device identifier, generating and persisting a new one if absent.
- * Falls back to in-memory storage safely if localStorage is inaccessible.
+ * Retrieves the current stable device identifier.
+ * If a valid identifier exists in localStorage or in-memory, returns it.
+ * If none exists, generates a new CSPRNG identifier.
+ * If secure randomness is unavailable, returns null rather than generating an insecure identifier.
  */
-export function getOrGenerateDeviceId(): string {
-  // 1. Try reading from localStorage
+export function getOrGenerateDeviceId(): string | null {
+  // 1. Try reading from localStorage (existing valid stored ID remains usable even if crypto is disabled)
   if (isLocalStorageAvailable()) {
     try {
       const stored = localStorage.getItem(DEVICE_ID_STORAGE_KEY);
@@ -80,7 +101,7 @@ export function getOrGenerateDeviceId(): string {
         return stored.trim();
       }
     } catch {
-      // Continue to in-memory fallback
+      // Continue to in-memory check
     }
   }
 
@@ -89,8 +110,12 @@ export function getOrGenerateDeviceId(): string {
     return inMemoryDeviceId;
   }
 
-  // 3. Generate a fresh pseudonymous ID
+  // 3. Generate a fresh pseudonymous ID using CSPRNG
   const freshId = generateRandomDeviceId();
+  if (!freshId) {
+    // Secure randomness unavailable; fail closed to null (do not invent insecure ID)
+    return null;
+  }
 
   // 4. Try saving to localStorage
   if (isLocalStorageAvailable()) {
@@ -109,17 +134,22 @@ export function getOrGenerateDeviceId(): string {
 
 /**
  * Rotates the device identifier to unlink future activity from past rate-limiting history.
- * Generates a fresh random identifier and updates persistence.
+ * If secure randomness is available, generates and stores a new identifier.
+ * If secure randomness is unavailable, clears stored state and returns null.
  */
-export function rotateDeviceId(): string {
+export function rotateDeviceId(): string | null {
   const newId = generateRandomDeviceId();
   inMemoryDeviceId = newId;
 
   if (isLocalStorageAvailable()) {
     try {
-      localStorage.setItem(DEVICE_ID_STORAGE_KEY, newId);
+      if (newId) {
+        localStorage.setItem(DEVICE_ID_STORAGE_KEY, newId);
+      } else {
+        localStorage.removeItem(DEVICE_ID_STORAGE_KEY);
+      }
     } catch {
-      // Ignore write failure
+      // Ignore storage write failure
     }
   }
 
