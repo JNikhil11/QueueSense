@@ -227,6 +227,8 @@ Resources:
           - Content-Type
           - Authorization
           - X-Idempotency-Key
+          - X-Device-ID
+          - X-Client-Instance-ID
         MaxAge: 600
       DefaultRouteSettings:
         ThrottlingBurstLimit: 100

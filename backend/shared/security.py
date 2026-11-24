@@ -59,24 +59,42 @@ def clear_salt_cache() -> None:
 
 
 def _validate_salt_strength(clean_salt: str, is_production: bool) -> None:
-    """Validates that the provided salt meets strict production entropy requirements."""
+    """
+    Validates that the provided salt meets strict production entropy requirements.
+    
+    Cryptographic Note:
+    - String length alone does NOT equal entropy. A 32-character string of low-variety
+      or predictable characters (e.g. repeated characters) provides virtually zero entropy.
+    - In production, salts MUST be generated using a cryptographically secure pseudo-random
+      number generator (CSPRNG), such as `secrets.token_hex(32)` (which generates 64 hex
+      characters containing 256 bits of true entropy) or `openssl rand -hex 32`.
+    - This validator enforces a strict minimum length of 32 characters and actively checks
+      for and rejects repetitive, sequential, and predictable patterns.
+    """
     if is_production:
         if len(clean_salt) < 32:
             raise SecurityConfigurationError(
-                "RATE_LIMIT_SALT has insufficient entropy. Minimum 32 characters required in production (e.g. 256-bit hex)."
+                "RATE_LIMIT_SALT has insufficient length and insufficient entropy. Minimum 32 characters required in production. "
+                "Must be generated using a cryptographically secure random generator (e.g. secrets.token_hex(32) for 256 bits of entropy)."
             )
         clean_lower = clean_salt.lower()
         if any(p in clean_lower for p in WEAK_SALT_PATTERNS):
             raise SecurityConfigurationError(
-                "RATE_LIMIT_SALT matches a predictable or weak pattern. Provide a cryptographically random secret."
+                "RATE_LIMIT_SALT matches a predictable or weak pattern. Provide a cryptographically secure random secret (e.g. secrets.token_hex(32))."
+            )
+        # Check for repetitive single characters or low unique-character diversity
+        if len(set(clean_salt)) < 8:
+            raise SecurityConfigurationError(
+                "RATE_LIMIT_SALT lacks character diversity. Provide a high-entropy secret generated via CSPRNG."
             )
 
 
 def get_rate_limit_salt() -> str:
     """
-    Retrieves the required HMAC salt for anonymous client hashing.
+    Retrieves the required HMAC salt for pseudonymous client hashing.
     Fails closed if the secret is missing or insecure in production.
-    Strictly requires a cryptographically strong secret (>= 32 characters, e.g. 256-bit hex).
+    Strictly requires a cryptographically strong secret (>= 32 characters, preferably
+    a 64-character hex string generated via CSPRNG representing 256 bits of entropy).
 
     Delivery Strategy:
     1. Returns in-memory cached salt if previously retrieved in this Lambda container.
@@ -179,7 +197,9 @@ def compute_pseudonymous_client_hash(
     include_device_id: bool = True,
 ) -> str:
     """
-    Computes a privacy-preserving, 16-character HMAC-SHA256 pseudonym for the client.
+    Computes a privacy-preserving, full 256-bit (64-character hexadecimal) HMAC-SHA256
+    pseudonym for the client. Retaining the complete 256-bit digest prevents hash collisions
+    and ensures cryptographic preimage and collision resistance ($2^{128}$ operations).
 
     Privacy & Regulatory Taxonomy (GDPR Recital 26, India DPDP Act 2023):
     - This mechanism provides PSEUDONYMIZATION, NOT absolute mathematical anonymity.
@@ -187,13 +207,20 @@ def compute_pseudonymous_client_hash(
       dictionary / rainbow-table attack across the 4.3-billion IPv4 address space.
     - Mitigations enforced:
       1. Secret Entropy: Salt is stored in AWS SSM Parameter Store as a SecureString,
-         encrypted under AWS KMS, and never logged or returned in responses.
+         encrypted under AWS KMS, and never logged or returned in responses. The salt
+         must be generated with a cryptographically secure random number generator
+         (e.g. `secrets.token_hex(32)` providing 256 bits of CSPRNG entropy).
       2. Zero Plaintext Persistence: Raw client IP addresses are NEVER logged,
          persisted in DynamoDB, or returned in client API responses.
       3. Minimal Operational Retention: DynamoDB rate limit records are bounded by a strict
          10-minute TTL (2x window duration), after which records are automatically deleted.
       4. Salt Rotation: Rotating the salt changes all pseudonyms simultaneously,
          preventing long-term correlation of user activity across time windows.
+      5. Full 256-Bit Digest: Returning the full 64-character hex digest avoids truncation
+         birthday collisions across high user volumes.
+      6. DynamoDB Partition Key Compatibility: The full digest key `RATELIMIT#<64-hex>`
+         is ~74 bytes, well within DynamoDB's 2,048-byte partition key maximum. Ephemeral
+         TTL ensures transparent migration as existing 16-character keys expire naturally.
 
     Shared NAT & Campus Wi-Fi Model (P1.10):
     - On campus Wi-Fi (e.g. IIT Bombay Powai / hostel gateways), thousands of students share
@@ -224,7 +251,7 @@ def compute_pseudonymous_client_hash(
         raw_identity = f"ip::{source_ip}".encode("utf-8")
 
     digest = hmac.new(secret, raw_identity, hashlib.sha256).hexdigest()
-    return digest[:16]
+    return digest
 
 
 # Backward-compatible alias

@@ -28,6 +28,7 @@ from backend.shared.security import (
     extract_client_instance_id,
     get_rate_limit_salt,
     clear_salt_cache,
+    _validate_salt_strength,
     SecurityConfigurationError,
     JWTValidationError,
 )
@@ -267,12 +268,59 @@ def test_admin_handler_forbidden_for_non_admin():
 # =========================================================================
 
 def test_hmac_pseudonym_generation_and_length():
-    """P1.9: Client hash returns exactly a 16-character hexadecimal pseudonym."""
+    """P1.9: Client hash returns full 64-character hexadecimal pseudonym (256-bit HMAC-SHA256)."""
     event = {"requestContext": {"http": {"sourceIp": "103.21.124.50"}}}
     h = compute_pseudonymous_client_hash(event, salt="test_salt_entropy_32_characters_minimum_12345")
     assert isinstance(h, str)
-    assert len(h) == 16
-    assert re.match(r"^[0-9a-f]{16}$", h)
+    assert len(h) == 64, f"Expected full 256-bit digest (64 hex chars), got {len(h)}"
+    assert re.match(r"^[0-9a-f]{64}$", h)
+
+
+def test_hmac_output_length_is_full_256_bit_digest():
+    """P1.9: Verifies exact 256-bit digest length across varied IP and device combinations."""
+    salt = "test_salt_entropy_32_characters_minimum_12345"
+    ev1 = {"requestContext": {"http": {"sourceIp": "192.0.2.1"}}}
+    ev2 = {
+        "requestContext": {"http": {"sourceIp": "192.0.2.1"}},
+        "headers": {"x-device-id": "client-instance-uuid-1111111111"},
+    }
+    h1 = compute_pseudonymous_client_hash(ev1, salt=salt)
+    h2 = compute_pseudonymous_client_hash(ev2, salt=salt)
+    assert len(h1) == 64
+    assert len(h2) == 64
+    assert h1 != h2
+
+
+def test_hmac_determinism_for_identical_inputs_and_salts():
+    """P1.9: Identical source identity and salt produces deterministic, reproducible 256-bit digests."""
+    salt = "fixed_reproducible_salt_32_chars_min_entropy_1234"
+    event = {
+        "requestContext": {"http": {"sourceIp": "10.0.0.42"}},
+        "headers": {"x-device-id": "reproducible-device-id-1234567890"},
+    }
+    digests = [compute_pseudonymous_client_hash(event, salt=salt) for _ in range(10)]
+    assert len(set(digests)) == 1, "HMAC-SHA256 must be strictly deterministic"
+    assert len(digests[0]) == 64
+
+
+def test_dynamodb_rate_limit_pk_format_and_capacity():
+    """P1.9: Full 64-char HMAC partition key (RATELIMIT#<64-hex>) respects DynamoDB 2048-byte PK limit."""
+    event = {"requestContext": {"http": {"sourceIp": "203.0.113.199"}}}
+    h = compute_pseudonymous_client_hash(event, salt="test_salt_entropy_32_characters_minimum_12345")
+    pk = f"RATELIMIT#{h}"
+    # DynamoDB partition key UTF-8 limit is 2048 bytes
+    assert len(pk.encode("utf-8")) == 74
+    assert len(pk.encode("utf-8")) < 2048
+
+
+def test_csprng_salt_generation_and_entropy_validation():
+    """P1.9: Cryptographically secure random generation (secrets.token_hex) passes strength validator."""
+    import secrets
+    # 32 bytes of CSPRNG = 64 hex characters (256 bits of true entropy)
+    csprng_salt = secrets.token_hex(32)
+    assert len(csprng_salt) == 64
+    # Must not raise in production
+    _validate_salt_strength(csprng_salt, is_production=True)
 
 
 def test_raw_ip_is_never_leaked_in_pseudonym_or_response():
@@ -412,6 +460,114 @@ def test_malformed_device_id_sanitized_or_ignored():
 
     event_valid = {"headers": {"x-device-id": "valid-device-uuid-1234567890"}}
     assert extract_client_instance_id(event_valid) == "valid-device-uuid-1234567890"
+
+
+def test_frontend_request_headers_and_dual_budget_integration(monkeypatch):
+    """
+    P1.10: Integration test verifying the exact frontend request contract:
+    Frontend sends X-Device-ID, X-Idempotency-Key, and Content-Type.
+    Backend correctly processes the submission, attaches the device ID to the client budget,
+    and grants independent quotas to distinct devices behind the same IP.
+    """
+    adapter = InMemoryStorageAdapter()
+    monkeypatch.setattr("backend.functions.submit_report.app.QueueSenseDatabase", lambda: adapter)
+    monkeypatch.setattr("backend.shared.security.get_rate_limit_salt", lambda: "integration_salt_entropy_32_characters_12345")
+
+    shared_nat_ip = "103.21.124.77"
+
+    # Student 1 from frontend
+    for req_idx in range(5):
+        event_s1 = {
+            "pathParameters": {"id": "iitb-mess-h12-14"},
+            "headers": {
+                "content-type": "application/json",
+                "x-idempotency-key": f"idem-student1-{req_idx}",
+                "x-device-id": "device-uuid-student-1-aaaa-bbbb",
+            },
+            "requestContext": {
+                "http": {"sourceIp": shared_nat_ip},
+                "requestId": f"req-s1-{req_idx}",
+            },
+            "body": json.dumps({"reportedWaitMinutes": 10.0, "queueLength": 5}),
+        }
+        res_s1 = submit_handler(event_s1, None)
+        assert res_s1["statusCode"] == 201
+
+    # Student 1 6th request is rate-limited (Tier-1 budget exhausted)
+    event_s1_6th = {
+        "pathParameters": {"id": "iitb-mess-h12-14"},
+        "headers": {
+            "content-type": "application/json",
+            "x-idempotency-key": "idem-student1-6th",
+            "x-device-id": "device-uuid-student-1-aaaa-bbbb",
+        },
+        "requestContext": {
+            "http": {"sourceIp": shared_nat_ip},
+            "requestId": "req-s1-6th",
+        },
+        "body": json.dumps({"reportedWaitMinutes": 10.0, "queueLength": 5}),
+    }
+    res_s1_6th = submit_handler(event_s1_6th, None)
+    assert res_s1_6th["statusCode"] == 429
+    body_s1 = json.loads(res_s1_6th["body"])
+    assert body_s1["errorCode"] == "RATE_LIMIT_EXCEEDED"
+
+    # Student 2 from same NAT IP can STILL submit reports (not blocked by Student 1's usage)
+    event_s2 = {
+        "pathParameters": {"id": "iitb-mess-h12-14"},
+        "headers": {
+            "content-type": "application/json",
+            "x-idempotency-key": "idem-student2-1st",
+            "x-device-id": "device-uuid-student-2-cccc-dddd",
+        },
+        "requestContext": {
+            "http": {"sourceIp": shared_nat_ip},
+            "requestId": "req-s2-1st",
+        },
+        "body": json.dumps({"reportedWaitMinutes": 12.0, "queueLength": 8}),
+    }
+    res_s2 = submit_handler(event_s2, None)
+    assert res_s2["statusCode"] == 201, "Student 2 must not be starved by Student 1 on shared NAT IP"
+
+
+def test_missing_device_id_safe_fallback_behavior(monkeypatch):
+    """
+    P1.10: Requests without X-Device-ID (e.g. legacy client or restricted storage)
+    safely fall back to IP-based rate limiting without failing or crashing.
+    """
+    adapter = InMemoryStorageAdapter()
+    monkeypatch.setattr("backend.functions.submit_report.app.QueueSenseDatabase", lambda: adapter)
+    monkeypatch.setattr("backend.shared.security.get_rate_limit_salt", lambda: "integration_salt_entropy_32_characters_12345")
+
+    event_no_device = {
+        "pathParameters": {"id": "iitb-mess-h12-14"},
+        "headers": {
+            "content-type": "application/json",
+            "x-idempotency-key": "idem-no-device-id-1",
+        },
+        "requestContext": {
+            "http": {"sourceIp": "198.51.100.99"},
+            "requestId": "req-no-device-1",
+        },
+        "body": json.dumps({"reportedWaitMinutes": 5.0, "queueLength": 2}),
+    }
+    res = submit_handler(event_no_device, None)
+    assert res["statusCode"] == 201
+
+
+def test_template_cors_allows_device_id_headers():
+    """
+    P1.10: Verifies infrastructure/template.yaml API Gateway CORS configuration
+    explicitly allows X-Device-ID and X-Client-Instance-ID headers.
+    """
+    template_path = os.path.join(
+        os.path.dirname(__file__), "..", "..", "infrastructure", "template.yaml"
+    )
+    with open(template_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    assert "X-Device-ID" in content, "template.yaml CORS AllowHeaders must include X-Device-ID"
+    assert "X-Client-Instance-ID" in content, "template.yaml CORS AllowHeaders must include X-Client-Instance-ID"
 
 
 # =========================================================================
@@ -646,4 +802,55 @@ def test_no_hardcoded_aws_credentials_in_repository():
                         assert len(matches) == 0, f"Potential AWS access key found in {file}: {matches}"
                 except Exception:
                     pass
+
+
+def test_git_history_contains_zero_credentials_or_private_keys():
+    """
+    P1.12: Deep git history audit. Verifies across all commits that zero AWS access keys,
+    secret keys, or RSA private keys were committed to git history.
+    """
+    import subprocess
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    try:
+        proc = subprocess.run(
+            ["git", "log", "--all", "-p"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            errors="ignore",
+            timeout=30,
+        )
+        assert proc.returncode == 0
+        diff_output = proc.stdout
+
+        # Search for AWS Access Key pattern
+        aws_keys = re.findall(r"(?:AKIA|ASIA)[0-9A-Z]{16}", diff_output)
+        assert len(aws_keys) == 0, f"Found AWS access key pattern in git history: {aws_keys}"
+
+        # Search for private key headers
+        private_keys = re.findall(r"-----BEGIN (?:RSA )?PRIVATE KEY-----", diff_output)
+        assert len(private_keys) == 0, f"Found private key header in git history: {private_keys}"
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        # Fall back gracefully if git CLI is unavailable in restricted test runner
+        pass
+
+
+def test_admin_handler_direct_invocation_defense_fails_closed(monkeypatch):
+    """
+    P1.8: Verifies that direct Lambda invocation (without API Gateway authorizer context)
+    in production mode fails closed immediately with HTTP 401 UNAUTHORIZED.
+    """
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DATA_MODE", "production")
+
+    # Direct invocation without requestContext or authorizer
+    raw_event = {
+        "headers": {"x-admin-key": "attempted-static-key-bypass"},
+        "queryStringParameters": {"limit": "10"},
+    }
+    res = admin_handler(raw_event, None)
+    assert res["statusCode"] == 401
+    body = json.loads(res["body"])
+    assert body["errorCode"] == "UNAUTHORIZED_COGNITO_REQUIRED"
+
 

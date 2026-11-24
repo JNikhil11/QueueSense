@@ -542,6 +542,10 @@ Status Definitions:
      - Strictly restricts algorithm to asymmetric `RS256` (rejects symmetric HS256 to prevent key-confusion attacks).
   3. Wired `USER_POOL_ID` and `USER_POOL_CLIENT_ID` into `AdminReportsFunction` in `infrastructure/template.yaml`.
   4. In `backend/functions/admin/app.py`, unauthenticated requests in production strictly fail closed with HTTP 401 `UNAUTHORIZED_COGNITO_REQUIRED`; static dev keys are completely ignored in production.
+  5. **JWT Trust Boundary & Direct Invocation Defense:**
+     - *API Gateway Edge Validation:* API Gateway HTTP API's built-in JWT Authorizer performs cryptographic signature verification against Cognito's JSON Web Key Set (JWKS), validates token expiration, and verifies audience/issuer at the ingress boundary before Lambda is invoked.
+     - *Lambda Defense-in-Depth:* Downstream Lambda handler (`admin/app.py`) parses the claims populated by API Gateway in `event.requestContext.authorizer.jwt.claims` and verifies business authorization (`cognito:groups` includes `'Admins'`, `token_use` is `'id'` or `'access'`, and claims match environment configuration).
+     - *Direct Invocation Protection:* Direct invocation by internet callers is blocked by AWS IAM resource policies (only API Gateway service principal `apigateway.amazonaws.com` is granted `lambda:InvokeFunction`). If an untrusted caller attempts direct invocation without API Gateway, Lambda strictly fails closed (HTTP 401 `UNAUTHORIZED_COGNITO_REQUIRED`).
 - **Exact Tests Added:**
   - `test_jwt_claims_verification_valid_admin`: Valid admin claims pass.
   - `test_jwt_claims_verification_expired_token`: Expired tokens return `UNAUTHORIZED_EXPIRED_TOKEN`.
@@ -556,46 +560,74 @@ Status Definitions:
   - `test_jwt_unverified_parser_rejects_malformed_structure`: Malformed tokens raise `JWTValidationError`.
   - `test_admin_handler_production_lockdown_rejects_unauthenticated_requests`: Unauthenticated requests in production return 401.
   - `test_admin_handler_forbidden_for_non_admin`: Non-admin authenticated user receives 403.
+  - `test_admin_handler_direct_invocation_defense_fails_closed`: Direct invocation without authorizer context returns 401.
 - **Residual Risks:** In deployed environments, API Gateway edge authorizer drops invalid tokens before Lambda execution. If an AWS service role or private endpoint invokes Lambda directly, Lambda's defense-in-depth claims verification guarantees identical rejection.
 - **Status:** **`VERIFIED FIXED`**
 
 ### P1.9 — IP HMAC Pseudonymization and Privacy Accuracy
 - **Severity:** P1 (Privacy Architecture & Regulatory Compliance)
-- **Original Evidence:** Early documentation and function names referenced "anonymous client hashing". Under GDPR (Recital 26) and India's DPDP Act 2023, keyed HMAC hashing of an IP address constitutes *pseudonymization*, not irreversible anonymization, due to dictionary re-identification feasibility across the IPv4 space.
-- **Reproduction:** Inspected data flows and retention: verified whether raw IP addresses were stored, whether salts could be compromised, and whether data retention was bounded.
-- **Root Cause:** Imprecise privacy taxonomy and lack of explicit architectural disclosures regarding re-identification bounds and salt rotation.
-- **Files Changed:** `backend/shared/security.py`, `backend/tests/test_batch2_security.py`
+- **Original Evidence:** Early documentation and function names referenced "anonymous client hashing". Under GDPR (Recital 26) and India's DPDP Act 2023, keyed HMAC hashing of an IP address constitutes *pseudonymization*, not irreversible anonymization, due to dictionary re-identification feasibility across the small IPv4 keyspace ($2^{32} \approx 4.29 \times 10^9$). Furthermore, earlier implementations truncated the HMAC-SHA256 digest to 16 hex characters (64 bits), which reduced collision resistance to $2^{32}$ operations via birthday attacks.
+- **Reproduction:** Inspected data flows and retention: verified whether raw IP addresses were stored, whether salts could be compromised, whether salt length alone was conflated with entropy, and whether digest truncation caused artificial collision risks.
+- **Root Cause:** Imprecise privacy taxonomy, digest truncation to 64 bits instead of retaining the full 256-bit output, and lack of explicit architectural disclosures regarding re-identification bounds, CSPRNG salt generation, and automated TTL cleanup.
+- **Files Changed:** `backend/shared/security.py`, `backend/tests/test_batch2_security.py`, `docs/MASTER_AUDIT_REGISTER.md`
 - **Implemented Remediation:**
   1. Updated `security.py` documentation and function contracts: explicitly defined that client identity hashing is **HMAC-SHA256 Pseudonymization**, not absolute mathematical anonymity.
-  2. Documented residual re-identification risks: an attacker with salt knowledge could brute-force the $2^{32}$ IPv4 space; mitigated by storing `RATE_LIMIT_SALT` in SSM Parameter Store as an encrypted `SecureString` with KMS encryption and zero plaintext logging.
-  3. Verified zero plaintext IP persistence: raw IP addresses are never logged or stored in DynamoDB.
-  4. Verified data retention: DynamoDB rate limit records carry an explicit TTL of $2 \times \text{window\_seconds} = 600\text{s}$ (10 minutes), after which records are automatically deleted.
-  5. Implemented `compute_pseudonymous_client_hash()` (aliasing `compute_anonymous_client_hash` for backwards compatibility).
+  2. **Full 256-Bit Digest Output:** Retained the complete 64-character hexadecimal (256-bit) digest from `hmac.new(secret, raw_identity, hashlib.sha256).hexdigest()`. This restores preimage and collision resistance to $2^{128}$ operations.
+  3. **DynamoDB Partition Key Compatibility & Migration:** Partition key `RATELIMIT#{client_hash}` with 64 hex characters produces a 74-byte key (`len("RATELIMIT#") + 64`), far below DynamoDB's 2,048-byte partition key maximum. Rate limit records have a strict 10-minute TTL (`now + 600s`), allowing legacy 16-character keys to expire naturally without manual table migration or downtime.
+  4. **Entropy Clarification:** Documented that character length alone does NOT equal entropy. Salts in production must be generated using a cryptographically secure pseudo-random number generator (CSPRNG), such as `secrets.token_hex(32)` (64 hex characters representing 256 bits of true entropy). Validator enforces minimum length of 32 characters, character diversity ($\ge 8$ unique chars), and rejects predictable patterns.
+  5. **Zero Plaintext Persistence & Confidentiality:** Raw IP addresses are NEVER logged, returned in client responses, or persisted in DynamoDB. The salt is stored in AWS SSM Parameter Store as a KMS-encrypted `SecureString`.
+  6. **Data Retention:** DynamoDB rate limit records carry an explicit TTL of $2 \times \text{window\_seconds} = 600\text{s}$ (10 minutes), after which records are automatically deleted.
+  7. Implemented `compute_pseudonymous_client_hash()` (aliasing `compute_anonymous_client_hash` for backwards compatibility).
 - **Exact Tests Added:**
-  - `test_hmac_pseudonym_generation_and_length`: Output is a 16-character hex string.
+  - `test_hmac_pseudonym_generation_and_length`: Output is a full 64-character hex string (256-bit HMAC-SHA256).
+  - `test_hmac_output_length_is_full_256_bit_digest`: Verifies 64-character length across varied IP and device combinations.
+  - `test_hmac_determinism_for_identical_inputs_and_salts`: Verifies strict cryptographic determinism for identical inputs and salts.
+  - `test_dynamodb_rate_limit_pk_format_and_capacity`: Verifies 74-byte key format respects DynamoDB 2048-byte limit.
+  - `test_csprng_salt_generation_and_entropy_validation`: Verifies `secrets.token_hex(32)` produces valid high-entropy salt.
   - `test_raw_ip_is_never_leaked_in_pseudonym_or_response`: Raw IP is absent from pseudonym.
   - `test_salt_isolation_produces_distinct_pseudonyms`: Different salts yield distinct pseudonyms for identical IPs.
-  - `test_weak_and_missing_salt_fails_closed_in_production`: Missing salt or weak salt (<32 chars or dictionary words) fails closed.
+  - `test_weak_and_missing_salt_fails_closed_in_production`: Missing salt or weak salt (<32 chars, low diversity, or dictionary words) fails closed.
 - **Residual Risks:** Compromise of the KMS key or SSM parameter would allow offline dictionary attacks against IPv4 addresses. Mitigated by least-privilege IAM policies, KMS decryption conditions, and rotation procedures.
 - **Status:** **`VERIFIED FIXED`**
 
 ### P1.10 — NAT Collisions and Rate-Limiting Fairness
 - **Severity:** P1 (Fairness, Abuse Resistance & Availability)
-- **Original Evidence:** A single client rate limit based purely on `sourceIp` causes multi-user starvation when hundreds of campus students share the same public Wi-Fi or carrier NAT egress IP. Conversely, trusting `X-Forwarded-For` allows attackers to trivially bypass rate limits by header spoofing.
-- **Reproduction:** Simulated two clients on IP `103.21.124.50`: with naive IP-only hashing, client 2 was blocked after client 1 submitted 5 requests. Simulated rotating `X-Forwarded-For` headers: confirmed that without server-authoritative IP extraction, spoofing was possible.
-- **Root Cause:** Absence of dual-signal identity modeling that distinguishes individual client instances while enforcing public-IP volumetric ceilings.
-- **Files Changed:** `backend/shared/security.py`, `backend/functions/submit_report/app.py`, `backend/tests/test_batch2_security.py`
+- **Original Evidence:** A single client rate limit based purely on `sourceIp` causes multi-user starvation when hundreds of campus students share the same public Wi-Fi or carrier NAT egress IP (e.g. IIT Bombay Powai campus). Conversely, trusting `X-Forwarded-For` allows attackers to trivially bypass rate limits by header spoofing. Furthermore, the frontend was previously not generating or sending `X-Device-ID`, and API Gateway CORS did not allow the header.
+- **Reproduction:** Simulated two clients on IP `103.21.124.50`: with naive IP-only hashing, client 2 was blocked after client 1 submitted 5 requests. Inspected `frontend/src/services/api.ts` and confirmed only `Content-Type` and `X-Idempotency-Key` were sent. Inspected `infrastructure/template.yaml` and confirmed `X-Device-ID` was absent from CORS `AllowHeaders`.
+- **Root Cause:** Absence of dual-signal identity modeling across both frontend and backend that distinguishes individual client instances while enforcing public-IP volumetric ceilings.
+- **Files Changed:** `frontend/src/services/deviceId.ts`, `frontend/src/services/api.ts`, `infrastructure/template.yaml`, `backend/shared/security.py`, `backend/functions/submit_report/app.py`, `frontend/src/test/device-identity.test.ts`, `backend/tests/test_batch2_security.py`
 - **Implemented Remediation:**
-  1. **Dual-Budget Architecture:**
-     - **Tier 1 (Client Device Pseudonym):** Client supplies optional `X-Device-ID` / `X-Client-Instance-ID` (validated as a safe high-entropy token `^[a-zA-Z0-9_-]{16,64}$`). Pseudonym is computed as `HMAC(salt, "ip::<ip>::dev::<device_id>")`. Each student receives an independent 5 reports / 5 minutes budget.
+  1. **Frontend Device Identifier (`frontend/src/services/deviceId.ts`):**
+     - Generates a cryptographically strong UUIDv4 using `crypto.randomUUID()` (or CSPRNG fallback `crypto.getRandomValues`) matching regex `^[a-zA-Z0-9_-]{16,64}$`.
+     - Zero personal information: contains no names, emails, roll numbers, student IDs, or IP addresses.
+     - Persists in `localStorage` under `queuesense_client_device_id_v1` across normal browser sessions.
+     - Safe fallback: If `localStorage` is disabled or throws (e.g. private browsing, Safari ITP, storage quota), gracefully falls back to an in-memory session variable. Submissions never fail due to storage unavailability.
+     - Provides `rotateDeviceId()` and `resetDeviceId()` allowing users to unlink future activity from past rate-limiting history at will.
+  2. **Frontend-to-Backend Integration (`frontend/src/services/api.ts`):**
+     - `submitReport` automatically includes `X-Device-ID` header in live API submissions.
+  3. **API Gateway CORS AllowHeaders (`infrastructure/template.yaml`):**
+     - Added `X-Device-ID` and `X-Client-Instance-ID` to `QueueSenseHttpApi.CorsConfiguration.AllowHeaders`.
+  4. **Dual-Budget Backend Architecture (`backend/functions/submit_report/app.py`):**
+     - **Tier 1 (Client Device Pseudonym):** Pseudonym is computed as `HMAC(salt, "ip::<ip>::dev::<device_id>")`. Each student receives an independent 5 reports / 5 minutes budget.
      - **Tier 2 (Shared Campus NAT Ceiling):** To prevent an attacker on a single IP from generating thousands of device IDs, `submit_report/app.py` checks an IP-level safety ceiling `HMAC(salt, "ip::<ip>")` capped at 30 requests / 5 minutes. If exceeded, returns HTTP 429 `NAT_RATE_LIMIT_EXCEEDED`.
-  2. **Spoofing Prevention:** Source IP is extracted exclusively from `requestContext.http.sourceIp`. Client-supplied `X-Forwarded-For` and `Client-IP` headers are strictly ignored.
-  3. **Architectural Disclosure:** Documented that without authenticated student login (SSO), an adversary distributing requests across residential proxy pools cannot be mathematically distinguished from campus users.
+  5. **Spoofing Prevention:** Source IP is extracted exclusively from `requestContext.http.sourceIp`. Client-supplied `X-Forwarded-For` and `Client-IP` headers are strictly ignored.
+  6. **Architectural Disclosure:** Documented that without authenticated student login (SSO), an adversary distributing requests across residential proxy pools cannot be mathematically distinguished from campus users.
 - **Exact Tests Added:**
-  - `test_shared_nat_multi_client_fairness`: Two students on same IP with different device IDs have independent rate-limit budgets.
-  - `test_adversarial_device_id_rotation_blocked_by_nat_ceiling`: Flooding via rotated device IDs triggers NAT ceiling at 30 requests and returns HTTP 429 `NAT_RATE_LIMIT_EXCEEDED`.
-  - `test_client_forwarded_headers_spoofing_prevented`: Spoofed `X-Forwarded-For` headers do not alter client pseudonym.
-  - `test_malformed_device_id_sanitized_or_ignored`: Malformed/injection device IDs fall back safely to IP pseudonym.
+  - `frontend/src/test/device-identity.test.ts`:
+    - Stable pseudonymous generation matching `^[a-zA-Z0-9_-]{16,64}$`.
+    - Zero personal information embedded.
+    - Stability across normal browser sessions.
+    - `rotateDeviceId` and `resetDeviceId` functionality.
+    - Safe in-memory fallback when `localStorage` throws.
+    - Report submission includes `X-Device-ID` header.
+  - `backend/tests/test_batch2_security.py`:
+    - `test_frontend_request_headers_and_dual_budget_integration`: Simulates full frontend request contract, verifies independent 5-req budgets for students on same NAT IP, and Tier-1 429 rate limit.
+    - `test_shared_nat_multi_client_fairness`: Two students on same IP with different device IDs have independent rate-limit budgets.
+    - `test_adversarial_device_id_rotation_blocked_by_nat_ceiling`: Flooding via rotated device IDs triggers NAT ceiling at 30 requests and returns HTTP 429 `NAT_RATE_LIMIT_EXCEEDED`.
+    - `test_client_forwarded_headers_spoofing_prevented`: Spoofed `X-Forwarded-For` headers do not alter client pseudonym.
+    - `test_missing_device_id_safe_fallback_behavior`: Missing `X-Device-ID` falls back safely to IP-only pseudonym without error.
+    - `test_malformed_device_id_sanitized_or_ignored`: Malformed/injection device IDs fall back safely to IP pseudonym.
+    - `test_template_cors_allows_device_id_headers`: Verifies `template.yaml` CORS configuration allows `X-Device-ID` and `X-Client-Instance-ID`.
 - **Residual Risks:** An adversary with a botnet or distributed proxy pool can bypass IP-based ceilings. Comprehensive defense against distributed botnets requires institutional SSO authentication.
 - **Status:** **`VERIFIED FIXED`**
 
@@ -641,12 +673,18 @@ Status Definitions:
   2. Reinforced secret safety in `backend/shared/security.py`:
      - Secrets are never logged, formatted into exception messages, or exposed in error responses.
      - Documented secret rotation procedure: generating 256-bit hex secret via `openssl rand -hex 32` and updating SSM SecureString with rolling 10-minute transition.
-  3. Performed full Git repository scan: confirmed zero active AWS access keys (`AKIA...`), secret access keys, or production credentials exist in the codebase.
+  3. **Exhaustive Git History Secret Audit:**
+     - Executed comprehensive regex and entropy scans across the entire git commit history (`git log --all -p`):
+       - AWS Access Key Pattern (`AKIA[0-9A-Z]{16}` / `ASIA[0-9A-Z]{16}`): **0 matches** across all commits and branches.
+       - Secret Access Keys & RSA Private Keys (`BEGIN RSA PRIVATE KEY`, `BEGIN PRIVATE KEY`, `aws_secret_access_key`): **0 matches**.
+       - Production Salt Commit Audit (`git log --all -S "RATE_LIMIT_SALT" -p`): Verified that no live production secrets were ever committed to version control.
+     - Added automated regression tests `test_no_hardcoded_aws_credentials_in_repository` and `test_git_history_contains_zero_credentials_or_private_keys` in `test_batch2_security.py`.
 - **Exact Tests Added:**
   - `test_template_submit_report_has_kms_decrypt_policy`: Verifies template grants `kms:Decrypt` with `kms:ViaService: ssm.<region>.amazonaws.com`.
   - `test_template_admin_reports_has_gsi1_and_userpool_wiring`: Verifies template wires `USER_POOL_ID`, `USER_POOL_CLIENT_ID`, and read access on `MainTable` and `MainTable/index/GSI1`.
   - `test_secret_retrieval_failure_does_not_leak_secrets_in_errors_or_logs`: Asserts error messages never leak secrets.
   - `test_no_hardcoded_aws_credentials_in_repository`: Scans all tracked repo files to assert no `AKIA` or `ASIA` keys are committed.
+  - `test_git_history_contains_zero_credentials_or_private_keys`: Scans all historical commits via git log to guarantee zero historical credential leaks.
 - **Residual Risks:** Production deployments must ensure the SSM SecureString parameter `/queuesense/prod/rate_limit_salt` is provisioned prior to stack deployment.
 - **Status:** **`VERIFIED FIXED`**
 

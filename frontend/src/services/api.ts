@@ -13,6 +13,19 @@ import {
   HistoricalData,
   DataMode,
 } from '../types';
+import {
+  getOrGenerateDeviceId,
+  rotateDeviceId,
+  resetDeviceId,
+  DEVICE_ID_STORAGE_KEY,
+} from './deviceId';
+
+export {
+  getOrGenerateDeviceId,
+  rotateDeviceId,
+  resetDeviceId,
+  DEVICE_ID_STORAGE_KEY,
+};
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
@@ -613,12 +626,18 @@ export function createApiClient(config: ApiClientConfig = {}) {
 
       if (this.isLiveApiConfigured()) {
         try {
+          const deviceId = getOrGenerateDeviceId();
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'X-Idempotency-Key': idempotencyKey,
+          };
+          if (deviceId) {
+            headers['X-Device-ID'] = deviceId;
+          }
+
           const res = await fetch(`${baseUrl}/locations/${locationId}/reports`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Idempotency-Key': idempotencyKey,
-            },
+            headers,
             body: JSON.stringify({ ...payload, idempotencyKey }),
           });
 
