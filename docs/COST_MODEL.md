@@ -76,18 +76,24 @@ However, serverless costs are inherently consumption-based and depend on actual 
 - **Daily Active Students:** ~300 students
 - **Observations:** 600 reports/day (18,000 reports/month)
 - **API Reads (Polling & Detail Views):** 150,000 requests/month
-- **Estimated Monthly Cost:** **~$0.28 / month** (under Standard Rates; ~$0.10 / month under Year 1 Free Tier)
+- **Estimated Monthly Cost:** **~$0.27 / month** (under Standard Rates; **~$0.10 / month** under Year 1 Free Tier)
 
-| Service | Volume | Billed Quantity | Rate | Cost |
-|---|---|---|---|---|
-| DynamoDB WRU | 36,000 writes | 0.036 M | $1.25 / M | $0.045 (~$0.05) |
-| DynamoDB RRU | 220,000 reads | 0.220 M | $0.25 / M | $0.055 (~$0.06) |
-| Lambda Invocations | 168,000 calls | 0 (Within 1M always-free tier) | $0.20 / M | $0.00 |
-| HTTP API Gateway | 168,000 calls | 0.168 M (post-free-tier) | $1.00 / M | $0.168 (~$0.17) |
-| CloudFront & S3 | 15 GB transfer | 0 (Within 1TB always-free tier) | $0.00 | $0.00 |
-| **Total Net Cost** | — | — | — | **~$0.28 / month (Standard Rates; ~$0.10 / mo Year 1)** |
+| Service | Volume | Free Tier Allowance | Billed Quantity (Standard) | Standard Rate | Cost (Standard) | Cost (Year 1 Free Tier) |
+|---|---|---|---|---|---|---|
+| DynamoDB WRU | 36,000 writes | 25 GB storage free (On-Demand WRUs billed) | 0.036 M | $1.25 / M | $0.045 | $0.045 |
+| DynamoDB RRU | 220,000 reads | 25 GB storage free (On-Demand RRUs billed) | 0.220 M | $0.25 / M | $0.055 | $0.055 |
+| Lambda Invocations | 168,000 calls | 1,000,000 calls & 400,000 GB-s Always-Free | 0 calls | $0.20 / M | $0.000 | $0.000 |
+| HTTP API Gateway | 168,000 calls | 1,000,000 calls/mo free (first 12 months) | 0.168 M | $1.00 / M | $0.168 | $0.000 |
+| CloudFront & S3 | 15 GB transfer | 1,000 GB transfer out Always-Free | 0 GB | $0.085 / GB | $0.000 | $0.000 |
+| **Total Net Cost** | — | — | — | — | **~$0.27 / month** | **~$0.10 / month** |
 
-*Arithmetic Verification:* $\$0.045 \text{ (WRU)} + \$0.055 \text{ (RRU)} + \$0.168 \text{ (API Gateway)} = \$0.268 \approx \mathbf{\$0.28 / \text{month}}$.
+*Arithmetic Verification:*
+- **Standard Rates Total:**
+  $$\$0.045 \text{ (DynamoDB WRU)} + \$0.055 \text{ (DynamoDB RRU)} + \$0.168 \text{ (API Gateway)} = \$0.268 \approx \mathbf{\$0.27 / \text{month}}$$
+  *(Rounding to two decimal places: \$0.268 rounds to \$0.27, not \$0.28).*
+- **Year 1 Free Tier Total:**
+  $$\$0.045 \text{ (DynamoDB WRU)} + \$0.055 \text{ (DynamoDB RRU)} + \$0.000 \text{ (Lambda free)} + \$0.000 \text{ (API Gateway free)} = \$0.100 = \mathbf{\$0.10 / \text{month}}.$$
+  *(Under the 12-Month AWS Free Tier, HTTP API Gateway [1M free], Lambda [1M free], and CloudFront [1TB free] allowances reduce their charges to \$0.00; the remaining \$0.10 arises solely from DynamoDB on-demand WRU [\$0.045] and RRU [\$0.055] pay-per-request consumption).*
 
 ---
 
