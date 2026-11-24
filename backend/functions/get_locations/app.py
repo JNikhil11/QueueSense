@@ -15,7 +15,7 @@ if "/opt/python" not in sys.path:
     sys.path.insert(0, "/opt/python")
 
 from response import create_api_response
-from database import QueueSenseDatabase, DatabasePersistenceError
+from database import QueueSenseDatabase, DatabasePersistenceError, InvalidCampusConfigurationError
 from prediction import calculate_queue_estimate
 
 logger = logging.getLogger("queuesense.get_locations")
@@ -26,8 +26,18 @@ def lambda_handler(event, context):
     request_id = getattr(context, "aws_request_id", None) or "local_req"
 
     try:
+        query_params = (event or {}).get("queryStringParameters") or {}
+        campus_id = query_params.get("campusId") or query_params.get("campus_id")
+
         db = QueueSenseDatabase()
-        locations = db.list_locations()
+        loc_result = db.list_locations(include_metadata=True, campus_id=campus_id)
+
+        if isinstance(loc_result, dict):
+            locations = loc_result.get("locations", [])
+            is_partial = loc_result.get("is_partial", False)
+        else:
+            locations = loc_result
+            is_partial = False
 
         results = []
         for loc in locations:
@@ -46,13 +56,22 @@ def lambda_handler(event, context):
 
             # Strip DynamoDB single-table keys and index partitions from client view
             clean_loc = {k: v for k, v in loc.items() if k not in ("PK", "SK", "entityType", "GSI1PK", "GSI1SK")}
-            clean_est = {k: v for k, v in est.items() if k not in ("PK", "SK", "entityType", "GSI1PK", "GSI1SK")}
+            clean_est = {k: v for k, v in (est or {}).items() if k not in ("PK", "SK", "entityType", "GSI1PK", "GSI1SK")}
             clean_loc["estimate"] = clean_est
             results.append(clean_loc)
 
         return create_api_response(
             status_code=200,
             data=results,
+            isPartial=is_partial,
+            request_id=request_id,
+        )
+    except InvalidCampusConfigurationError as e:
+        logger.warning("Invalid campus requested [req=%s]: %s", request_id, str(e))
+        return create_api_response(
+            status_code=400,
+            error=str(e),
+            error_code="INVALID_CAMPUS",
             request_id=request_id,
         )
     except DatabasePersistenceError as e:

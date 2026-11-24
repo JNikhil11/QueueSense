@@ -1924,6 +1924,8 @@ def test_campus_locations_have_structured_provenance_metadata():
     Priority 1.7: Data Provenance.
     Verify all default campus locations have a structured provenance object
     distinguishing verified directory facts from dynamic crowdsourced observations.
+    Static venue details are unverified community listings (lastVerifiedDate is None, verifiedBy is None).
+    Dynamic queue observations are crowdsourced.
     """
     from backend.shared.database import IITB_CAMPUS_LOCATIONS, VITAP_CAMPUS_LOCATIONS
 
@@ -1931,12 +1933,14 @@ def test_campus_locations_have_structured_provenance_metadata():
     for loc in all_locs:
         assert "provenance" in loc, f"Location {loc.get('id')} must contain provenance metadata"
         prov = loc["provenance"]
-        assert prov["sourceType"] in ("COMMUNITY_DIRECTORY", "OFFICIAL_DIRECTORY")
-        assert len(prov["verifiedBy"]) > 0
-        assert "lastVerifiedDate" in prov
+        assert prov["sourceType"] == "COMMUNITY_SOURCED"
+        assert prov["verificationStatus"] == "UNVERIFIED"
+        assert prov["verifiedBy"] is None
+        assert prov["lastVerifiedDate"] is None
         assert prov["isCrowdsourced"] is False, "Directory metadata itself must not be marked crowdsourced"
         assert "reportedWaitMinutes" in prov["crowdsourcedAttributes"]
         assert "queueLength" in prov["crowdsourcedAttributes"]
+        assert "disclaimer" in prov and len(prov["disclaimer"]) > 0
 
 
 def test_get_locations_exposes_provenance_without_leaking_internal_keys():
@@ -1971,12 +1975,13 @@ def test_provenance_integrity_and_forbidden_unsupported_claims():
     """
     Finding 1 (P1.7): Provenance Integrity & Truth Enforcement
     Verifies that all campus locations contain truthful, student-community provenance details:
-    1. sourceType is strictly 'COMMUNITY_DIRECTORY'
-    2. verificationStatus is 'STUDENT_SOURCED'
-    3. lastVerifiedDate matches actual compilation date '2026-01-15'
-    4. NO location claims 'OFFICIAL_INSTITUTIONAL_DIRECTORY'
-    5. NO location claims unverified administrative bodies like 'Campus Dining Operations'
-    6. isCrowdsourced is False for static metadata, crowdsourcedAttributes contains queue fields.
+    1. sourceType is strictly 'COMMUNITY_SOURCED'
+    2. verificationStatus is 'UNVERIFIED'
+    3. lastVerifiedDate is None (no fabricated dates)
+    4. verifiedBy is None (no fabricated administrative sign-off)
+    5. NO location claims 'OFFICIAL_INSTITUTIONAL_DIRECTORY' or 'OFFICIAL_DIRECTORY'
+    6. NO location claims unverified administrative bodies like 'Campus Dining Operations'
+    7. isCrowdsourced is False for static metadata, crowdsourcedAttributes contains queue fields.
     """
     from backend.shared.database import IITB_CAMPUS_LOCATIONS, VITAP_CAMPUS_LOCATIONS
 
@@ -1988,17 +1993,19 @@ def test_provenance_integrity_and_forbidden_unsupported_claims():
         prov = loc["provenance"]
 
         # 1. Truthful community directory source
-        assert prov["sourceType"] == "COMMUNITY_DIRECTORY", (
-            f"Location {loc['id']} must declare sourceType as COMMUNITY_DIRECTORY"
+        assert prov["sourceType"] == "COMMUNITY_SOURCED", (
+            f"Location {loc['id']} must declare sourceType as COMMUNITY_SOURCED"
         )
-        assert loc.get("verificationStatus") == "STUDENT_SOURCED"
-        assert prov["lastVerifiedDate"] == "2026-01-15"
+        assert loc.get("verificationStatus") == "UNVERIFIED"
+        assert prov.get("verificationStatus") == "UNVERIFIED"
+        assert prov.get("lastVerifiedDate") is None, "Must not fabricate verification dates"
+        assert prov.get("verifiedBy") is None, "Must not claim unverified authorities"
 
         # 2. Strict rejection of unsupported institutional claims
-        assert prov["sourceType"] != "OFFICIAL_INSTITUTIONAL_DIRECTORY", (
+        assert prov["sourceType"] not in ("OFFICIAL_INSTITUTIONAL_DIRECTORY", "OFFICIAL_DIRECTORY"), (
             "Must never claim OFFICIAL_INSTITUTIONAL_DIRECTORY without administrative sign-off"
         )
-        assert "Campus Dining Operations" not in prov.get("verifiedBy", ""), (
+        assert "Campus Dining Operations" not in str(prov.get("sourceAttribution", "")), (
             f"Location {loc['id']} must not claim unverified Campus Dining Operations verification"
         )
 
@@ -2531,6 +2538,363 @@ def test_get_locations_read_path_succeeds_even_when_cache_write_fails(monkeypatc
     assert len(body["data"]) > 0
     for loc in body["data"]:
         assert "estimate" in loc
+
+
+# =========================================================================
+# Batch 1 Acceptance Corrections Tests (P1.5, P1.7, and Campus Validation)
+# =========================================================================
+
+def test_campus_configuration_validation_and_fail_closed():
+    """
+    Acceptance Correction 3: Campus Configuration Fail-Closed.
+    Verifies that:
+    1. Supported campuses ('iitb', 'vitap', case-insensitive) resolve correctly.
+    2. Missing/None/empty campus ID defaults to DEFAULT_CAMPUS_ID ('iitb').
+    3. Unknown/unsupported campuses ('mit', 'xyz', 'stanford') fail closed with InvalidCampusConfigurationError.
+    4. Both InMemory and DynamoDB adapters fail closed on invalid campus configuration.
+    5. GET /locations Lambda returns HTTP 400 INVALID_CAMPUS on unknown campus request.
+    6. GET /locations Lambda returns HTTP 200 with corresponding campus data on valid campus request.
+    """
+    from backend.shared.database import (
+        get_default_campus_locations,
+        InvalidCampusConfigurationError,
+        DynamoDBStorageAdapter,
+        InMemoryStorageAdapter,
+        IITB_CAMPUS_LOCATIONS,
+        VITAP_CAMPUS_LOCATIONS,
+    )
+    from backend.functions.get_locations.app import lambda_handler as locations_handler
+
+    # 1. Valid campuses
+    iitb_locs = get_default_campus_locations("iitb")
+    assert len(iitb_locs) == len(IITB_CAMPUS_LOCATIONS)
+    assert iitb_locs[0]["campusId"] == "iitb"
+
+    vitap_locs = get_default_campus_locations("vitap")
+    assert len(vitap_locs) == len(VITAP_CAMPUS_LOCATIONS)
+    assert vitap_locs[0]["campusId"] == "vitap"
+
+    # Case insensitivity
+    assert len(get_default_campus_locations("IITB")) == len(IITB_CAMPUS_LOCATIONS)
+    assert len(get_default_campus_locations("ViTaP")) == len(VITAP_CAMPUS_LOCATIONS)
+
+    # 2. None / whitespace defaults to iitb
+    assert get_default_campus_locations(None) == iitb_locs
+    assert get_default_campus_locations("") == iitb_locs
+    assert get_default_campus_locations("   ") == iitb_locs
+
+    # 3. Invalid campuses fail closed
+    with pytest.raises(InvalidCampusConfigurationError) as exc_info:
+        get_default_campus_locations("mit")
+    assert "Unsupported campus identifier 'mit'" in str(exc_info.value)
+
+    with pytest.raises(InvalidCampusConfigurationError):
+        get_default_campus_locations("xyz")
+
+    with pytest.raises(InvalidCampusConfigurationError):
+        get_default_campus_locations("stanford")
+
+    # 4. Storage adapters fail closed on unknown campus
+    in_mem = InMemoryStorageAdapter()
+    with pytest.raises(InvalidCampusConfigurationError):
+        in_mem.list_locations(campus_id="unknown_campus")
+
+    ddb_adapter = DynamoDBStorageAdapter("dummy_table")
+    with pytest.raises(InvalidCampusConfigurationError):
+        ddb_adapter.list_locations(campus_id="unknown_campus")
+
+    # 5. GET /locations returns 400 on invalid campus
+    res_invalid = locations_handler({"queryStringParameters": {"campusId": "unknown_campus"}}, None)
+    assert res_invalid["statusCode"] == 400
+    body_invalid = json.loads(res_invalid["body"])
+    assert body_invalid["success"] is False
+    assert body_invalid["errorCode"] == "INVALID_CAMPUS"
+
+    # 6. GET /locations returns 200 with vitap data on campusId=vitap
+    res_vitap = locations_handler({"queryStringParameters": {"campusId": "vitap"}}, None)
+    assert res_vitap["statusCode"] == 200
+    body_vitap = json.loads(res_vitap["body"])
+    assert body_vitap["success"] is True
+    assert body_vitap["isPartial"] is False
+    for loc in body_vitap["data"]:
+        assert loc.get("campusId") == "vitap" or loc.get("id", "").startswith("vitap-")
+
+
+def test_dynamodb_list_locations_gsi1_multipage_pagination(monkeypatch):
+    """
+    Acceptance Correction 1 (P1.5): GSI1 Multi-Page Pagination.
+    Verifies that list_locations() paginates through LastEvaluatedKey across multiple
+    pages of GSI1 query results and aggregates all locations.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter(table_name="TestLocationsTable")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    page1_items = [
+        {"PK": f"LOCATION#iitb-loc-{i}", "SK": "METADATA", "id": f"iitb-loc-{i}", "name": f"Location {i}", "campusId": "iitb", "active": True, "GSI1PK": "ENTITY#LOCATION"}
+        for i in range(3)
+    ]
+    page2_items = [
+        {"PK": f"LOCATION#iitb-loc-{i}", "SK": "METADATA", "id": f"iitb-loc-{i}", "name": f"Location {i}", "campusId": "iitb", "active": True, "GSI1PK": "ENTITY#LOCATION"}
+        for i in range(3, 6)
+    ]
+
+    mock_table.query.side_effect = [
+        {"Items": page1_items, "LastEvaluatedKey": {"PK": "LOCATION#iitb-loc-2", "SK": "METADATA"}},
+        {"Items": page2_items, "LastEvaluatedKey": None},
+    ]
+    mock_table.scan.return_value = {"Items": [], "LastEvaluatedKey": None}
+
+    meta_result = adapter.list_locations(include_metadata=True, campus_id="iitb")
+    assert isinstance(meta_result, dict)
+    assert meta_result["total_retrieved"] == 6
+    assert meta_result["is_partial"] is False
+    assert meta_result["gsi_pages_evaluated"] == 2
+    assert len(meta_result["locations"]) == 6
+    assert mock_table.query.call_count == 2
+    # Verify second query passed ExclusiveStartKey
+    second_call_kwargs = mock_table.query.call_args_list[1][1]
+    assert second_call_kwargs.get("ExclusiveStartKey") == {"PK": "LOCATION#iitb-loc-2", "SK": "METADATA"}
+
+
+def test_dynamodb_list_locations_dual_read_recovers_legacy_unindexed_records_regardless_of_gsi_count(monkeypatch):
+    """
+    Acceptance Correction 1 (P1.5): Unsound Catalog Count Shortcut Regression Test.
+    Proves that a dataset containing enough indexed records in GSI1 to meet or exceed
+    the catalog count (e.g. 15 indexed records >= default catalog count 10),
+    plus additional unindexed legacy records (e.g. 3 legacy records),
+    DOES NOT omit those legacy records. Dual-read scan MUST recover all unindexed records.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter(table_name="TestLocationsTable")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    # 15 GSI1-indexed records (more than default catalog of 10)
+    gsi_items = [
+        {"PK": f"LOCATION#iitb-idx-{i}", "SK": "METADATA", "id": f"iitb-idx-{i}", "name": f"Indexed Location {i}", "campusId": "iitb", "active": True, "GSI1PK": "ENTITY#LOCATION"}
+        for i in range(15)
+    ]
+    # 3 legacy unindexed records lacking GSI1PK
+    legacy_items = [
+        {"PK": f"LOCATION#iitb-legacy-{i}", "SK": "METADATA", "id": f"iitb-legacy-{i}", "name": f"Legacy Location {i}", "campusId": "iitb", "active": True}
+        for i in range(3)
+    ]
+
+    mock_table.query.return_value = {"Items": gsi_items, "LastEvaluatedKey": None}
+    mock_table.scan.return_value = {"Items": legacy_items, "LastEvaluatedKey": None}
+
+    # Execute dual-read retrieval
+    result = adapter.list_locations(include_metadata=True, campus_id="iitb")
+    assert result["total_retrieved"] == 18, (
+        f"Expected all 18 locations (15 indexed + 3 legacy), but got {result['total_retrieved']}. "
+        "Legacy records were silently omitted due to unsound catalog count comparison!"
+    )
+    assert len(result["locations"]) == 18
+    # Confirm scan was called even though len(gsi_items) >= default_count
+    assert mock_table.scan.call_count >= 1
+    retrieved_ids = {loc["id"] for loc in result["locations"]}
+    for i in range(3):
+        assert f"iitb-legacy-{i}" in retrieved_ids, f"Legacy record iitb-legacy-{i} must be recovered"
+
+
+def test_dynamodb_list_locations_dual_read_merges_and_deduplicates_by_entity_id(monkeypatch):
+    """
+    Acceptance Correction 1 (P1.5): Stable Entity ID Deduplication.
+    Verifies that if a record appears in both GSI1 query and scan (e.g. during active
+    migration index propagation), it is cleanly deduplicated by entity ID.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter(table_name="TestLocationsTable")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    item_duplicate = {
+        "PK": "LOCATION#iitb-loc-dup",
+        "SK": "METADATA",
+        "id": "iitb-loc-dup",
+        "name": "Duplicate Canteen",
+        "campusId": "iitb",
+        "active": True,
+        "GSI1PK": "ENTITY#LOCATION",
+    }
+    item_unique_gsi = {
+        "PK": "LOCATION#iitb-loc-unique-gsi",
+        "SK": "METADATA",
+        "id": "iitb-loc-unique-gsi",
+        "name": "Unique GSI Canteen",
+        "campusId": "iitb",
+        "active": True,
+        "GSI1PK": "ENTITY#LOCATION",
+    }
+    item_unique_scan = {
+        "PK": "LOCATION#iitb-loc-unique-scan",
+        "SK": "METADATA",
+        "id": "iitb-loc-unique-scan",
+        "name": "Unique Scan Canteen",
+        "campusId": "iitb",
+        "active": True,
+    }
+
+    mock_table.query.return_value = {"Items": [item_duplicate, item_unique_gsi], "LastEvaluatedKey": None}
+    mock_table.scan.return_value = {"Items": [item_duplicate, item_unique_scan], "LastEvaluatedKey": None}
+
+    locs = adapter.list_locations(include_metadata=False, campus_id="iitb")
+    assert len(locs) == 3, f"Expected exactly 3 unique locations, got {len(locs)}"
+    ids = [loc["id"] for loc in locs]
+    assert sorted(ids) == ["iitb-loc-dup", "iitb-loc-unique-gsi", "iitb-loc-unique-scan"]
+
+
+def test_dynamodb_list_locations_scan_fallback_when_gsi1_fails(monkeypatch):
+    """
+    Acceptance Correction 1 (P1.5): GSI1 Failure Graceful Scan Fallback.
+    Verifies that if GSI1 query throws an exception (e.g. index build in progress or
+    ResourceNotFoundException), it gracefully falls back to full scan and returns active locations.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter(table_name="TestLocationsTable")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    # GSI1 query fails
+    mock_table.query.side_effect = Exception("Index GSI1 not active or available")
+    # Scan succeeds
+    scan_items = [
+        {"PK": f"LOCATION#iitb-loc-{i}", "SK": "METADATA", "id": f"iitb-loc-{i}", "name": f"Scan Location {i}", "campusId": "iitb", "active": True}
+        for i in range(4)
+    ]
+    mock_table.scan.return_value = {"Items": scan_items, "LastEvaluatedKey": None}
+
+    meta_result = adapter.list_locations(include_metadata=True, campus_id="iitb")
+    assert meta_result["total_retrieved"] == 4
+    assert meta_result["scan_pages_evaluated"] == 1
+    assert len(meta_result["locations"]) == 4
+
+
+def test_dynamodb_list_locations_fails_closed_when_scan_fails(monkeypatch):
+    """
+    Acceptance Correction 1 (P1.5): Fail-Closed on Persistence Errors.
+    Verifies that if DynamoDB persistence scan encounters an unexpected error,
+    it fails closed with DatabasePersistenceError instead of returning corrupted/silent empty data.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter(table_name="TestLocationsTable")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    mock_table.query.return_value = {"Items": [], "LastEvaluatedKey": None}
+    mock_table.scan.side_effect = Exception("Unrecoverable DynamoDB InternalServerError")
+
+    with pytest.raises(DatabasePersistenceError) as exc_info:
+        adapter.list_locations(campus_id="iitb")
+    assert "Failed to retrieve campus locations from database" in str(exc_info.value)
+
+
+def test_dynamodb_list_locations_safety_cap_exposes_partial_honestly(monkeypatch):
+    """
+    Acceptance Correction 1 (P1.5): Honest Partial Disclosure on Safety Limits.
+    Verifies that if GSI1 query or scan reaches its max safety page cap with
+    LastEvaluatedKey remaining, is_partial is honestly set to True.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter(table_name="TestLocationsTable")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    # Always returns LastEvaluatedKey to simulate hitting safety limit
+    mock_table.query.return_value = {
+        "Items": [{"PK": "LOCATION#iitb-item", "SK": "METADATA", "id": "iitb-item", "name": "Item", "campusId": "iitb", "active": True, "GSI1PK": "ENTITY#LOCATION"}],
+        "LastEvaluatedKey": {"PK": "LOCATION#iitb-item", "SK": "METADATA"}
+    }
+    mock_table.scan.return_value = {"Items": [], "LastEvaluatedKey": None}
+
+    meta_result = adapter.list_locations(include_metadata=True, campus_id="iitb")
+    assert meta_result["is_partial"] is True, "Must disclose is_partial=True when safety cap reached"
+    assert meta_result["gsi_pages_evaluated"] == 25, "Must halt at max_gsi_pages safety limit"
+
+
+def test_dynamodb_list_locations_migration_completed_flag_bypasses_scan(monkeypatch):
+    """
+    Acceptance Correction 1 (P1.5): MIGRATION_COMPLETED Optimization.
+    When MIGRATION_COMPLETED=true is set in the environment, verifies that dual-read
+    scan is bypassed and GSI1 partition query is used exclusively.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    monkeypatch.setenv("MIGRATION_COMPLETED", "true")
+
+    adapter = DynamoDBStorageAdapter(table_name="TestLocationsTable")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    gsi_items = [
+        {"PK": f"LOCATION#iitb-loc-{i}", "SK": "METADATA", "id": f"iitb-loc-{i}", "name": f"Location {i}", "campusId": "iitb", "active": True, "GSI1PK": "ENTITY#LOCATION"}
+        for i in range(5)
+    ]
+    mock_table.query.return_value = {"Items": gsi_items, "LastEvaluatedKey": None}
+
+    locs = adapter.list_locations(include_metadata=False, campus_id="iitb")
+    assert len(locs) == 5
+    assert mock_table.query.call_count == 1
+    # Verify scan was NOT called because migration is completed
+    assert mock_table.scan.call_count == 0
+
 
 
 

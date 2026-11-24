@@ -444,9 +444,9 @@ Status Definitions:
 
 ### P1.5 — DynamoDB GSI1 Data Model & Global Secondary Indexing
 - **Severity:** P1 (Database Performance & Architecture)
-- **Defect:** The single-table DynamoDB schema lacked global secondary indexes for polymorphic entity queries. Querying entity types required full table scans with filter expressions, causing linear cost and latency growth as report volume expanded.
-- **Evidence:** CloudFormation template `MainTable` defined only `PK` (Hash) and `SK` (Range) with zero secondary indexes.
-- **Root Cause:** Single-table design relied exclusively on primary key partitions (`PK`, `SK`).
+- **Defect:** The single-table DynamoDB schema lacked global secondary indexes for polymorphic entity queries. Querying entity types required full table scans with filter expressions, causing linear cost and latency growth as report volume expanded. Furthermore, an earlier implementation of `list_locations` contained an unsound catalog count comparison (`len(gsi_items) >= default_count`) that caused dual-read scan to terminate prematurely, silently omitting legacy unindexed records when indexed records met the catalog count.
+- **Evidence:** CloudFormation template `MainTable` defined only `PK` (Hash) and `SK` (Range) with zero secondary indexes. In `database.py`, GSI1 query did not paginate over `LastEvaluatedKey` and bypassed fallback scan on count threshold.
+- **Root Cause:** Single-table design relied exclusively on primary key partitions (`PK`, `SK`), and dual-read compatibility shortcut incorrectly conflated catalog count with complete table retrieval.
 - **Fix Implemented:**
   1. In `infrastructure/template.yaml`, added `GSI1PK` and `GSI1SK` attribute definitions and created `GlobalSecondaryIndexes: GSI1` on `MainTable` with `ProjectionType: ALL`.
   2. Defined partition key schema:
@@ -454,50 +454,65 @@ Status Definitions:
      - Reports: `GSI1PK = "ENTITY#REPORT"`, `GSI1SK = f"REPORT#{timestamp}#{report_id}"`
   3. Populated GSI1 attributes in `seed_locations`, `record_report`, and `InMemoryStorageAdapter`.
   4. Updated IAM policies in `infrastructure/template.yaml` for `GetLocationsFunction`, `GetQueueDetailsFunction`, `SubmitReportFunction`, and `GetRecommendationsFunction` to grant least-privilege permissions on `!Sub "${MainTable.Arn}/index/GSI1"`.
-  5. Sparse index handling & safe migration engine: Created `backend/shared/migration.py` (`backfill_gsi1_records`) providing idempotent, bounded backfilling with conditional updates (`attribute_not_exists(GSI1PK)`), resumption from `ExclusiveStartKey`, and dry-run capabilities. Dual-read compatibility in `list_locations` ensures legacy unindexed records remain discoverable until backfill completes.
+  5. Sparse index handling & safe migration engine: Created `backend/shared/migration.py` (`backfill_gsi1_records`) providing idempotent, bounded backfilling with conditional updates (`attribute_not_exists(GSI1PK)`), resumption from `ExclusiveStartKey`, and dry-run capabilities.
+  6. **Dual-Read Reliability & Pagination:**
+     - `DynamoDBStorageAdapter.list_locations()` paginates through `LastEvaluatedKey` across all GSI1 query pages (up to safety limit `max_gsi_pages = 25`).
+     - Removed the unsound `len(gsi_items) >= default_count` shortcut: fallback scan for `attribute_not_exists(GSI1PK)` executes reliably to recover all unindexed legacy records unless `MIGRATION_COMPLETED=true` is explicitly set.
+     - Merges indexed and scanned records with stable entity ID deduplication (`get_entity_id(item)`).
+     - Exposes partial results honestly: sets `is_partial = True` and returns top-level `isPartial: true` in GET /locations API if safety limits are reached with unexhausted pages.
+     - Resilient error handling: falls back to full scan if GSI1 query fails, and fails closed with `DatabasePersistenceError` if persistence scan fails.
 - **Tests Performed:**
   1. `test_template_main_table_has_gsi1_entity_type_index`: Asserts GSI1 index configuration in CloudFormation template.
   2. `test_gsi1_keys_populated_on_locations_and_reports`: Verifies `GSI1PK` and `GSI1SK` are populated accurately on write.
   3. `test_gsi1_sparse_index_silently_omits_unindexed_records_reproduction`: Proves raw GSI1 query omits unindexed legacy records and verifies adapter fallback recovery.
   4. `test_gsi1_backfill_migration_completes_and_is_idempotent`: Proves backfill populates GSI keys and is 100% idempotent on repeated runs.
   5. `test_gsi1_backfill_migration_partial_and_interrupted_resumption`: Proves interrupted migration resumes cleanly from `LastEvaluatedKey`.
+  6. `test_dynamodb_list_locations_gsi1_multipage_pagination`: Verifies GSI1 query follows `ExclusiveStartKey` across multiple pages and aggregates all locations.
+  7. `test_dynamodb_list_locations_dual_read_recovers_legacy_unindexed_records_regardless_of_gsi_count`: Regression test proving that a dataset with 15 indexed records and 3 legacy unindexed records recovers all 18 records without omission.
+  8. `test_dynamodb_list_locations_dual_read_merges_and_deduplicates_by_entity_id`: Verifies duplicate records appearing in both query and scan are cleanly deduplicated.
+  9. `test_dynamodb_list_locations_scan_fallback_when_gsi1_fails`: Verifies graceful fallback to scan when GSI1 query fails.
+  10. `test_dynamodb_list_locations_fails_closed_when_scan_fails`: Verifies persistence scan errors fail closed with `DatabasePersistenceError`.
+  11. `test_dynamodb_list_locations_safety_cap_exposes_partial_honestly`: Verifies `is_partial=True` is disclosed when safety caps are reached.
+  12. `test_dynamodb_list_locations_migration_completed_flag_bypasses_scan`: Verifies `MIGRATION_COMPLETED=true` bypasses scan and queries GSI1 directly.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** `5db118c` (Refined in Acceptance Review)
+- **Commit SHA:** `5db118c` (Refined in Final Acceptance Corrections)
 
 ### P1.6 — Multi-Campus Isolation & Parameterization
 - **Severity:** P1 (Portability & Multi-Tenancy Architecture)
-- **Defect:** Campus location fixtures and configurations were hardcoded to IIT Bombay (`iitb`), preventing clean multi-campus deployments and risking cross-campus data mixing.
-- **Evidence:** Location definitions in `database.py` were statically named `CAMPUS_LOCATIONS` with hardcoded IIT Bombay hostel and mess identifiers.
-- **Root Cause:** Hardcoded campus constants and absence of CloudFormation template parameters.
+- **Defect:** Campus location fixtures and configurations were hardcoded to IIT Bombay (`iitb`), preventing clean multi-campus deployments and risking cross-campus data mixing. Furthermore, unknown campus identifiers silently fell back to IIT Bombay rather than failing closed.
+- **Evidence:** Location definitions in `database.py` were statically named `CAMPUS_LOCATIONS` with hardcoded IIT Bombay hostel and mess identifiers. `get_default_campus_locations()` previously returned IIT Bombay catalog for any arbitrary string.
+- **Root Cause:** Hardcoded campus constants, absence of CloudFormation template parameters, and permissive fallback behavior.
 - **Fix Implemented:**
   1. Parameterized `CampusId` in `infrastructure/template.yaml` with default `iitb` and wired `CAMPUS_ID: !Ref CampusId` to `Globals.Function.Environment.Variables`.
-  2. Implemented dynamic catalog lookup `get_default_campus_locations(campus_id)` supporting both `iitb` (IIT Bombay) and `vitap` (VIT-AP University), defaulting gracefully to `iitb`.
-  3. In `database.py`, dynamic environment variable `CAMPUS_ID = os.environ.get("CAMPUS_ID", "iitb").lower()` isolates campus data models.
+  2. Implemented dynamic catalog lookup `get_default_campus_locations(campus_id)` supporting both `iitb` (IIT Bombay) and `vitap` (VIT-AP University).
+  3. **Strict Fail-Closed Validation:** Defined `InvalidCampusConfigurationError`. Any unknown or unsupported campus identifier (e.g. `'mit'`, `'xyz'`) immediately raises `InvalidCampusConfigurationError` in `get_default_campus_locations()` and all storage adapters.
+  4. In `backend/functions/get_locations/app.py`, query parameter `campusId` is validated, returning HTTP 400 with `errorCode: "INVALID_CAMPUS"` on invalid campus inputs.
+  5. In `database.py`, dynamic environment variable `CAMPUS_ID = os.environ.get("CAMPUS_ID", DEFAULT_CAMPUS_ID).lower()` isolates campus data models.
 - **Tests Performed:**
   1. `test_template_has_campus_id_parameter_wired_to_globals`: Verifies `CampusId` parameter and environment variable mapping in SAM template.
   2. `test_campus_id_environment_selects_locations_dynamically`: Proves that toggling `CAMPUS_ID` selects the corresponding campus location catalog.
+  3. `test_campus_configuration_validation_and_fail_closed`: Verifies that supported campuses (`iitb`, `vitap`, case-insensitive) resolve, `None`/empty defaults to `iitb`, unknown campuses fail closed with `InvalidCampusConfigurationError`, and GET /locations returns HTTP 400 `INVALID_CAMPUS`.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** `5db118c` (Refined in Acceptance Review)
+- **Commit SHA:** `5db118c` (Refined in Final Acceptance Corrections)
 
 ### P1.7 — Location Data Provenance Metadata & Single-Table Schema Leakage Protection
 - **Severity:** P1 (Data Transparency & Information Security)
-- **Defect:** Campus dining locations lacked structured provenance metadata indicating their verification origin, meal session schedules, and crowdsourcing status. Furthermore, single-table internal keys (`PK`, `SK`, `entityType`, `GSI1PK`, `GSI1SK`) risked leaking into public API responses.
-- **Evidence:** Inspected `GET /locations` output: returned raw DynamoDB attributes `PK` and `SK` in early prototypes, and location objects had no metadata verifying the institutional source of operating hours.
-- **Root Cause:** Unstructured location dictionaries and un-sanitized API response serialization.
+- **Defect:** Campus dining locations lacked structured provenance metadata indicating their verification origin, meal session schedules, and crowdsourcing status. Furthermore, early revisions claimed unsupported compilation dates (`"2026-01-15"`) and named student mentorship bodies without verifiable institutional records. Single-table internal keys (`PK`, `SK`, `entityType`, `GSI1PK`, `GSI1SK`) risked leaking into public API responses.
+- **Evidence:** Inspected `GET /locations` output: returned raw DynamoDB attributes `PK` and `SK` in early prototypes, and location objects had unverified institutional attribution claims.
+- **Root Cause:** Unstructured location dictionaries, fabricated compilation dates, and un-sanitized API response serialization.
 - **Fix Implemented:**
-  1. Added truthful, community-grounded `provenance` metadata to all campus locations in `IITB_CAMPUS_LOCATIONS` and `VITAP_CAMPUS_LOCATIONS`:
-     - `sourceType`: `"COMMUNITY_DIRECTORY"` (strictly rejecting unsupported claims of official institutional directory certification)
-     - `verifiedBy`: Community bodies (e.g. `"IIT Bombay Student Mentor Program Directory"`, `"Hostel 2 Student Council Guide"`, `"VIT-AP Student Dining Guide"`)
-     - `lastVerifiedDate`: `"2026-01-15"` (the actual compilation date of the campus student guides)
-     - `isCrowdsourced`: `False` (for static directory details)
-     - `crowdsourcedAttributes`: `["reportedWaitMinutes", "queueLength", "note"]` (explicitly designating that only dynamic queue observations are crowdsourced)
+  1. **Truthful, Evidence-Based Provenance Standard:**
+     - Static venue details (operating hours, names, capacities) are marked with `sourceType: "COMMUNITY_SOURCED"`, `sourceAttribution: "Informal campus community guide (Unverified student compilation)"`, and `verificationStatus: "UNVERIFIED"`.
+     - Fabricated dates and administrative certifications were eliminated: `verifiedBy: None`, `lastVerifiedDate: None`.
+     - Explicit community disclaimer added to every location: *"Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions."*
+     - Clear distinction between static data and crowdsourced queue observations: `isCrowdsourced: False` for venue metadata, with `crowdsourcedAttributes: ["reportedWaitMinutes", "queueLength", "note"]`.
   2. In `backend/functions/get_locations/app.py`, strictly stripped internal single-table keys (`PK`, `SK`, `entityType`, `GSI1PK`, `GSI1SK`) while preserving `provenance` in public responses.
 - **Tests Performed:**
-  1. `test_campus_locations_have_structured_provenance_metadata`: Asserts presence and structure of provenance metadata across all catalog locations.
+  1. `test_campus_locations_have_structured_provenance_metadata`: Asserts presence and structure of provenance metadata across all catalog locations, ensuring `sourceType == 'COMMUNITY_SOURCED'`, `verificationStatus == 'UNVERIFIED'`, `verifiedBy is None`, and `lastVerifiedDate is None`.
   2. `test_get_locations_exposes_provenance_without_leaking_internal_keys`: Verifies `GetLocationsFunction` exposes `provenance` while stripping `PK`, `SK`, `entityType`, `GSI1PK`, `GSI1SK`.
-  3. `test_provenance_integrity_and_forbidden_unsupported_claims`: Strictly asserts `sourceType == 'COMMUNITY_DIRECTORY'`, `lastVerifiedDate == '2026-01-15'`, and forbids unsupported claims like `OFFICIAL_INSTITUTIONAL_DIRECTORY` or `Campus Dining Operations`.
+  3. `test_provenance_integrity_and_forbidden_unsupported_claims`: Strictly asserts `sourceType == 'COMMUNITY_SOURCED'`, `lastVerifiedDate is None`, `verifiedBy is None`, and forbids unsupported claims like `OFFICIAL_INSTITUTIONAL_DIRECTORY` or `Campus Dining Operations`.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** `5db118c` (Refined in Acceptance Review)
+- **Commit SHA:** `5db118c` (Refined in Final Acceptance Corrections)
 
 ---
 

@@ -61,6 +61,7 @@ def create_api_response(
     request_id: Optional[str] = None,
     cors: bool = True,
     allowed_origin: Optional[str] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """
     Format Lambda proxy response with consistent JSON body, security headers, and CORS.
@@ -85,6 +86,9 @@ def create_api_response(
 
     if data is not None:
         body["data"] = data
+
+    for k, v in kwargs.items():
+        body[k] = v
 
     if request_id:
         body["requestId"] = request_id

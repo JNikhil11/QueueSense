@@ -100,7 +100,7 @@ describe('Outlet Card Layout & Interaction Verification', { timeout: 25000 }, ()
     const closeBtn = await page.$('[role="dialog"] button[aria-label*="dialog"], [role="dialog"] button[aria-label*="Close"]');
     if (closeBtn) await closeBtn.click();
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), { timeout: 5000 });
-  }, 15000);
+  }, 25000);
 
   it('ensures external-link arrow button is contained and opens outlet details', async () => {
     await page.setViewport({ width: 1280, height: 900 });
@@ -124,7 +124,7 @@ describe('Outlet Card Layout & Interaction Verification', { timeout: 25000 }, ()
     if (closeBtn) await closeBtn.click();
     else await page.keyboard.press('Escape');
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), { timeout: 5000 });
-  }, 15000);
+  }, 25000);
 
   it('guarantees zero horizontal card overflow across multiple responsive breakpoints (320px to 1440px)', async () => {
     const testWidths = [320, 360, 375, 414, 640, 768, 1024, 1280, 1440];

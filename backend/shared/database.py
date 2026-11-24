@@ -58,22 +58,31 @@ class LocationNotFoundError(QueueSenseDatabaseError):
 # Note: VerificationStatus is strictly STUDENT_SOURCED or COMMUNITY_LISTING.
 # Precise integer seating capacities and unverified claims have been removed.
 # =========================================================================
+# Campus Directory Catalogs (Truthful, Evidence-Based Provenance)
+# Note: Static venue details (hours, locations, names) are informal community
+# listings. They are unverified and not certified by any campus administration.
+# Dynamic queue estimates and wait reports are crowdsourced.
+# =========================================================================
 
 IITB_CAMPUS_LOCATIONS = [
     {
         "id": "iitb-mess-h12-14",
+        "campusId": "iitb",
         "name": "Hostel 12-13-14 Dining Complex",
         "category": "MESS",
         "description": "Central multi-tiered student mess serving breakfast, lunch, snacks, and dinner counters.",
         "landmarkLocation": "Hostel 12-14 Complex, Lakeside Road, East Campus",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Council of Student Affairs / Student Mentorship Directory",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "IIT Bombay Council of Student Affairs",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Tiffin (16:30-18:00), Dinner (19:30-21:45)",
         "capacityEstimate": "Large Dining Complex (~400-600 approx.)",
@@ -81,18 +90,22 @@ IITB_CAMPUS_LOCATIONS = [
     },
     {
         "id": "iitb-mess-h15-16",
+        "campusId": "iitb",
         "name": "Hostel 15-16 Dining Hall",
         "category": "MESS",
         "description": "Modern hostel mess catering to senior undergraduate and postgraduate wings.",
         "landmarkLocation": "Hostel 15-16 Quadrangle, North-East Campus",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Student Mentor Program (SMP) Freshers Guide",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "IIT Bombay Student Mentor Program",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Tiffin (16:30-18:00), Dinner (19:30-21:45)",
         "capacityEstimate": "Large Dining Hall (~400-500 approx.)",
@@ -100,18 +113,22 @@ IITB_CAMPUS_LOCATIONS = [
     },
     {
         "id": "iitb-mess-h2",
+        "campusId": "iitb",
         "name": "Hostel 2 Dining Hall & Mess",
         "category": "MESS",
         "description": "Hostel mess renowned for rotating regional menus and dining counters.",
         "landmarkLocation": "Hostel 2 Quadrangle, near Gymkhana Grounds",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Hostel 2 Student Guide",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "IIT Bombay Hostel 2 Council",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Tiffin (16:30-18:00), Dinner (19:30-21:30)",
         "capacityEstimate": "Medium Dining Hall (~250-350 approx.)",
@@ -119,18 +136,22 @@ IITB_CAMPUS_LOCATIONS = [
     },
     {
         "id": "iitb-canteen-h3",
+        "campusId": "iitb",
         "name": "Hostel 3 Canteen & Juice Centre",
         "category": "CANTEEN",
         "description": "Campus late-night staple serving fresh fruit juices, dosas, parathas, and tea.",
         "landmarkLocation": "Ground Floor, Hostel 3, Main Hostel Avenue",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Gymkhana Freshers Guide",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "IIT Bombay Gymkhana",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "14:00 - 02:00 (Late Night)",
         "capacityEstimate": "Cafeteria Seating (~80-120 approx.)",
@@ -138,18 +159,22 @@ IITB_CAMPUS_LOCATIONS = [
     },
     {
         "id": "iitb-canteen-lhc",
+        "campusId": "iitb",
         "name": "LHC Food Court (Lecture Hall)",
         "category": "CANTEEN",
         "description": "Daytime cafeteria serving express lunches, coffee, sandwiches, and rolls.",
         "landmarkLocation": "Ground Floor, Lecture Hall Complex (LHC), Academic Area",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Student Mentor Program Academic Guide",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "IIT Bombay Academic Area Mentors",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "08:30 - 18:30 (Class Hours)",
         "capacityEstimate": "Medium Food Court (~150-220 approx.)",
@@ -157,18 +182,22 @@ IITB_CAMPUS_LOCATIONS = [
     },
     {
         "id": "iitb-canteen-gulmohar",
+        "campusId": "iitb",
         "name": "Gulmohar Restaurant & Cafe",
         "category": "CANTEEN",
         "description": "Multi-cuisine sit-down restaurant and guest lounge serving meals and thalis.",
         "landmarkLocation": "Gulmohar Building, First Floor, Opposite Main Building",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Campus Commercial Establishments Directory",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "IIT Bombay Commercial Establishments Register",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "11:00 - 22:30",
         "capacityEstimate": "Restaurant Seating (~120-180 approx.)",
@@ -176,18 +205,22 @@ IITB_CAMPUS_LOCATIONS = [
     },
     {
         "id": "iitb-canteen-kresit",
+        "campusId": "iitb",
         "name": "KReSIT IT Canteen (CSE)",
         "category": "CANTEEN",
         "description": "Quick-service eatery favored by computer science students for coffee, noodles, and wraps.",
         "landmarkLocation": "Kanwal Rekhi School of Information Technology (KReSIT)",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "Dept of Computer Science & Engineering Student Mentors",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "Dept of CSE Student Mentors",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "09:00 - 20:00",
         "capacityEstimate": "Small Express Counter (~60-90 approx.)",
@@ -195,18 +228,22 @@ IITB_CAMPUS_LOCATIONS = [
     },
     {
         "id": "iitb-cafe-92",
+        "campusId": "iitb",
         "name": "Cafe 92 (SAC Hangout)",
         "category": "CANTEEN",
         "description": "Active evening hangout spot serving milkshakes, burgers, hot fries, and snacks.",
         "landmarkLocation": "Students Activity Centre (SAC) Grounds",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "IIT Bombay Gymkhana Cultural Affairs Guide",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "IIT Bombay Gymkhana Cultural Affairs",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "16:00 - 01:00 (Evening / Night)",
         "capacityEstimate": "Outdoor & Indoor SAC Area (~100-140 approx.)",
@@ -214,18 +251,22 @@ IITB_CAMPUS_LOCATIONS = [
     },
     {
         "id": "iitb-canteen-brewberrys",
+        "campusId": "iitb",
         "name": "Brewberrys The Coffee Bar",
         "category": "CANTEEN",
         "description": "Coffee, bakery items, iced brews, and tables for study sessions.",
         "landmarkLocation": "Adjacent to Central Library, Main Academic Spine",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "Central Library Amenities Student Guide",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "Central Library Amenities Committee",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "08:00 - 23:00",
         "capacityEstimate": "Study Cafe Seating (~60-80 approx.)",
@@ -233,18 +274,22 @@ IITB_CAMPUS_LOCATIONS = [
     },
     {
         "id": "iitb-amul-parlour",
+        "campusId": "iitb",
         "name": "Amul Ice Cream & Dairy Parlour",
         "category": "CANTEEN",
         "description": "Dairy outlet offering ice creams, flavored milk, milkshakes, and packaged snacks.",
         "landmarkLocation": "Near Hostel 1 & Campus School Junction",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "Campus Commercial Amenities Register",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "IIT Bombay Campus Amenities Registry",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "09:00 - 23:00",
         "capacityEstimate": "Kiosk Counter (Takeaway / Bench Seating)",
@@ -255,18 +300,22 @@ IITB_CAMPUS_LOCATIONS = [
 VITAP_CAMPUS_LOCATIONS = [
     {
         "id": "vitap-mess-a",
+        "campusId": "vitap",
         "name": "Central Mess A (North Block)",
         "category": "MESS",
         "description": "Multi-counter student dining hall serving breakfast, lunch, and dinner.",
         "landmarkLocation": "North Dining Block, Near MH-1",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "VIT-AP Student Dining Guide",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:30)",
         "capacityEstimate": "Large Dining Hall (~350-450 approx.)",
@@ -274,18 +323,22 @@ VITAP_CAMPUS_LOCATIONS = [
     },
     {
         "id": "vitap-mess-b",
+        "campusId": "vitap",
         "name": "South Mess B (Annex Dining)",
         "category": "MESS",
         "description": "South dining hall featuring vegetarian and regional dining counters.",
         "landmarkLocation": "South Student Block, Near LH-1",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "VIT-AP Student Dining Guide",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:00)",
         "capacityEstimate": "Medium Dining Hall (~250-350 approx.)",
@@ -293,18 +346,22 @@ VITAP_CAMPUS_LOCATIONS = [
     },
     {
         "id": "vitap-rock-plaza",
+        "campusId": "vitap",
         "name": "Rock Plaza Food Court",
         "category": "CANTEEN",
         "description": "Open-air food court offering quick snacks, fruit juices, and meals.",
         "landmarkLocation": "Central Plaza, Between Academic & Hostel Blocks",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "VIT-AP Student Dining Guide",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "10:00 - 23:00",
         "capacityEstimate": "Open Plaza Seating (~120-180 approx.)",
@@ -312,18 +369,22 @@ VITAP_CAMPUS_LOCATIONS = [
     },
     {
         "id": "vitap-academic-bistro",
+        "campusId": "vitap",
         "name": "Academic Bistro",
         "category": "CANTEEN",
         "description": "Express counter near lecture halls for sandwiches, rolls, and coffee.",
         "landmarkLocation": "Central Block (CB), Ground Floor",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "VIT-AP Student Dining Guide",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "08:30 - 18:00 (Class Hours)",
         "capacityEstimate": "Express Counter (~80-120 approx.)",
@@ -331,18 +392,22 @@ VITAP_CAMPUS_LOCATIONS = [
     },
     {
         "id": "vitap-midnight-fuel",
+        "campusId": "vitap",
         "name": "Midnight Fuel Canteen",
         "category": "CANTEEN",
         "description": "Late-evening campus eatery active during study and project hours.",
         "landmarkLocation": "Hostel Avenue Commercial Area",
-        "verificationStatus": "STUDENT_SOURCED",
-        "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
+        "verificationStatus": "UNVERIFIED",
+        "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
         "provenance": {
-            "sourceType": "COMMUNITY_DIRECTORY",
-            "verifiedBy": "VIT-AP Student Dining Guide",
-            "lastVerifiedDate": "2026-01-15",
+            "sourceType": "COMMUNITY_SOURCED",
+            "sourceAttribution": "Informal campus community guide (Unverified student compilation)",
+            "verificationStatus": "UNVERIFIED",
+            "verifiedBy": None,
+            "lastVerifiedDate": None,
             "isCrowdsourced": False,
             "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+            "disclaimer": "Venue operating hours, menus, and capacities are unverified community-compiled approximations. Real-time wait times and queue lengths are dynamic crowdsourced student submissions.",
         },
         "openHours": "17:00 - 02:00 (Late Night)",
         "capacityEstimate": "Late Night Counter (~100-150 approx.)",
@@ -350,11 +415,38 @@ VITAP_CAMPUS_LOCATIONS = [
     },
 ]
 
-def get_default_campus_locations(campus_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    cid = (campus_id or os.environ.get("CAMPUS_ID", "iitb")).lower()
-    return VITAP_CAMPUS_LOCATIONS if cid == "vitap" else IITB_CAMPUS_LOCATIONS
+class InvalidCampusConfigurationError(ValueError):
+    """Raised when an unknown or unsupported campus identifier is provided."""
+    pass
 
-ACTIVE_CAMPUS = os.environ.get("CAMPUS_ID", "iitb").lower()
+SUPPORTED_CAMPUSES = {
+    "iitb": IITB_CAMPUS_LOCATIONS,
+    "vitap": VITAP_CAMPUS_LOCATIONS,
+}
+DEFAULT_CAMPUS_ID = "iitb"
+
+def get_default_campus_locations(campus_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Returns campus location directory for the requested campus ID.
+    Fails closed if an invalid/unknown campus ID is provided.
+    If campus_id is None, defaults to CAMPUS_ID env var, or DEFAULT_CAMPUS_ID ('iitb').
+    """
+    if campus_id is None:
+        raw_cid = os.environ.get("CAMPUS_ID", DEFAULT_CAMPUS_ID)
+    else:
+        raw_cid = campus_id
+
+    if not raw_cid or not raw_cid.strip():
+        raw_cid = DEFAULT_CAMPUS_ID
+
+    cid = raw_cid.strip().lower()
+    if cid not in SUPPORTED_CAMPUSES:
+        raise InvalidCampusConfigurationError(
+            f"Unsupported campus identifier '{raw_cid}'. Supported campus identifiers are: {sorted(list(SUPPORTED_CAMPUSES.keys()))}."
+        )
+    return SUPPORTED_CAMPUSES[cid]
+
+ACTIVE_CAMPUS = os.environ.get("CAMPUS_ID", DEFAULT_CAMPUS_ID).lower()
 DEFAULT_CAMPUS_LOCATIONS = get_default_campus_locations()
 
 
@@ -366,7 +458,9 @@ class BaseStorageAdapter(ABC):
     """Abstract interface defining the required persistence contract."""
 
     @abstractmethod
-    def list_locations(self) -> List[Dict[str, Any]]:
+    def list_locations(
+        self, include_metadata: bool = False, campus_id: Optional[str] = None
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         pass
 
     @abstractmethod
@@ -456,54 +550,165 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
         if self._table is None:
             raise DatabasePersistenceError("DynamoDB storage table is not available.")
 
-    def list_locations(self) -> List[Dict[str, Any]]:
+    def list_locations(
+        self, include_metadata: bool = False, campus_id: Optional[str] = None
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+        # 1. Campus ID validation & normalization (fail fast before DB operations)
+        if campus_id is None:
+            raw_cid = os.environ.get("CAMPUS_ID", DEFAULT_CAMPUS_ID)
+        else:
+            raw_cid = campus_id
+        if not raw_cid or not raw_cid.strip():
+            raw_cid = DEFAULT_CAMPUS_ID
+        cid = raw_cid.strip().lower()
+        if cid not in SUPPORTED_CAMPUSES:
+            raise InvalidCampusConfigurationError(
+                f"Unsupported campus identifier '{raw_cid}'. Supported campus identifiers are: {sorted(list(SUPPORTED_CAMPUSES.keys()))}."
+            )
+
         self._ensure_table()
+
         try:
-            from boto3.dynamodb.conditions import Key, Attr  # type: ignore
-
-            # 1. Prefer GSI1 indexed query: direct partition retrieval
-            gsi_items = []
             try:
-                resp = self._table.query(
-                    IndexName="GSI1",
-                    KeyConditionExpression=Key("GSI1PK").eq("ENTITY#LOCATION"),
-                )
-                gsi_items = resp.get("Items", [])
+                from boto3.dynamodb.conditions import Key, Attr  # type: ignore
+            except ImportError:
+                class Key:  # type: ignore
+                    def __init__(self, name):
+                        self.name = name
+                    def eq(self, val):
+                        return (self.name, "eq", val)
+                class Attr:  # type: ignore
+                    def __init__(self, name):
+                        self.name = name
+                    def eq(self, val):
+                        return (self.name, "eq", val)
+                    def ne(self, val):
+                        return (self.name, "ne", val)
+                    def not_exists(self):
+                        return (self.name, "not_exists")
+                    def __and__(self, other):
+                        return ("AND", self, other)
+
+            migration_completed = os.environ.get("MIGRATION_COMPLETED", "").strip().lower() == "true"
+
+            items_by_id: Dict[str, Dict[str, Any]] = {}
+            is_partial = False
+            gsi_pages = 0
+            scan_pages = 0
+            max_gsi_pages = 25
+            max_scan_pages = 25
+
+            gsi_succeeded = False
+            gsi_last_evaluated_key = None
+
+            def get_entity_id(item: Dict[str, Any]) -> str:
+                if item.get("id"):
+                    return str(item["id"])
+                pk = str(item.get("PK", ""))
+                if pk.startswith("LOCATION#"):
+                    return pk[len("LOCATION#"):]
+                return pk
+
+            def belongs_to_campus(item: Dict[str, Any]) -> bool:
+                item_cid = item.get("campusId")
+                if item_cid is not None:
+                    return str(item_cid).strip().lower() == cid
+                ent_id = get_entity_id(item).lower()
+                # Check other supported campuses
+                for other_cid in SUPPORTED_CAMPUSES:
+                    if other_cid != DEFAULT_CAMPUS_ID and ent_id.startswith(f"{other_cid}-"):
+                        return cid == other_cid
+                # If no other campus prefix, defaults to DEFAULT_CAMPUS_ID (IIT Bombay legacy records)
+                return cid == DEFAULT_CAMPUS_ID
+
+            # Phase 1: Query GSI1 partition ENTITY#LOCATION with full pagination
+            try:
+                while gsi_pages < max_gsi_pages:
+                    query_kwargs: Dict[str, Any] = {
+                        "IndexName": "GSI1",
+                        "KeyConditionExpression": Key("GSI1PK").eq("ENTITY#LOCATION"),
+                    }
+                    if gsi_last_evaluated_key:
+                        query_kwargs["ExclusiveStartKey"] = gsi_last_evaluated_key
+
+                    resp = self._table.query(**query_kwargs)
+                    gsi_pages += 1
+                    for it in resp.get("Items", []):
+                        ent_id = get_entity_id(it)
+                        if ent_id and ent_id not in items_by_id:
+                            items_by_id[ent_id] = it
+
+                    gsi_last_evaluated_key = resp.get("LastEvaluatedKey")
+                    if not gsi_last_evaluated_key:
+                        break
+
+                if gsi_last_evaluated_key:
+                    is_partial = True
+
+                gsi_succeeded = True
             except Exception as gsi_err:
-                logger.debug("GSI1 query on ENTITY#LOCATION fell back to paginated scan: %s", str(gsi_err))
+                logger.warning("GSI1 query on ENTITY#LOCATION failed or unavailable; falling back to full scan: %s", str(gsi_err))
+                gsi_succeeded = False
 
-            # If GSI1 returned all expected campus locations (>= default catalog count), return directly
-            default_count = len(get_default_campus_locations())
-            if len(gsi_items) >= default_count:
-                active_items = [it for it in gsi_items if it.get("active", True)]
-                return sorted(self._convert_decimals_to_float(active_items), key=lambda x: x.get("name", ""))
+            # Phase 2: Dual-read compatibility scan
+            # Required if migration is NOT complete, or if GSI1 query failed
+            if not migration_completed or not gsi_succeeded:
+                scan_last_evaluated_key = None
+                while scan_pages < max_scan_pages:
+                    scan_kwargs: Dict[str, Any] = {}
+                    if gsi_succeeded:
+                        # Discover legacy unindexed records lacking GSI1PK
+                        scan_kwargs["FilterExpression"] = (
+                            Attr("GSI1PK").not_exists() & Attr("entityType").eq("LOCATION")
+                        )
+                    else:
+                        # GSI failed, scan for all LOCATION entities
+                        scan_kwargs["FilterExpression"] = Attr("entityType").eq("LOCATION")
 
-            # 2. Paginated Scan fallback: discovers legacy unindexed locations lacking GSI1PK
-            items = list(gsi_items)
-            seen_ids = {it.get("id") or it.get("PK") for it in items}
-            last_evaluated_key = None
-            max_pages = 10
-            for _ in range(max_pages):
-                scan_kwargs: Dict[str, Any] = {
-                    "FilterExpression": Attr("entityType").eq("LOCATION") & Attr("active").eq(True),
+                    if scan_last_evaluated_key:
+                        scan_kwargs["ExclusiveStartKey"] = scan_last_evaluated_key
+
+                    resp = self._table.scan(**scan_kwargs)
+                    scan_pages += 1
+
+                    for it in resp.get("Items", []):
+                        ent_id = get_entity_id(it)
+                        if ent_id and ent_id not in items_by_id:
+                            items_by_id[ent_id] = it
+
+                    scan_last_evaluated_key = resp.get("LastEvaluatedKey")
+                    if not scan_last_evaluated_key:
+                        break
+
+                if scan_last_evaluated_key:
+                    is_partial = True
+
+            # Filter active and campus-matching items
+            active_items = [
+                it for it in items_by_id.values()
+                if it.get("active", True) and belongs_to_campus(it)
+            ]
+
+            sorted_items = sorted(
+                self._convert_decimals_to_float(active_items),
+                key=lambda x: x.get("name", "")
+            )
+
+            if include_metadata:
+                return {
+                    "locations": sorted_items,
+                    "is_partial": is_partial,
+                    "total_retrieved": len(sorted_items),
+                    "campus_id": cid,
+                    "gsi_pages_evaluated": gsi_pages,
+                    "scan_pages_evaluated": scan_pages,
                 }
-                if last_evaluated_key:
-                    scan_kwargs["ExclusiveStartKey"] = last_evaluated_key
-                resp = self._table.scan(**scan_kwargs)
-                for it in resp.get("Items", []):
-                    dedup_key = it.get("id") or it.get("PK")
-                    if dedup_key not in seen_ids:
-                        seen_ids.add(dedup_key)
-                        items.append(it)
-                last_evaluated_key = resp.get("LastEvaluatedKey")
-                if not last_evaluated_key:
-                    break
+            return sorted_items
 
-            # Never seed on read path! If empty, return empty list.
-            active_items = [it for it in items if it.get("active", True)]
-            return sorted(self._convert_decimals_to_float(active_items), key=lambda x: x.get("name", ""))
+        except InvalidCampusConfigurationError:
+            raise
         except Exception as e:
-            logger.error("DynamoDB list_locations failed: %s", str(e))
+            logger.error("DynamoDB list_locations failed: %s", str(e), exc_info=True)
             raise DatabasePersistenceError(f"Failed to retrieve campus locations from database: {str(e)}")
 
     def get_location(self, location_id: str) -> Optional[Dict[str, Any]]:
@@ -997,14 +1202,48 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
                 **loc,
             }
 
-    def list_locations(self) -> List[Dict[str, Any]]:
+    def list_locations(
+        self, include_metadata: bool = False, campus_id: Optional[str] = None
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         if self._simulate_failure:
             raise DatabasePersistenceError("Simulated database failure.")
+
+        # 1. Campus ID validation & normalization
+        if campus_id is None:
+            raw_cid = os.environ.get("CAMPUS_ID", DEFAULT_CAMPUS_ID)
+        else:
+            raw_cid = campus_id
+        if not raw_cid or not raw_cid.strip():
+            raw_cid = DEFAULT_CAMPUS_ID
+        cid = raw_cid.strip().lower()
+        if cid not in SUPPORTED_CAMPUSES:
+            raise InvalidCampusConfigurationError(
+                f"Unsupported campus identifier '{raw_cid}'. Supported campus identifiers are: {sorted(list(SUPPORTED_CAMPUSES.keys()))}."
+            )
+
+        def belongs_to_campus(v: Dict[str, Any]) -> bool:
+            item_cid = v.get("campusId")
+            if item_cid is not None:
+                return str(item_cid).strip().lower() == cid
+            ent_id = str(v.get("id") or v.get("PK", "").replace("LOCATION#", "")).lower()
+            for other_cid in SUPPORTED_CAMPUSES:
+                if other_cid != DEFAULT_CAMPUS_ID and ent_id.startswith(f"{other_cid}-"):
+                    return cid == other_cid
+            return cid == DEFAULT_CAMPUS_ID
+
         locations = [
             v for v in self._store.values()
-            if v.get("entityType") == "LOCATION" and v.get("active", True)
+            if v.get("entityType") == "LOCATION" and v.get("active", True) and belongs_to_campus(v)
         ]
-        return sorted(locations, key=lambda x: x["name"])
+        sorted_locs = sorted(locations, key=lambda x: x.get("name", ""))
+        if include_metadata:
+            return {
+                "locations": sorted_locs,
+                "is_partial": False,
+                "total_retrieved": len(sorted_locs),
+                "campus_id": cid,
+            }
+        return sorted_locs
 
     def get_location(self, location_id: str) -> Optional[Dict[str, Any]]:
         if self._simulate_failure:
@@ -1261,8 +1500,10 @@ class QueueSenseDatabase:
             else:
                 self._adapter = DynamoDBStorageAdapter(table_name=self.table_name)
 
-    def list_locations(self) -> List[Dict[str, Any]]:
-        return self._adapter.list_locations()
+    def list_locations(
+        self, include_metadata: bool = False, campus_id: Optional[str] = None
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+        return self._adapter.list_locations(include_metadata=include_metadata, campus_id=campus_id)
 
     def get_location(self, location_id: str) -> Optional[Dict[str, Any]]:
         return self._adapter.get_location(location_id)
