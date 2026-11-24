@@ -62,7 +62,9 @@ def lambda_handler(event, context):
             )
 
         # Retrieve historical reports (strictly enforced 14 days cutoff in DB query, bounded to 1000 reports across pages)
-        reports = db.get_historical_reports(location_id, days=14, limit=1000)
+        hist_result = db.get_historical_reports(location_id, days=14, limit=1000, include_metadata=True)
+        reports = hist_result["reports"]
+        is_capped = hist_result["is_truncated"]
 
         # Aggregate by hour (0-23) in campus timezone (Asia/Kolkata, UTC+05:30)
         hourly_buckets = defaultdict(lambda: {"wait_sum": 0.0, "queue_sum": 0.0, "count": 0})
@@ -133,11 +135,25 @@ def lambda_handler(event, context):
         has_sufficient_history = total_observations >= 5
 
         status = "available" if has_sufficient_history else "insufficient_history"
-        summary = (
-            f"Historical average curve aggregated from {total_observations} student-submitted observations over the past 14 days (Campus Timezone: Asia/Kolkata)."
-            if has_sufficient_history
-            else f"Only {total_observations} historical report(s) available. Hourly curves calibrate after 5+ observations accumulate."
-        )
+        coverage_status = "CAPPED_AT_1000_OBSERVATIONS" if is_capped else "COMPLETE_14_DAY"
+
+        if has_sufficient_history:
+            if is_capped:
+                summary = (
+                    f"Historical average curve aggregated from {total_observations} student observations "
+                    f"over the past 14 days (sample bounded at 1,000 most recent observations for low-latency analysis; "
+                    f"older observations beyond cap excluded; Campus Timezone: Asia/Kolkata)."
+                )
+            else:
+                summary = (
+                    f"Historical average curve aggregated from all {total_observations} student-submitted observations "
+                    f"over the past 14 days (Campus Timezone: Asia/Kolkata)."
+                )
+        else:
+            summary = (
+                f"Only {total_observations} historical report(s) available. "
+                f"Hourly curves calibrate after 5+ observations accumulate."
+            )
 
         return create_api_response(
             status_code=200,
@@ -149,6 +165,9 @@ def lambda_handler(event, context):
                 "metricType": "HISTORICAL_AVERAGES",
                 "minSamplesRequiredForPeak": MIN_SAMPLES_PER_HOUR,
                 "totalObservations": total_observations,
+                "isCapped": is_capped,
+                "maxObservationCap": 1000,
+                "coverageStatus": coverage_status,
                 "disclaimer": "Historical averages reflect empirical crowdsourced observations in Indian Standard Time (IST, UTC+05:30) and should not be treated as deterministic real-time forecasts.",
                 "hourlyTrends": hourly_trends,
                 "busiestHour": {

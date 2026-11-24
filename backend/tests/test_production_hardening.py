@@ -1381,11 +1381,22 @@ def test_historical_reports_dynamodb_pagination_max_pages_safety_guard(monkeypat
     mock_table = MagicMock()
     adapter._table = mock_table
 
-    # Each page returns 10 items and a LastEvaluatedKey indefinitely
+    call_counter = [0]
+    # Each page returns 10 unique items and a LastEvaluatedKey indefinitely
     def mock_query(**kwargs):
+        call_counter[0] += 1
+        c = call_counter[0]
         return {
-            "Items": [{"PK": "LOCATION#infinite", "SK": "REPORT#ts", "reportedWaitMinutes": 5.0} for _ in range(10)],
-            "LastEvaluatedKey": {"PK": "LOCATION#infinite", "SK": "REPORT#next"},
+            "Items": [
+                {
+                    "PK": "LOCATION#infinite",
+                    "SK": f"REPORT#ts_{c}_{i}",
+                    "reportId": f"inf_{c}_{i}",
+                    "reportedWaitMinutes": 5.0,
+                }
+                for i in range(10)
+            ],
+            "LastEvaluatedKey": {"PK": "LOCATION#infinite", "SK": f"REPORT#next_{c}"},
         }
 
     mock_table.query.side_effect = mock_query
@@ -1472,6 +1483,485 @@ def test_historical_handler_end_to_end_with_large_paginated_history():
     bucket_13 = [b for b in data["hourlyTrends"] if b["hour"] == 13][0]
     assert bucket_13["sampleCount"] == 250
     assert bucket_13["historicalAverageWaitMinutes"] == 20.0
+
+
+def test_historical_reports_dynamodb_pagination_empty_page_with_last_evaluated_key(monkeypatch):
+    """
+    Priority 1.2: Empty page with LastEvaluatedKey.
+    DynamoDB may return an empty Items list with a LastEvaluatedKey (e.g. after filtering/evaluating items).
+    The pagination loop MUST NOT abort prematurely; it must continue to subsequent pages.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    page2_items = [
+        {"PK": "LOCATION#loc", "SK": f"REPORT#ts_{i}", "reportId": f"r_{i}", "reportedWaitMinutes": 10.0}
+        for i in range(5)
+    ]
+
+    def mock_query(**kwargs):
+        if "ExclusiveStartKey" not in kwargs:
+            # Page 1: Empty items list, but LastEvaluatedKey is present
+            return {"Items": [], "LastEvaluatedKey": {"PK": "loc", "SK": "checkpoint_1"}}
+        else:
+            # Page 2: Contains items, LastEvaluatedKey is None
+            return {"Items": page2_items}
+
+    mock_table.query.side_effect = mock_query
+
+    reports = adapter.get_historical_reports("loc", days=14, limit=1000)
+    assert mock_table.query.call_count == 2
+    assert len(reports) == 5
+    assert reports[0]["reportId"] == "r_0"
+
+
+def test_historical_reports_dynamodb_pagination_1mb_boundary_simulation(monkeypatch):
+    """
+    Priority 1.2: 1 MB response boundary simulation.
+    DynamoDB returns fewer items than requested Limit because response reached 1 MB size boundary.
+    Pagination loop must seamlessly request the next page until limit is satisfied.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    # Simulate 3 pages of 50 items each due to 1MB buffer cap
+    p1 = [{"PK": "LOCATION#heavy", "SK": f"REPORT#ts_1_{i}", "reportId": f"r_1_{i}", "reportedWaitMinutes": 5.0} for i in range(50)]
+    p2 = [{"PK": "LOCATION#heavy", "SK": f"REPORT#ts_2_{i}", "reportId": f"r_2_{i}", "reportedWaitMinutes": 6.0} for i in range(50)]
+    p3 = [{"PK": "LOCATION#heavy", "SK": f"REPORT#ts_3_{i}", "reportId": f"r_3_{i}", "reportedWaitMinutes": 7.0} for i in range(20)]
+
+    def mock_query(**kwargs):
+        start_key = kwargs.get("ExclusiveStartKey")
+        if start_key is None:
+            return {"Items": p1, "LastEvaluatedKey": {"PK": "heavy", "SK": "p1_end"}}
+        elif start_key == {"PK": "heavy", "SK": "p1_end"}:
+            return {"Items": p2, "LastEvaluatedKey": {"PK": "heavy", "SK": "p2_end"}}
+        else:
+            return {"Items": p3}
+
+    mock_table.query.side_effect = mock_query
+
+    reports = adapter.get_historical_reports("heavy", days=14, limit=1000)
+    assert mock_table.query.call_count == 3
+    assert len(reports) == 120
+
+
+def test_historical_reports_ordering_and_cutoff_correctness_across_page_boundaries(monkeypatch):
+    """
+    Priority 1.2: Ordering and cutoff correctness.
+    - Reports must be sorted in strictly descending order across multiple page boundaries.
+    - Cutoff parameter is accurately passed to DynamoDB KeyConditionExpression.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    p1 = [
+        {"PK": "LOCATION#loc", "SK": "REPORT#2026-11-24T10:00:00#r1", "reportId": "r1", "timestamp": "2026-11-24T10:00:00"},
+        {"PK": "LOCATION#loc", "SK": "REPORT#2026-11-23T10:00:00#r2", "reportId": "r2", "timestamp": "2026-11-23T10:00:00"},
+    ]
+    p2 = [
+        {"PK": "LOCATION#loc", "SK": "REPORT#2026-11-22T10:00:00#r3", "reportId": "r3", "timestamp": "2026-11-22T10:00:00"},
+        {"PK": "LOCATION#loc", "SK": "REPORT#2026-11-20T10:00:00#r4", "reportId": "r4", "timestamp": "2026-11-20T10:00:00"},
+    ]
+
+    def mock_query(**kwargs):
+        if "ExclusiveStartKey" not in kwargs:
+            assert kwargs["ScanIndexForward"] is False, "Must query in reverse chronological order"
+            return {"Items": p1, "LastEvaluatedKey": {"PK": "loc", "SK": "p1_end"}}
+        else:
+            return {"Items": p2}
+
+    mock_table.query.side_effect = mock_query
+
+    reports = adapter.get_historical_reports("loc", days=14, limit=1000)
+    assert len(reports) == 4
+    # Verify strict descending order across page boundaries
+    timestamps = [r["timestamp"] for r in reports]
+    assert timestamps == sorted(timestamps, reverse=True)
+
+
+def test_historical_reports_deduplication_of_boundary_overlap(monkeypatch):
+    """
+    Priority 1.2: Boundary deduplication.
+    If a record overlaps between page 1 and page 2, the adapter deduplicates by report ID.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    # r_overlap is returned in both page 1 and page 2
+    p1 = [
+        {"PK": "LOCATION#loc", "SK": "REPORT#ts_1#r1", "reportId": "r1"},
+        {"PK": "LOCATION#loc", "SK": "REPORT#ts_2#r_overlap", "reportId": "r_overlap"},
+    ]
+    p2 = [
+        {"PK": "LOCATION#loc", "SK": "REPORT#ts_2#r_overlap", "reportId": "r_overlap"},
+        {"PK": "LOCATION#loc", "SK": "REPORT#ts_3#r3", "reportId": "r3"},
+    ]
+
+    def mock_query(**kwargs):
+        if "ExclusiveStartKey" not in kwargs:
+            return {"Items": p1, "LastEvaluatedKey": {"PK": "loc", "SK": "p1_end"}}
+        else:
+            return {"Items": p2}
+
+    mock_table.query.side_effect = mock_query
+
+    reports = adapter.get_historical_reports("loc", days=14, limit=1000)
+    assert len(reports) == 3  # r1, r_overlap, r3 (duplicate omitted)
+    report_ids = [r["reportId"] for r in reports]
+    assert report_ids == ["r1", "r_overlap", "r3"]
+
+
+def test_historical_reports_exact_1000_cap_metadata_and_api_exposure(monkeypatch):
+    """
+    Priority 1.2: Exact 1,000 cap metadata and API exposure.
+    Verify that when more than 1,000 observations exist, include_metadata=True flags is_truncated=True,
+    and GET /locations/{id}/historical exposes isCapped=True and coverageStatus='CAPPED_AT_1000_OBSERVATIONS'.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter, QueueSenseDatabase
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    # Mock 1000 items returned across 5 pages of 200, with LastEvaluatedKey still present at the 1000 mark
+    call_idx = [0]
+    def mock_query(**kwargs):
+        call_idx[0] += 1
+        c = call_idx[0]
+        items = [{"PK": "loc", "SK": f"REPORT#{c}_{i}", "reportId": f"r_{c}_{i}", "reportedWaitMinutes": 10.0} for i in range(200)]
+        return {"Items": items, "LastEvaluatedKey": {"PK": "loc", "SK": f"next_{c}"}}
+
+    mock_table.query.side_effect = mock_query
+
+    meta_result = adapter.get_historical_reports("loc", days=14, limit=1000, include_metadata=True)
+    assert meta_result["is_truncated"] is True
+    assert meta_result["total_retrieved"] == 1000
+    assert meta_result["limit"] == 1000
+    assert len(meta_result["reports"]) == 1000
+
+
+# =========================================================================
+# Priority 1.3: Location Listing and Seeding on Read Path Tests
+# =========================================================================
+
+def test_list_locations_never_seeds_on_read_path_when_empty(monkeypatch):
+    """
+    Priority 1.3: Read-path purity.
+    When a DynamoDB table contains 0 locations, list_locations() MUST NOT call put_item
+    to seed the table on the read path. It must cleanly return an empty list.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("EmptyTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    # Query or Scan on empty table returns empty Items list
+    mock_table.query.return_value = {"Items": []}
+    mock_table.scan.return_value = {"Items": []}
+
+    locations = adapter.list_locations()
+    assert locations == []
+    # put_item MUST NEVER be called on the read path!
+    assert mock_table.put_item.call_count == 0
+
+
+def test_list_locations_paginates_scan_without_side_effects(monkeypatch):
+    """
+    Priority 1.3: If GSI1 is absent, list_locations traverses multiple scan pages
+    following LastEvaluatedKey to collect all locations across 1MB boundaries without seeding.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    # Force GSI1 query to fail to test paginated scan fallback
+    mock_table.query.side_effect = Exception("ValidationException: Index GSI1 does not exist")
+
+    p1_locs = [{"PK": "LOCATION#l1", "SK": "METADATA", "entityType": "LOCATION", "id": "l1", "name": "Location B", "active": True}]
+    p2_locs = [{"PK": "LOCATION#l2", "SK": "METADATA", "entityType": "LOCATION", "id": "l2", "name": "Location A", "active": True}]
+
+    def mock_scan(**kwargs):
+        if "ExclusiveStartKey" not in kwargs:
+            return {"Items": p1_locs, "LastEvaluatedKey": {"PK": "l1", "SK": "METADATA"}}
+        else:
+            return {"Items": p2_locs}
+
+    mock_table.scan.side_effect = mock_scan
+
+    locations = adapter.list_locations()
+    assert mock_table.scan.call_count == 2
+    assert len(locations) == 2
+    # Sorted by name: Location A, Location B
+    assert locations[0]["name"] == "Location A"
+    assert locations[1]["name"] == "Location B"
+    assert mock_table.put_item.call_count == 0
+
+
+# =========================================================================
+# Priority 1.4: Administrative Report Feed Pagination Tests
+# =========================================================================
+
+def test_list_all_reports_paginated_scan_when_first_page_has_no_matching_reports(monkeypatch):
+    """
+    Priority 1.4: Administrative report feed pagination.
+    In DynamoDB, Limit applies before FilterExpression. If the first page of a scan contains 0 reports
+    (e.g. only locations and rate limits), list_all_reports must continue paginating over LastEvaluatedKey
+    until the requested limit of reports is collected.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    # Force GSI1 query to fail to test paginated scan fallback
+    mock_table.query.side_effect = Exception("GSI1 unavailable in test table")
+
+    # Page 1: 0 matching reports (only other entities evaluated), but LastEvaluatedKey present
+    # Page 2: 10 matching reports
+    reports_page2 = [
+        {"PK": "loc", "SK": f"REPORT#{i}", "entityType": "REPORT", "reportId": f"r_{i}", "timestamp": f"2026-11-24T{i:02d}:00:00"}
+        for i in range(10)
+    ]
+
+    def mock_scan(**kwargs):
+        if "ExclusiveStartKey" not in kwargs:
+            return {"Items": [], "LastEvaluatedKey": {"PK": "checkpoint_page_1"}}
+        else:
+            return {"Items": reports_page2}
+
+    mock_table.scan.side_effect = mock_scan
+
+    results = adapter.list_all_reports(limit=10)
+    assert mock_table.scan.call_count == 2
+    assert len(results) == 10
+    assert results[0]["reportId"] == "r_9"  # Reverse chronological
+
+
+# =========================================================================
+# Priority 1.5: DynamoDB GSI1 Model & Query Schema Tests
+# =========================================================================
+
+def test_template_main_table_has_gsi1_entity_type_index():
+    """
+    Priority 1.5: Verify SAM template defines GSI1 on MainTable with GSI1PK and GSI1SK.
+    """
+    import os
+    import re
+    template_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "infrastructure", "template.yaml")
+    )
+    with open(template_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Verify GSI1 attributes in AttributeDefinitions
+    assert "AttributeName: GSI1PK" in content
+    assert "AttributeName: GSI1SK" in content
+
+    # Verify GlobalSecondaryIndexes definition
+    gsi_match = re.search(r"GlobalSecondaryIndexes:.*?(?=TimeToLiveSpecification:)", content, re.DOTALL)
+    assert gsi_match, "GlobalSecondaryIndexes must be defined in template.yaml"
+    gsi_text = gsi_match.group(0)
+    assert "IndexName: GSI1" in content
+    assert "AttributeName: GSI1PK" in gsi_text
+    assert "KeyType: HASH" in gsi_text
+    assert "AttributeName: GSI1SK" in gsi_text
+    assert "KeyType: RANGE" in gsi_text
+    assert "ProjectionType: ALL" in gsi_text
+
+
+def test_gsi1_keys_populated_on_locations_and_reports(monkeypatch):
+    """
+    Priority 1.5: Verify GSI1PK and GSI1SK are automatically populated when
+    persisting reports and seeding locations.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    # 1. Record report
+    report = adapter.record_report("iitb-mess-h12-14", 15.0, 20, note="Testing GSI1 keys")
+    assert report["GSI1PK"] == "ENTITY#REPORT"
+    assert report["GSI1SK"].startswith("2026-")
+
+    # 2. Seed locations
+    mock_table.reset_mock()
+    adapter.seed_locations()
+    assert mock_table.put_item.call_count > 0
+    seeded_loc = mock_table.put_item.call_args_list[0][1]["Item"]
+    assert seeded_loc["GSI1PK"] == "ENTITY#LOCATION"
+    assert "GSI1SK" in seeded_loc
+
+
+# =========================================================================
+# Priority 1.6: Multi-Campus Isolation Tests
+# =========================================================================
+
+def test_template_has_campus_id_parameter_wired_to_globals():
+    """
+    Priority 1.6: Verify CampusId parameter exists in template.yaml and is passed
+    to Globals.Function.Environment.Variables.CAMPUS_ID.
+    """
+    import os
+    import re
+    template_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "infrastructure", "template.yaml")
+    )
+    with open(template_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    assert "CampusId:" in content
+    assert "Default: iitb" in content
+    assert "CAMPUS_ID: !Ref CampusId" in content
+
+
+def test_campus_id_environment_selects_locations_dynamically(monkeypatch):
+    """
+    Priority 1.6: Verify CAMPUS_ID environment variable selects the appropriate
+    campus directory (e.g. vitap -> VITAP_CAMPUS_LOCATIONS; iitb -> IITB_CAMPUS_LOCATIONS).
+    """
+    from backend.shared.database import get_default_campus_locations, VITAP_CAMPUS_LOCATIONS, IITB_CAMPUS_LOCATIONS
+
+    # When CAMPUS_ID is vitap
+    monkeypatch.setenv("CAMPUS_ID", "vitap")
+    vitap_locs = get_default_campus_locations()
+    assert len(vitap_locs) == len(VITAP_CAMPUS_LOCATIONS)
+    assert vitap_locs[0]["id"].startswith("vitap-")
+
+    # When CAMPUS_ID is iitb
+    monkeypatch.setenv("CAMPUS_ID", "iitb")
+    iitb_locs = get_default_campus_locations()
+    assert len(iitb_locs) == len(IITB_CAMPUS_LOCATIONS)
+    assert iitb_locs[0]["id"].startswith("iitb-")
+
+
+# =========================================================================
+# Priority 1.7: Structured Data Provenance Tests
+# =========================================================================
+
+def test_campus_locations_have_structured_provenance_metadata():
+    """
+    Priority 1.7: Data Provenance.
+    Verify all default campus locations have a structured provenance object
+    distinguishing verified directory facts from dynamic crowdsourced observations.
+    """
+    from backend.shared.database import IITB_CAMPUS_LOCATIONS, VITAP_CAMPUS_LOCATIONS
+
+    all_locs = IITB_CAMPUS_LOCATIONS + VITAP_CAMPUS_LOCATIONS
+    for loc in all_locs:
+        assert "provenance" in loc, f"Location {loc.get('id')} must contain provenance metadata"
+        prov = loc["provenance"]
+        assert prov["sourceType"] in ("COMMUNITY_DIRECTORY", "OFFICIAL_DIRECTORY")
+        assert len(prov["verifiedBy"]) > 0
+        assert "lastVerifiedDate" in prov
+        assert prov["isCrowdsourced"] is False, "Directory metadata itself must not be marked crowdsourced"
+        assert "reportedWaitMinutes" in prov["crowdsourcedAttributes"]
+        assert "queueLength" in prov["crowdsourcedAttributes"]
+
+
+def test_get_locations_exposes_provenance_without_leaking_internal_keys():
+    """
+    Priority 1.7: Verify GET /locations Lambda response exposes structured provenance
+    while stripping internal single-table keys (PK, SK, entityType, GSI1PK, GSI1SK).
+    """
+    from backend.functions.get_locations.app import lambda_handler as locations_handler
+
+    event = {}
+    res = locations_handler(event, None)
+    assert res["statusCode"] == 200
+    body = json.loads(res["body"])
+    assert body["success"] is True
+    locations = body["data"]
+
+    for loc in locations:
+        assert "provenance" in loc, "Cleaned location must include structured provenance"
+        # Internal keys must NEVER leak to client
+        assert "PK" not in loc
+        assert "SK" not in loc
+        assert "entityType" not in loc
+        assert "GSI1PK" not in loc
+        assert "GSI1SK" not in loc
+
 
 
 

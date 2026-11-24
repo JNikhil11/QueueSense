@@ -40,9 +40,9 @@ def lambda_handler(event, context):
                 est = calculate_queue_estimate(reports)
                 db.save_current_estimate(loc_id, est)
 
-            # Strip DynamoDB single-table keys from client view
-            clean_loc = {k: v for k, v in loc.items() if k not in ("PK", "SK", "entityType")}
-            clean_est = {k: v for k, v in est.items() if k not in ("PK", "SK", "entityType")}
+            # Strip DynamoDB single-table keys and index partitions from client view
+            clean_loc = {k: v for k, v in loc.items() if k not in ("PK", "SK", "entityType", "GSI1PK", "GSI1SK")}
+            clean_est = {k: v for k, v in est.items() if k not in ("PK", "SK", "entityType", "GSI1PK", "GSI1SK")}
             clean_loc["estimate"] = clean_est
             results.append(clean_loc)
 

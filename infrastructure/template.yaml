@@ -22,6 +22,10 @@ Parameters:
     Type: String
     Default: ''
     Description: Optional custom domain origin for production CORS (e.g. https://queuesense.campus.edu)
+  CampusId:
+    Type: String
+    Default: iitb
+    Description: Campus institution identifier (e.g. iitb, vitap)
 
 Globals:
   Function:
@@ -34,6 +38,7 @@ Globals:
       Variables:
         TABLE_NAME: !Ref MainTable
         ENVIRONMENT: !Ref Environment
+        CAMPUS_ID: !Ref CampusId
         USER_POOL_ID: !Ref QueueSenseUserPool
         USER_POOL_CLIENT_ID: !Ref QueueSenseUserPoolClient
 
@@ -51,11 +56,24 @@ Resources:
           AttributeType: S
         - AttributeName: SK
           AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
       KeySchema:
         - AttributeName: PK
           KeyType: HASH
         - AttributeName: SK
           KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
@@ -257,7 +275,9 @@ Resources:
                 - dynamodb:Scan
                 - dynamodb:Query
                 - dynamodb:PutItem
-              Resource: !GetAtt MainTable.Arn
+              Resource:
+                - !GetAtt MainTable.Arn
+                - !Sub "${MainTable.Arn}/index/GSI1"
       Events:
         ListLocations:
           Type: HttpApi
@@ -279,7 +299,9 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:Query
                 - dynamodb:PutItem
-              Resource: !GetAtt MainTable.Arn
+              Resource:
+                - !GetAtt MainTable.Arn
+                - !Sub "${MainTable.Arn}/index/GSI1"
       Events:
         GetQueueDetails:
           Type: HttpApi
@@ -312,7 +334,9 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:UpdateItem
                 - dynamodb:TransactWriteItems
-              Resource: !GetAtt MainTable.Arn
+              Resource:
+                - !GetAtt MainTable.Arn
+                - !Sub "${MainTable.Arn}/index/GSI1"
             - Sid: SubmitReportSSMParameterAccess
               Effect: Allow
               Action:
@@ -340,7 +364,9 @@ Resources:
                 - dynamodb:Scan
                 - dynamodb:Query
                 - dynamodb:PutItem
-              Resource: !GetAtt MainTable.Arn
+              Resource:
+                - !GetAtt MainTable.Arn
+                - !Sub "${MainTable.Arn}/index/GSI1"
       Events:
         FetchRecommendations:
           Type: HttpApi

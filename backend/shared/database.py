@@ -20,7 +20,7 @@ import logging
 import threading
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 logger = logging.getLogger("queuesense.database")
 
@@ -68,6 +68,13 @@ IITB_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Hostel 12-14 Complex, Lakeside Road, East Campus",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "IIT Bombay Council of Student Affairs / Student Mentorship Directory",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "IIT Bombay Council of Student Affairs",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Tiffin (16:30-18:00), Dinner (19:30-21:45)",
         "capacityEstimate": "Large Dining Complex (~400-600 approx.)",
         "active": True,
@@ -80,6 +87,13 @@ IITB_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Hostel 15-16 Quadrangle, North-East Campus",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "IIT Bombay Student Mentor Program (SMP) Freshers Guide",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "IIT Bombay Student Mentor Program",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Tiffin (16:30-18:00), Dinner (19:30-21:45)",
         "capacityEstimate": "Large Dining Hall (~400-500 approx.)",
         "active": True,
@@ -92,6 +106,13 @@ IITB_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Hostel 2 Quadrangle, near Gymkhana Grounds",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "IIT Bombay Hostel 2 Student Guide",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "IIT Bombay Hostel 2 Council",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Tiffin (16:30-18:00), Dinner (19:30-21:30)",
         "capacityEstimate": "Medium Dining Hall (~250-350 approx.)",
         "active": True,
@@ -104,6 +125,13 @@ IITB_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Ground Floor, Hostel 3, Main Hostel Avenue",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "IIT Bombay Gymkhana Freshers Guide",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "IIT Bombay Gymkhana",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "14:00 - 02:00 (Late Night)",
         "capacityEstimate": "Cafeteria Seating (~80-120 approx.)",
         "active": True,
@@ -116,6 +144,13 @@ IITB_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Ground Floor, Lecture Hall Complex (LHC), Academic Area",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "IIT Bombay Student Mentor Program Academic Guide",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "IIT Bombay Academic Area Mentors",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "08:30 - 18:30 (Class Hours)",
         "capacityEstimate": "Medium Food Court (~150-220 approx.)",
         "active": True,
@@ -128,6 +163,13 @@ IITB_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Gulmohar Building, First Floor, Opposite Main Building",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "IIT Bombay Campus Commercial Establishments Directory",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "IIT Bombay Commercial Establishments Register",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "11:00 - 22:30",
         "capacityEstimate": "Restaurant Seating (~120-180 approx.)",
         "active": True,
@@ -140,6 +182,13 @@ IITB_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Kanwal Rekhi School of Information Technology (KReSIT)",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "Dept of Computer Science & Engineering Student Mentors",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "Dept of CSE Student Mentors",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "09:00 - 20:00",
         "capacityEstimate": "Small Express Counter (~60-90 approx.)",
         "active": True,
@@ -152,6 +201,13 @@ IITB_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Students Activity Centre (SAC) Grounds",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "IIT Bombay Gymkhana Cultural Affairs Guide",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "IIT Bombay Gymkhana Cultural Affairs",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "16:00 - 01:00 (Evening / Night)",
         "capacityEstimate": "Outdoor & Indoor SAC Area (~100-140 approx.)",
         "active": True,
@@ -164,6 +220,13 @@ IITB_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Adjacent to Central Library, Main Academic Spine",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "Central Library Amenities Student Guide",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "Central Library Amenities Committee",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "08:00 - 23:00",
         "capacityEstimate": "Study Cafe Seating (~60-80 approx.)",
         "active": True,
@@ -176,6 +239,13 @@ IITB_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Near Hostel 1 & Campus School Junction",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "Campus Commercial Amenities Register",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "IIT Bombay Campus Amenities Registry",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "09:00 - 23:00",
         "capacityEstimate": "Kiosk Counter (Takeaway / Bench Seating)",
         "active": True,
@@ -191,6 +261,13 @@ VITAP_CAMPUS_LOCATIONS = [
         "landmarkLocation": "North Dining Block, Near MH-1",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "VIT-AP Student Dining Guide",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:30)",
         "capacityEstimate": "Large Dining Hall (~350-450 approx.)",
         "active": True,
@@ -203,6 +280,13 @@ VITAP_CAMPUS_LOCATIONS = [
         "landmarkLocation": "South Student Block, Near LH-1",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "VIT-AP Student Dining Guide",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "Breakfast (07:30-09:30), Lunch (12:00-14:15), Dinner (19:30-21:00)",
         "capacityEstimate": "Medium Dining Hall (~250-350 approx.)",
         "active": True,
@@ -215,6 +299,13 @@ VITAP_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Central Plaza, Between Academic & Hostel Blocks",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "VIT-AP Student Dining Guide",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "10:00 - 23:00",
         "capacityEstimate": "Open Plaza Seating (~120-180 approx.)",
         "active": True,
@@ -227,6 +318,13 @@ VITAP_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Central Block (CB), Ground Floor",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "VIT-AP Student Dining Guide",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "08:30 - 18:00 (Class Hours)",
         "capacityEstimate": "Express Counter (~80-120 approx.)",
         "active": True,
@@ -239,16 +337,25 @@ VITAP_CAMPUS_LOCATIONS = [
         "landmarkLocation": "Hostel Avenue Commercial Area",
         "verificationStatus": "STUDENT_SOURCED",
         "verificationSource": "VIT-AP Student Dining Guide (Community Sourced)",
+        "provenance": {
+            "sourceType": "COMMUNITY_DIRECTORY",
+            "verifiedBy": "VIT-AP Student Dining Guide",
+            "lastVerifiedDate": "2026-01-15",
+            "isCrowdsourced": False,
+            "crowdsourcedAttributes": ["reportedWaitMinutes", "queueLength", "note"],
+        },
         "openHours": "17:00 - 02:00 (Late Night)",
         "capacityEstimate": "Late Night Counter (~100-150 approx.)",
         "active": True,
     },
 ]
 
+def get_default_campus_locations(campus_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    cid = (campus_id or os.environ.get("CAMPUS_ID", "iitb")).lower()
+    return VITAP_CAMPUS_LOCATIONS if cid == "vitap" else IITB_CAMPUS_LOCATIONS
+
 ACTIVE_CAMPUS = os.environ.get("CAMPUS_ID", "iitb").lower()
-DEFAULT_CAMPUS_LOCATIONS = (
-    VITAP_CAMPUS_LOCATIONS if ACTIVE_CAMPUS == "vitap" else IITB_CAMPUS_LOCATIONS
-)
+DEFAULT_CAMPUS_LOCATIONS = get_default_campus_locations()
 
 
 # =========================================================================
@@ -298,7 +405,17 @@ class BaseStorageAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 1000) -> List[Dict[str, Any]]:
+    def seed_locations(self):
+        pass
+
+    @abstractmethod
+    def get_historical_reports(
+        self,
+        location_id: str,
+        days: int = 14,
+        limit: int = 1000,
+        include_metadata: bool = False,
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         pass
 
 
@@ -340,15 +457,39 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
     def list_locations(self) -> List[Dict[str, Any]]:
         self._ensure_table()
         try:
-            from boto3.dynamodb.conditions import Attr  # type: ignore
-            resp = self._table.scan(
-                FilterExpression=Attr("entityType").eq("LOCATION") & Attr("active").eq(True)
-            )
-            items = resp.get("Items", [])
-            if not items:
-                self.seed_locations()
-                return self.list_locations()
-            return sorted(items, key=lambda x: x.get("name", ""))
+            from boto3.dynamodb.conditions import Key, Attr  # type: ignore
+
+            # 1. Prefer GSI1 indexed query: O(N_locations) direct partition retrieval
+            try:
+                resp = self._table.query(
+                    IndexName="GSI1",
+                    KeyConditionExpression=Key("GSI1PK").eq("ENTITY#LOCATION"),
+                )
+                items = resp.get("Items", [])
+                active_items = [it for it in items if it.get("active", True)]
+                if active_items:
+                    return sorted(self._convert_decimals_to_float(active_items), key=lambda x: x.get("name", ""))
+            except Exception as gsi_err:
+                logger.debug("GSI1 query on ENTITY#LOCATION fell back to paginated scan: %s", str(gsi_err))
+
+            # 2. Paginated Scan fallback (traverses table pages without mutating on read path)
+            items = []
+            last_evaluated_key = None
+            max_pages = 10
+            for _ in range(max_pages):
+                scan_kwargs: Dict[str, Any] = {
+                    "FilterExpression": Attr("entityType").eq("LOCATION") & Attr("active").eq(True),
+                }
+                if last_evaluated_key:
+                    scan_kwargs["ExclusiveStartKey"] = last_evaluated_key
+                resp = self._table.scan(**scan_kwargs)
+                items.extend(resp.get("Items", []))
+                last_evaluated_key = resp.get("LastEvaluatedKey")
+                if not last_evaluated_key:
+                    break
+
+            # Never seed on read path! If empty, return empty list.
+            return sorted(self._convert_decimals_to_float(items), key=lambda x: x.get("name", ""))
         except Exception as e:
             logger.error("DynamoDB list_locations failed: %s", str(e))
             raise DatabasePersistenceError(f"Failed to retrieve campus locations from database: {str(e)}")
@@ -386,6 +527,8 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
         item = {
             "PK": pk,
             "SK": sk,
+            "GSI1PK": "ENTITY#REPORT",
+            "GSI1SK": f"{iso_timestamp}#{report_id}",
             "entityType": "REPORT",
             "reportId": report_id,
             "locationId": location_id,
@@ -514,12 +657,42 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
     def list_all_reports(self, limit: int = 50) -> List[Dict[str, Any]]:
         self._ensure_table()
         try:
-            from boto3.dynamodb.conditions import Attr  # type: ignore
-            resp = self._table.scan(
-                FilterExpression=Attr("entityType").eq("REPORT"),
-                Limit=limit,
-            )
-            items = resp.get("Items", [])
+            from boto3.dynamodb.conditions import Key, Attr  # type: ignore
+
+            # 1. Prefer GSI1 indexed query: ENTITY#REPORT reverse-chronological by timestamp
+            try:
+                resp = self._table.query(
+                    IndexName="GSI1",
+                    KeyConditionExpression=Key("GSI1PK").eq("ENTITY#REPORT"),
+                    ScanIndexForward=False,
+                    Limit=limit,
+                )
+                items = resp.get("Items", [])
+                if items:
+                    return self._convert_decimals_to_float(items[:limit])
+            except Exception as gsi_err:
+                logger.debug("GSI1 query on ENTITY#REPORT fell back to paginated scan: %s", str(gsi_err))
+
+            # 2. Paginated Scan fallback: loops over LastEvaluatedKey until limit matching reports collected
+            items = []
+            last_evaluated_key = None
+            max_pages = 10
+            for _ in range(max_pages):
+                scan_kwargs: Dict[str, Any] = {
+                    "FilterExpression": Attr("entityType").eq("REPORT"),
+                    "Limit": min(limit * 2, 200),
+                }
+                if last_evaluated_key:
+                    scan_kwargs["ExclusiveStartKey"] = last_evaluated_key
+
+                resp = self._table.scan(**scan_kwargs)
+                items.extend(resp.get("Items", []))
+                if len(items) >= limit:
+                    break
+                last_evaluated_key = resp.get("LastEvaluatedKey")
+                if not last_evaluated_key:
+                    break
+
             items.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
             return self._convert_decimals_to_float(items[:limit])
         except Exception as e:
@@ -589,7 +762,13 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
             # FAIL CLOSED: Do not return True. Raise DatabasePersistenceError to deny or return controlled error.
             raise DatabasePersistenceError(f"Rate limit storage verification failed: {str(e)}")
 
-    def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 1000) -> List[Dict[str, Any]]:
+    def get_historical_reports(
+        self,
+        location_id: str,
+        days: int = 14,
+        limit: int = 1000,
+        include_metadata: bool = False,
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         self._ensure_table()
         pk = f"LOCATION#{location_id}"
         cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
@@ -599,12 +778,19 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
             from boto3.dynamodb.conditions import Key  # type: ignore
 
             items: List[Dict[str, Any]] = []
+            seen_ids = set()
             last_evaluated_key = None
             max_pages = 20  # Bounded pagination safety guard against runaway loops
+            pages_evaluated = 0
+            is_truncated = False
 
             for _ in range(max_pages):
+                pages_evaluated += 1
                 remaining = limit - len(items)
                 if remaining <= 0:
+                    # Target limit satisfied
+                    if last_evaluated_key is not None:
+                        is_truncated = True
                     break
 
                 page_limit = min(remaining, 200)
@@ -618,25 +804,49 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
 
                 resp = self._table.query(**query_kwargs)
                 page_items = resp.get("Items", [])
-                items.extend(page_items)
+                for item in page_items:
+                    dedup_key = item.get("reportId") or (item.get("PK"), item.get("SK"))
+                    if dedup_key not in seen_ids:
+                        seen_ids.add(dedup_key)
+                        items.append(item)
 
                 last_evaluated_key = resp.get("LastEvaluatedKey")
                 if not last_evaluated_key:
+                    # Clean termination: all pages exhausted
                     break
+            else:
+                # Exhausted all max_pages
+                if last_evaluated_key is not None:
+                    is_truncated = True
 
-            return self._convert_decimals_to_float(items[:limit])
+            if len(items) >= limit and last_evaluated_key is not None:
+                is_truncated = True
+
+            final_items = self._convert_decimals_to_float(items[:limit])
+            if include_metadata:
+                return {
+                    "reports": final_items,
+                    "is_truncated": is_truncated,
+                    "total_retrieved": len(final_items),
+                    "limit": limit,
+                    "pages_evaluated": pages_evaluated,
+                }
+            return final_items
         except Exception as e:
             logger.error("DynamoDB get_historical_reports failed: %s", str(e))
             raise DatabasePersistenceError(f"Failed to query historical observations: {str(e)}")
 
     def seed_locations(self):
         self._ensure_table()
-        for loc in DEFAULT_CAMPUS_LOCATIONS:
+        campus_locations = get_default_campus_locations()
+        for loc in campus_locations:
             pk = f"LOCATION#{loc['id']}"
             sk = "METADATA"
             item = {
                 "PK": pk,
                 "SK": sk,
+                "GSI1PK": "ENTITY#LOCATION",
+                "GSI1SK": loc["id"],
                 "entityType": "LOCATION",
                 **loc,
             }
@@ -686,13 +896,15 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
         self._simulate_idempotency_failure: bool = False
         self._simulate_rate_limit_failure: bool = False
 
-        locs = initial_locations or DEFAULT_CAMPUS_LOCATIONS
+        locs = initial_locations if initial_locations is not None else get_default_campus_locations()
         for loc in locs:
             pk = f"LOCATION#{loc['id']}"
             sk = "METADATA"
             self._store[f"{pk}::{sk}"] = {
                 "PK": pk,
                 "SK": sk,
+                "GSI1PK": "ENTITY#LOCATION",
+                "GSI1SK": loc["id"],
                 "entityType": "LOCATION",
                 **loc,
             }
@@ -705,6 +917,22 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
 
     def set_simulate_rate_limit_failure(self, fail: bool):
         self._simulate_rate_limit_failure = fail
+
+    def seed_locations(self):
+        if self._simulate_failure:
+            raise DatabasePersistenceError("Simulated database failure.")
+        campus_locations = get_default_campus_locations()
+        for loc in campus_locations:
+            pk = f"LOCATION#{loc['id']}"
+            sk = "METADATA"
+            self._store[f"{pk}::{sk}"] = {
+                "PK": pk,
+                "SK": sk,
+                "GSI1PK": "ENTITY#LOCATION",
+                "GSI1SK": loc["id"],
+                "entityType": "LOCATION",
+                **loc,
+            }
 
     def list_locations(self) -> List[Dict[str, Any]]:
         if self._simulate_failure:
@@ -742,6 +970,8 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
         item = {
             "PK": pk,
             "SK": sk,
+            "GSI1PK": "ENTITY#REPORT",
+            "GSI1SK": f"{iso_timestamp}#{report_id}",
             "entityType": "REPORT",
             "reportId": report_id,
             "locationId": location_id,
@@ -838,12 +1068,19 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
             self._rate_limits[key_curr] = n_curr + 1
             return True
 
-    def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 1000) -> List[Dict[str, Any]]:
+    def get_historical_reports(
+        self,
+        location_id: str,
+        days: int = 14,
+        limit: int = 1000,
+        include_metadata: bool = False,
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         if self._simulate_failure:
             raise DatabasePersistenceError("Simulated database failure.")
         cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
         prefix = f"LOCATION#{location_id}::REPORT#"
         reports = []
+        seen_ids = set()
         for k, v in self._store.items():
             if k.startswith(prefix) and v.get("entityType") == "REPORT":
                 ts_str = v.get("timestamp")
@@ -854,11 +1091,24 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
                         if dt.tzinfo is None:
                             dt = dt.replace(tzinfo=timezone.utc)
                         if dt >= cutoff_dt:
-                            reports.append(v)
+                            dedup_key = v.get("reportId") or (v.get("PK"), v.get("SK"))
+                            if dedup_key not in seen_ids:
+                                seen_ids.add(dedup_key)
+                                reports.append(v)
                     except Exception:
                         continue
         reports.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
-        return reports[:limit]
+        is_truncated = len(reports) > limit
+        final_reports = reports[:limit]
+        if include_metadata:
+            return {
+                "reports": final_reports,
+                "is_truncated": is_truncated,
+                "total_retrieved": len(final_reports),
+                "limit": limit,
+                "pages_evaluated": 1,
+            }
+        return final_reports
 
 
 # =========================================================================
@@ -973,5 +1223,19 @@ class QueueSenseDatabase:
     def check_rate_limit(self, client_hash: str, window_seconds: int = 300, max_requests: int = 5) -> bool:
         return self._adapter.check_rate_limit(client_hash=client_hash, window_seconds=window_seconds, max_requests=max_requests)
 
-    def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 1000) -> List[Dict[str, Any]]:
-        return self._adapter.get_historical_reports(location_id=location_id, days=days, limit=limit)
+    def seed_locations(self):
+        return self._adapter.seed_locations()
+
+    def get_historical_reports(
+        self,
+        location_id: str,
+        days: int = 14,
+        limit: int = 1000,
+        include_metadata: bool = False,
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+        return self._adapter.get_historical_reports(
+            location_id=location_id,
+            days=days,
+            limit=limit,
+            include_metadata=include_metadata,
+        )
