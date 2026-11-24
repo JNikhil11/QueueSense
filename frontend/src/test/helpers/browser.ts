@@ -1,42 +1,69 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export function resolveChromePath(): string {
-  // 1. Explicit env variables
-  if (process.env.CHROME_BIN && fs.existsSync(process.env.CHROME_BIN)) {
-    return process.env.CHROME_BIN;
+export interface ResolveChromeOptions {
+  env?: Record<string, string | undefined>;
+  platform?: string;
+  existsSync?: (candidate: string) => boolean;
+}
+
+export function resolveChromePath(options: ResolveChromeOptions = {}): string {
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const existsSync = options.existsSync ?? fs.existsSync;
+
+  // 1. Explicit environment overrides (fail fast if explicitly misconfigured)
+  const explicitChromeBin = env.CHROME_BIN?.trim();
+  if (explicitChromeBin) {
+    if (existsSync(explicitChromeBin)) {
+      return explicitChromeBin;
+    }
+    throw new Error(
+      `CHROME_BIN is set to '${explicitChromeBin}', but no executable was found at that path.`
+    );
   }
-  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
+
+  const explicitPuppeteerPath = env.PUPPETEER_EXECUTABLE_PATH?.trim();
+  if (explicitPuppeteerPath) {
+    if (existsSync(explicitPuppeteerPath)) {
+      return explicitPuppeteerPath;
+    }
+    throw new Error(
+      `PUPPETEER_EXECUTABLE_PATH is set to '${explicitPuppeteerPath}', but no executable was found at that path.`
+    );
   }
 
   // 2. Platform-specific standard candidate paths
-  const platform = process.platform;
-  const candidates: string[] = [];
+  const rawCandidates: string[] = [];
 
   if (platform === 'win32') {
-    const localAppData = process.env.LOCALAPPDATA || '';
-    const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
-    const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+    const winJoin = path.win32?.join ?? path.join;
+    const programFiles = env.ProgramFiles?.trim() || 'C:\\Program Files';
+    const programFilesX86 = env['ProgramFiles(x86)']?.trim() || 'C:\\Program Files (x86)';
+    const localAppData = env.LOCALAPPDATA?.trim();
 
-    candidates.push(
-      path.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      path.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      path.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    rawCandidates.push(
+      winJoin(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      winJoin(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    );
+    if (localAppData) {
+      rawCandidates.push(winJoin(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+    }
+    rawCandidates.push(
       'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
       'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-      path.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-      path.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe')
+      winJoin(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      winJoin(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe')
     );
   } else if (platform === 'darwin') {
-    candidates.push(
+    rawCandidates.push(
       '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
       '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
       '/Applications/Chromium.app/Contents/MacOS/Chromium'
     );
   } else {
-    // Linux and others
-    candidates.push(
+    // Linux and other POSIX platforms
+    rawCandidates.push(
       '/usr/bin/google-chrome',
       '/usr/bin/google-chrome-stable',
       '/usr/bin/chromium',
@@ -45,15 +72,17 @@ export function resolveChromePath(): string {
     );
   }
 
+  const candidates = Array.from(new Set(rawCandidates.filter(Boolean)));
+
   for (const candidate of candidates) {
-    if (candidate && fs.existsSync(candidate)) {
+    if (existsSync(candidate)) {
       return candidate;
     }
   }
 
   throw new Error(
-    `Chrome/Chromium executable not found across candidate paths: ${candidates.join(', ')}. ` +
-    `Please set CHROME_BIN or PUPPETEER_EXECUTABLE_PATH environment variable.`
+    `Chrome/Chromium executable not found across candidate paths for platform '${platform}': ${candidates.join(', ')}. ` +
+      `Please set CHROME_BIN or PUPPETEER_EXECUTABLE_PATH environment variable.`
   );
 }
 

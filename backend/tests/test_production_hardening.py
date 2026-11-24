@@ -13,6 +13,7 @@ Verifies:
 """
 
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 try:
@@ -26,6 +27,7 @@ from backend.shared.database import (
     QueueSenseDatabase,
     InMemoryStorageAdapter,
     DatabasePersistenceError,
+    IdempotencyConflictError,
     get_shared_test_adapter,
     reset_shared_test_adapter,
 )
@@ -63,7 +65,8 @@ def test_persistence_failure_fails_closed():
 
 def test_idempotency_deduplication():
     """
-    Priority 0: Verify that identical idempotency keys do not generate duplicate database entries.
+    Priority 0: Verify that identical idempotency keys + identical payloads deduplicate cleanly,
+    and reusing the same key with a conflicting payload raises IdempotencyConflictError.
     """
     reset_shared_test_adapter()
     adapter = get_shared_test_adapter()
@@ -81,35 +84,47 @@ def test_idempotency_deduplication():
         location_id="iitb-mess-h12-14",
         reported_wait_minutes=12.0,
         queue_length=15,
-        note="Retry submit",
+        note="First submit",
         idempotency_key=key,
     )
 
     assert r1["reportId"] == r2["reportId"]
     assert len(db.get_recent_reports("iitb-mess-h12-14")) == 1
 
+    with pytest.raises(IdempotencyConflictError):
+        db.record_report(
+            location_id="iitb-mess-h12-14",
+            reported_wait_minutes=25.0,
+            queue_length=15,
+            note="Conflicting retry",
+            idempotency_key=key,
+        )
+    assert len(db.get_recent_reports("iitb-mess-h12-14")) == 1
+
 
 def test_concurrent_idempotency_simulation():
     """
-    Priority 0: Test concurrent execution with the identical idempotency key.
+    Priority 0: Test synchronized concurrent execution with identical idempotency key & payload.
     All concurrent requests must return the same report record and create exactly 1 persistent entry.
     """
     reset_shared_test_adapter()
     adapter = get_shared_test_adapter()
     db = QueueSenseDatabase(adapter=adapter)
     key = "idem-concurrent-race-key-9999"
+    barrier = threading.Barrier(8)
 
-    def submit_task(worker_id):
+    def submit_task():
+        barrier.wait(timeout=5.0)
         return db.record_report(
             location_id="iitb-mess-h12-14",
-            reported_wait_minutes=10.0 + worker_id,
+            reported_wait_minutes=10.0,
             queue_length=15,
-            note=f"Worker {worker_id}",
+            note="Concurrent worker retry",
             idempotency_key=key,
         )
 
     with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = [executor.submit(submit_task, i) for i in range(8)]
+        futures = [executor.submit(submit_task) for _ in range(8)]
         results = [f.result() for f in futures]
 
     report_ids = {r["reportId"] for r in results}

@@ -11,6 +11,8 @@ Single-table architecture supporting:
 """
 
 from __future__ import annotations
+import hashlib
+import json
 import os
 import sys
 import time
@@ -23,6 +25,42 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Union
 
 logger = logging.getLogger("queuesense.database")
+
+
+def compute_idempotency_payload_hash(
+    location_id: str,
+    reported_wait_minutes: float,
+    queue_length: int,
+    note: Optional[str] = None,
+) -> str:
+    """Compute a deterministic SHA-256 fingerprint of a report submission payload."""
+    canonical = json.dumps(
+        {
+            "locationId": str(location_id),
+            "reportedWaitMinutes": round(float(reported_wait_minutes), 1),
+            "queueLength": int(queue_length),
+            "note": note,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _extract_stored_idempotency_hash(existing: Dict[str, Any]) -> Optional[str]:
+    """Retrieve stored payload hash, or derive it from cachedReport for backward compatibility."""
+    stored_hash = existing.get("payloadHash")
+    if isinstance(stored_hash, str) and stored_hash:
+        return stored_hash
+    cached = existing.get("cachedReport")
+    if isinstance(cached, dict):
+        return compute_idempotency_payload_hash(
+            location_id=str(cached.get("locationId", "")),
+            reported_wait_minutes=float(cached.get("reportedWaitMinutes", 0.0)),
+            queue_length=int(cached.get("queueLength", 0)),
+            note=cached.get("note"),
+        )
+    return None
 
 # =========================================================================
 # Custom Exceptions (Fail-Closed, Controlled Public Errors)
@@ -768,6 +806,12 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
                 raise DatabasePersistenceError("Failed to persist queue observation to durable database.")
 
         # Atomic Idempotency Transaction via TransactWriteItems
+        payload_hash = compute_idempotency_payload_hash(
+            location_id=location_id,
+            reported_wait_minutes=reported_wait_minutes,
+            queue_length=queue_length,
+            note=note,
+        )
         idem_pk = f"IDEMPOTENCY#{idempotency_key}"
         idem_sk = "RECORD"
         idem_ttl = int(time.time()) + 86400  # 24 hours
@@ -776,6 +820,7 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
             "PK": idem_pk,
             "SK": idem_sk,
             "entityType": "IDEMPOTENCY",
+            "payloadHash": payload_hash,
             "cachedReport": clean_item,
             "ttl": idem_ttl,
             "createdAt": iso_timestamp,
@@ -811,11 +856,18 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
             error_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
             if error_code == "TransactionCanceledException":
                 # Idempotency collision: conditional check failed because key already exists
-                logger.info("Idempotent replay detected for key: %s", idempotency_key)
+                logger.info("Idempotent replay/conflict detected for key: %s", idempotency_key)
                 try:
                     existing = self._table.get_item(Key={"PK": idem_pk, "SK": idem_sk}).get("Item")
                     if existing and "cachedReport" in existing:
+                        stored_hash = _extract_stored_idempotency_hash(existing)
+                        if stored_hash != payload_hash:
+                            raise IdempotencyConflictError(
+                                f"Idempotency key '{idempotency_key}' was already used with a different request payload."
+                            )
                         return self._convert_decimals_to_float(existing["cachedReport"])
+                except IdempotencyConflictError:
+                    raise
                 except Exception as get_err:
                     logger.error("Failed to read existing idempotency record: %s", str(get_err))
                 raise IdempotencyConflictError(f"Idempotent submission conflict for key '{idempotency_key}'.")
@@ -1286,11 +1338,23 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
 
         with self._lock:
             if idempotency_key:
+                payload_hash = compute_idempotency_payload_hash(
+                    location_id=location_id,
+                    reported_wait_minutes=reported_wait_minutes,
+                    queue_length=queue_length,
+                    note=note,
+                )
                 idem_key = f"IDEMPOTENCY#{idempotency_key}::RECORD"
                 if idem_key in self._store:
                     if self._simulate_idempotency_failure:
                         raise DatabasePersistenceError("Simulated idempotency read failure.")
-                    return self._store[idem_key]["cachedReport"]
+                    existing = self._store[idem_key]
+                    stored_hash = _extract_stored_idempotency_hash(existing)
+                    if stored_hash != payload_hash:
+                        raise IdempotencyConflictError(
+                            f"Idempotency key '{idempotency_key}' was already used with a different request payload."
+                        )
+                    return existing["cachedReport"]
 
                 if self._simulate_idempotency_failure:
                     raise DatabasePersistenceError("Simulated idempotency write failure.")
@@ -1300,6 +1364,7 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
                     "PK": f"IDEMPOTENCY#{idempotency_key}",
                     "SK": "RECORD",
                     "entityType": "IDEMPOTENCY",
+                    "payloadHash": payload_hash,
                     "cachedReport": item,
                     "ttl": int(time.time()) + 86400,
                 }

@@ -1,86 +1,67 @@
-# QueueSense — Final Release Readiness & Go/No-Go Decision
+# QueueSense — Batch 6 Release Readiness & Pre-Deployment Evidence Assessment
 
 **Project:** QueueSense — Real-Time Campus Queue Intelligence  
 **Repository:** https://github.com/JNikhil11/QueueSense  
 **Feature Branch:** `feature/production-hardening`  
-**Starting Verified Commit:** `879c2ac82c45ab135ecd21c6a514b2110ad391b6`  
+**Batch 6 Starting Commit:** `879c2ac82c45ab135ecd21c6a514b2110ad391b6`  
 **Protected Master Baseline:** `47d4ab0ac8c4ece6da7f481d86101c65f6026d4c`  
 **Target AWS Region:** `ap-southeast-2` (Configured default) / Recommended `ap-south-1` (Campus target)  
-**Evaluator:** Antigravity Senior Engineering Organisation (Lead Architect, AppSec, Systems Lead, QA)  
 **Audit Date:** November 25, 2026  
-**Final Release Recommendation:** **CONDITIONAL GO (READY FOR PRODUCTION DEPLOYMENT)**  
+**Assessment Status:** **CONDITIONAL / PRE-DEPLOYMENT CHECKPOINT (OFFLINE SUITES PASSING; LIVE AWS & STAGING VERIFICATION PENDING)**  
 
 ---
 
-## 1. Executive Summary & Verification Attestation
+## 1. Executive Summary & Evidence Boundaries
 
-QueueSense has undergone a comprehensive, zero-compromise engineering reconstruction, cross-component adversarial integration testing, and production hardening audit across all 6 development batches. All findings identified across Product Integrity, Security, Estimation Science, Frontend UX, Infrastructure, and Public Credibility have been systematically diagnosed, resolved in code, and validated by automated regression suites.
+QueueSense has completed six engineering hardening and audit batches across fail-closed data handling, privacy-preserving rate limiting, queue estimation heuristics ($\tau = 15.0\text{ min}$ / $900\text{s}$), frontend WCAG 2.2 AA accessibility and schema validation, AWS SAM infrastructure definition, and cross-component integration testing.
 
-The codebase operates under a strict **fail-closed** paradigm:
-- Database outages fail safely with controlled HTTP 500/503 responses; in-memory silent fallbacks in production Lambda are permanently disabled.
-- Missing or weak security salts fail closed; the application retrieves high-entropy salts from AWS SSM Parameter Store (`SecureString`).
-- The frontend strictly isolates live API interactions from local demo fixtures; unconfigured endpoints or server errors immediately render honest error notices without substituting mock data.
-- The estimation engine defends against mathematical anomalies (MAD zero-division, meal-rush surge preservation, majority poisoning bounds) and enforces honest cold-start thresholds before issuing recommendations.
-- Cross-platform test resilience is ensured through portable Chrome discovery supporting CI/CD, macOS, Linux, and Windows environments without hardcoded binary paths.
+To preserve technical accuracy prior to live AWS deployment, verification claims are separated strictly into what has been executed locally versus what awaits an AWS-backed environment:
+
+- **Verified by Source Inspection:** CloudFormation / SAM resource policies, API Gateway `CognitoAuthorizer` issuer/audience/route attachments, on-demand DynamoDB billing, S3 Public Access Block + OAC, explicit 30-day CloudWatch log retention, 15.0-minute prediction decay constant across backend & frontend, and absence of GitHub Actions CI definitions (`.github/workflows/`).
+- **Verified by Automated Tests (Offline / In-Memory / Simulated DynamoDB / Local Windows Chrome):**
+  - **238 / 238 backend pytest tests** across 9 suites, separating in-memory handler tests (`STORAGE_BACKEND=memory`) from offline `DynamoDBStorageAdapter` protocol simulations (`FakeTransactionalTable`).
+  - **177 / 177 frontend Vitest tests** across 14 suites, including unit schema/resolver tests and 7 Puppeteer browser suites run on `Microsoft Windows NT 10.0.26300.0` with Chrome `158.0.8127.88`.
+  - Clean TypeScript check (`tsc --noEmit`), Vite production build (`dist/assets/index-DT6ri0Pj.js` 264.53 kB / gzip 75.78 kB), and AWS SAM lint validation (`sam validate -t infrastructure/template.yaml --lint`).
+- **Verified Against a Real External Service:** **None.** Zero tests executed against live AWS DynamoDB, live API Gateway, live Cognito, live SSM Parameter Store, or remote CI runners.
+- **Not Tested:** Native Chrome execution on macOS or Linux (only unit-simulated path resolution); GitHub Actions CI workflows; live load/latency benchmarking on AWS Lambda.
+- **Blocked by Lack of External Evidence:** Live AWS DynamoDB `TransactWriteItems` behavior, 1 MB DynamoDB physical pagination splits, GSI1 eventual consistency lag, 48-hour background TTL reaper deletion, real API Gateway RS256 JWKS verification, runtime SSM decryption, and physical sensor ground-truth wait-time validation.
 
 ---
 
-## 2. Test Execution & Verification Scorecard
+## 2. Test Execution & Verification Scorecard (Observed Final Run)
 
-Every automated test suite in the repository passes with zero errors, zero warnings, and zero vacuous assertions:
-
-| Test Suite / Standard | Environment / Tool | Scope | Result | Execution Time |
+| Verification Gate | Environment / Mode | Scope & Limitations | Result | Duration / Size |
 | :--- | :--- | :--- | :---: | :---: |
-| **Backend API & Handlers** | Python 3.12 / `pytest 9.2.0` | Health, Locations, Queue, Reports, Recommendations, Admin, Historical | **53 / 53 passed** | 0.22s |
-| **Mathematical Estimation & Proofs** | Python 3.12 / `pytest 9.2.0` | Exponential decay half-life, MAD identical reports, poisoning limits | **12 / 12 passed** | Included in above |
-| **Production Hardening & Security** | Python 3.12 / `pytest 9.2.0` | Atomic idempotency, SSM salt caching, fail-closed rate limit, Cognito auth | **69 / 69 passed** | 2.50s |
-| **Batch 4 Infrastructure Semantic Tests** | Python 3.12 / `pytest 9.2.0` | CloudFormation semantic validations, IAM least-privilege, deletion protection | **47 / 47 passed** | 1.10s |
-| **Batch 6 Adversarial Integration** | Python 3.12 / `pytest 9.2.0` | Matrices A–G (contracts, idempotency, auth, abuse, DynamoDB, models, IAM) | **25 / 25 passed** | 0.45s |
-| **Complete Backend Test Suite** | Python 3.12 / `pytest 9.2.0` | 9 backend test suites across `backend/tests/` | **231 / 231 passed** | 7.21s |
-| **Frontend Unit & Contract Validation** | Node 20 / `vitest 2.1.9` | Schema validation, device identity, fail-closed data isolation, estimation | **118 / 118 passed** | 0.20s |
-| **Frontend Interactive & Puppeteer** | Headless Chrome / `vitest 2.1.9` | 7 browser suites (a11y, focus trap, idempotency lifecycle, stale data, video bg) | **51 / 51 passed** | 59.93s |
-| **Complete Frontend Test Suite** | Node 20 / `vitest 2.1.9` | 13 frontend test suites across `frontend/src/test/` | **169 / 169 passed** | 70.54s |
-| **Frontend Production Build** | TypeScript 5.6 / `vite 5.4.21` | Type check (`tsc --noEmit`), bundle optimization, asset hashing | **Clean (0 errors)** | 4.80s |
-| **Serverless Infrastructure (SAM)** | AWS SAM CLI / `cfn-lint` | CloudFormation syntax, IAM least privilege, route throttling, OAC | **Valid SAM Template** | 2.10s |
+| **Python Compilation** | Python 3.12 / `py_compile` | Syntax compilation across all backend `.py` modules & tests | **Exit 0 (Clean)** | — |
+| **Batch 6 Adversarial Integration** | Python 3.12 / `pytest 9.2.0` | In-memory handlers + offline DynamoDB simulator + static SAM + 15m decay | **32 / 32 passed (Exit 0)** | 1.25s |
+| **Complete Backend Test Suite** | Python 3.12 / `pytest 9.2.0` | All 9 suites in `backend/tests/` (no live AWS / no `boto3` installed) | **238 / 238 passed (Exit 0)** | 14.40s |
+| **TypeScript Type Check** | Node / `tsc --noEmit` | Full `frontend/src` strict type check | **Exit 0 (0 errors)** | — |
+| **Frontend Production Build** | Vite 5.4.21 | JS/CSS production assets & source maps | **Exit 0 (Clean)** | 264.53 kB JS (75.78 kB gz) |
+| **Complete Frontend Vitest Suite** | Windows 11 (`win32`) + Chrome `158.0.8127.88` | 14 suites (unit, estimation, resolver, data isolation, 7 Puppeteer browser suites) | **177 / 177 passed (Exit 0)** | 68.52s |
+| **SAM Template Validation & Lint** | AWS SAM CLI (`sam validate --lint`) | Syntax, intrinsic references, cfn-lint rules (`infrastructure/template.yaml`) | **Valid SAM Template (Exit 0)** | — |
 
 ---
 
-## 3. Comprehensive Fixes Across All 24 Audit Issues
+## 3. Architectural Mechanics & Boundaries Verified
 
-1. **Issue 01 (Cold-Start & Data Isolation):** Factory `createApiClient` enforces fail-closed behavior across all API methods; 18 unit tests prove no mock leaks.
-2. **Issue 02 (Historical Intelligence):** 30-day raw report TTL guarantees full retention for 14-day rolling window query (`SK >= REPORT#{cutoff_iso}`); converted to `Asia/Kolkata` (IST).
-3. **Issue 03 (Privacy & Rate Limiting):** HMAC-SHA256 client hash bound strictly to trusted API Gateway source IP; `User-Agent` and forwarded headers excluded; raw IPs never logged or stored.
-4. **Issue 04 (Statistical Outlier Rejection):** Rush-tolerant cutoff `max(3.5 * mad, 25.0)` prevents zero-division and preserves valid surges when $N < 5$.
-5. **Issue 05 (Outlet Recommendations):** Enforces `active == True`, $\ge 3$ fresh reports, and $\ge 50\%$ confidence; returns `insufficient_data` during sparse windows.
-6. **Issue 06 (Public API Security):** Cognito User Pool JWT authorizer on `/admin/reports` with `cognito:groups` verification; API Gateway throttling (Burst 20, Rate 10).
-7. **Issue 07 (Read-Path Scalability):** Pre-aggregated estimate caching (`ESTIMATE#current`) and indexed DynamoDB queries eliminate unindexed table scans.
-8. **Issue 08 (DynamoDB TTL Correctness):** Query-level ISO timestamp filtering ensures asynchronously expired records are never factored into estimates.
-9. **Issue 09 (Disabled Memory Fallback):** `database.py` permanently forbids `InMemoryStorageAdapter` in Lambda/production, raising `DatabasePersistenceError`.
-10. **Issue 10 (AWS Region Strategy):** Parameterized region with CloudFront CDN edge caching; documented latency trade-offs between Sydney (`ap-southeast-2`) and Mumbai (`ap-south-1`).
-11. **Issue 11 (Server-Authoritative Timestamps):** Handlers unconditionally overwrite client-supplied timestamps with server UTC time.
-12. **Issue 12 (Exponential Decay Rigor):** Mathematically verified half-life $t_{1/2} = 10.397$ min ($\tau = 15.0$ min) with 60-minute hard cutoff.
-13. **Issue 13 (Non-Stationarity & Trend):** Avoided speculative linear extrapolation; adopted decayed nowcasting with explicit freshness indicators (`LIVE`, `RECENT`, `STALE`).
-14. **Issue 14 (Confidence Score Formulation):** 3-factor formulation (Volume 45%, Recency 35%, Agreement 20%) with single-report confidence cap.
-15. **Issue 15 (Ground Truth & Backtesting):** Honest limitation disclosure regarding absence of physical sensor datasets; 12 synthetic test proofs in `test_prediction.py`.
-16. **Issue 16 (Visual & Layout Regressions):** Outlet card footer buttons contained with zero overflow across all breakpoints (320px–1440px); card hover dimming restored.
-17. **Issue 17 (Accessibility):** Escape key and backdrop dismissal on all modals; semantic ARIA labels on all icon-only buttons; WCAG AA contrast.
-18. **Issue 18 (Performance & Bundling):** 235 kB JS bundle; passive event listeners with `requestAnimationFrame` for cursor ambient tracking.
-19. **Issue 19 (IAM Least Privilege):** Scoped table and parameter ARNs; added `dynamodb:Query` to `GetLocationsFunction`.
-20. **Issue 20 (Deployment Safety):** S3 Public Access Blocked; CloudFront Origin Access Control (OAC); HTTPS redirection.
-21. **Issue 21 (Observability):** Structured JSON logs with request IDs; CloudWatch 5xx and Lambda error metric alarms.
-22. **Issue 22 (Supply Chain Security):** Modern patched npm dependencies; zero third-party runtime frameworks in Lambda (Python 3.12 standard library).
-23. **Issue 23 (Git Hygiene):** Clean working tree; `.gitignore` covers all artifacts, caches, and environment files; zero committed secrets.
-24. **Issue 24 (Public Claims Integrity):** Purged exaggerated terms ("AI-powered", "Zero Personal Data") in favor of precise technical descriptions.
+1. **Report Idempotency & Payload Conflict Enforcement:**
+   - `DynamoDBStorageAdapter.record_report` issues `TransactWriteItems` writing both the `REPORT` item (30-day TTL) and an `IDEMPOTENCY#{key}` reservation item (24-hour TTL, `ConditionExpression="attribute_not_exists(PK)"`, SHA-256 `payloadHash`).
+   - Replays with matching `payloadHash` return the cached original report; conflicting payloads (changed wait, queue, note, or `locationId`) raise `IdempotencyConflictError` mapped to HTTP `409 IDEMPOTENCY_CONFLICT` across both adapters.
+   - *Limitation:* Concurrency and `TransactionCanceledException` paths were proven against `InMemoryStorageAdapter` (`threading.Lock`) and an offline Python simulator (`FakeTransactionalTable`); live AWS DynamoDB distributed transaction behavior has not been executed.
+2. **Authentication Boundary (API Gateway vs. Lambda):**
+   - `infrastructure/template.yaml` configures `CognitoAuthorizer` on `QueueSenseHttpApi` (`IdentitySource: "$request.header.Authorization"`, Cognito User Pool issuer, `QueueSenseUserPoolClient` audience) and attaches it exclusively to `GET /admin/reports`. Route-level `AuthorizationScopes` is not configured; authorization checks `cognito:groups` contains `'Admins'` inside Lambda (`AdminReportsFunction`).
+   - Lambda evaluates already-decoded authorizer claims (`verify_cognito_jwt_claims`) and rejects static `X-Admin-Key` in production, rather than performing cryptographic RS256 signature verification (which rests in AWS API Gateway).
+3. **Estimation Decay & Heuristic Scope:**
+   - Both `backend/shared/prediction.py` (`DEFAULT_DECAY_CONSTANT_MINUTES = 15.0`) and `frontend/src/services/api.ts` (`TAU_MS = 15 * 60 * 1000`) implement exponential decay with $\tau = 15.0$ minutes ($900\text{s}$), half-life $t_{1/2} = 15 \cdot \ln(2) \approx 10.3972$ minutes, smooth cosine taper over 50–60 minutes, and hard cutoff beyond 60 minutes.
+   - Without physical entrance sensors, predictions are crowdsourced heuristics.
+4. **Cross-Platform Browser Resolution:**
+   - `frontend/src/test/helpers/browser.ts` eliminates hardcoded machine-specific paths across all 7 Puppeteer files, checking `CHROME_BIN`, `PUPPETEER_EXECUTABLE_PATH`, and OS candidates. Unit tests verify resolution/error branches cleanly; real headless Chromium execution was verified on Windows 11 (`win32`) Chrome `158.0.8127.88` only.
 
 ---
 
-## 4. Unresolved Blockers & Deployment Gate
+## 4. Operational Prerequisites & Pre-Deployment Blockers
 
-### Code Blockers: **0 (NONE)**
-There are zero remaining code defects, test failures, or design flaws in the codebase.
-
-### Operational Prerequisites (Before Live Deployment):
-The deployment is classified as **CONDITIONAL GO** pending completion of these standard infrastructure bootstrapping actions by project ownership:
+Before classifying an actual AWS environment as production-ready, complete and test the following on a live AWS staging stack:
 
 1. **SSM Parameter Store Provisioning:**
    ```bash
@@ -90,7 +71,7 @@ The deployment is classified as **CONDITIONAL GO** pending completion of these s
      --value "$(openssl rand -hex 32)" \
      --region ap-southeast-2
    ```
-2. **Cognito Administrator Account Creation:**
+2. **Cognito Administrator Account & Group Provisioning:**
    ```bash
    aws cognito-idp admin-create-user \
      --user-pool-id "<USER_POOL_ID>" \
@@ -101,22 +82,21 @@ The deployment is classified as **CONDITIONAL GO** pending completion of these s
      --username "admin@campus.ac.in" \
      --group-name "Admins"
    ```
-3. **Execution of SAM Deployment:**
+3. **Live AWS Deployment & Smoke Verification (Not Yet Executed):**
    ```bash
    sam build -t infrastructure/template.yaml
    sam deploy --config-file infrastructure/samconfig.toml
    ```
-4. **S3 Static Asset Sync & CloudFront Invalidation:**
-   ```bash
-   cd frontend
-   VITE_API_URL="<API_GATEWAY_URL>" VITE_DATA_MODE="production" npm run build
-   aws s3 sync dist/ "s3://<FRONTEND_BUCKET>/" --delete
-   aws cloudfront create-invalidation --distribution-id "<DISTRIBUTION_ID>" --paths "/*"
-   ```
+   After SAM deployment, verify against the live staging/prod API:
+   - Real Cognito JWT signature enforcement (`401` on invalid signature, `403` on non-`Admins` group, `200` on `Admins` token).
+   - Real DynamoDB `TransactWriteItems` replay (`201`) and conflicting payload (`409 IDEMPOTENCY_CONFLICT`).
+   - Real SSM `SecureString` + KMS decryption inside `SubmitReportFunction`.
+   - Frontend build with deployed API Gateway URL and S3/CloudFront sync.
 
 ---
 
-## 5. Explicit Go/No-Go Decision
+## 5. Deployment Gate Verdict
 
-### **RECOMMENDATION: GO FOR DEPLOYMENT**
-The application is technically defensible, mathematically validated, cloud-hardened, and ready for production operations on AWS.
+### **GATE STATUS: READY FOR STAGING DEPLOYMENT — BLOCKED FROM UNCONDITIONAL PRODUCTION GO UNTIL LIVE AWS & STAGING SMOKE VERIFICATION**
+
+The repository codebase on `feature/production-hardening` satisfies all offline unit, adversarial integration, static infrastructure, and Windows Chromium browser gates, subject to completing the AWS infrastructure bootstrapping and live external integration checks listed above.
