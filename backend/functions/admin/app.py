@@ -103,7 +103,17 @@ def lambda_handler(event, context):
             limit = 50
 
         db = QueueSenseDatabase()
-        reports = db.list_all_reports(limit=limit)
+        report_result = db.list_all_reports(limit=limit, include_metadata=True)
+        if isinstance(report_result, dict):
+            reports = report_result.get("reports", [])
+            is_partial = report_result.get("is_partial", False)
+            is_truncated = report_result.get("is_truncated", False)
+            source = report_result.get("source", "UNKNOWN")
+        else:
+            reports = report_result
+            is_partial = False
+            is_truncated = False
+            source = "LEGACY"
 
         # Flag statistical outliers for administrator review
         valid_reports, outliers = filter_outliers(reports)
@@ -128,6 +138,9 @@ def lambda_handler(event, context):
             data={
                 "totalReportsReturned": len(audit_feed),
                 "outlierCount": len(outlier_ids),
+                "isPartial": is_partial,
+                "isTruncated": is_truncated,
+                "retrievalSource": source,
                 "operatorIdentity": user_identity,
                 "reports": audit_feed,
             },

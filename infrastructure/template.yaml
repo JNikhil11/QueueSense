@@ -274,7 +274,7 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:Scan
                 - dynamodb:Query
-                - dynamodb:PutItem
+                - dynamodb:PutItem # Required strictly for save_current_estimate (ESTIMATE#CURRENT cache warming on read miss); location seeding is NEVER executed on read path
               Resource:
                 - !GetAtt MainTable.Arn
                 - !Sub "${MainTable.Arn}/index/GSI1"
@@ -363,7 +363,7 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:Scan
                 - dynamodb:Query
-                - dynamodb:PutItem
+                - dynamodb:PutItem # Required strictly for save_current_estimate (ESTIMATE#CURRENT cache warming on read miss); location seeding is NEVER executed on read path
               Resource:
                 - !GetAtt MainTable.Arn
                 - !Sub "${MainTable.Arn}/index/GSI1"

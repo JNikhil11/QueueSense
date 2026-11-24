@@ -403,9 +403,10 @@ Status Definitions:
 - **Result:** **`VERIFIED FIXED`**
 - **Commit SHA:** `5db118c` (remediated in Batch 1; initial pagination in `b657cf1`)
 - **Mathematical & Architectural Rationale for 1,000-Item Cap:**
-  - *Statistical Adequacy:* For a 24-hour hour-of-day curve over 14 days, 1,000 observations provides an average of $\approx 42$ observations per hour (or $\approx 100+$ observations per active meal rush hour). According to the Central Limit Theorem ($N > 30$), sample means and medians achieve standard error $\sigma / \sqrt{N} < 0.15 \sigma$, satisfying all statistical significance criteria.
-  - *Lambda Performance Boundary:* Retrieving and parsing $>1,000$ DynamoDB items requires multiple network round-trips (>5 pages) and $>50$ms serialization overhead, threatening the <300ms SLA and 128MB RAM limits.
-  - *Production Roadmap:* To support unbounded history over arbitrary months/years without read-path query overhead, an asynchronous DynamoDB Streams rollup architecture can aggregate hourly/daily summary items into an `AGGREGATE#hourly` partition.
+  - *Engineering Boundary:* In a serverless AWS Lambda environment, retrieving and deserializing $>1,000$ DynamoDB items requires $>5$ pagination network round trips, increasing execution latency beyond the 300ms SLA and risking 128MB container memory pressure.
+  - *Statistical Rationale & Autocorrelation Caveat:* While 1,000 observations over 14 days provides $\approx 42$ observations per hour (and $>100$ observations during active meal rush hours), queue observations in physical dining facilities are NOT independent and identically distributed (i.i.d.) random variables. They exhibit temporal autocorrelation (long queues persist across consecutive minutes) and self-selection reporting bias (students in long queues report more frequently than students walking into empty dining halls). Therefore, textbook Central Limit Theorem guarantees cannot be claimed naively. The hourly averages represent empirical historical medians and averages serving as orientation baselines, NOT deterministic population distributions.
+  - *API Transparency:* The response explicitly publishes `isCapped: true`, `maxObservationCap: 1000`, and `coverageStatus: "CAPPED_AT_1000_OBSERVATIONS"` whenever records are truncated. When under 1,000 observations, it reports `"COMPLETE_14_DAY"`.
+  - *Production Roadmap:* To support unbounded multi-month historical rollups without read-path query overhead, an asynchronous DynamoDB Streams rollup architecture can aggregate hourly summary items into an `AGGREGATE#hourly` partition.
 
 ### P1.3 — Location Listing Read-Path Purity (Never Mutate DB on Read)
 - **Severity:** P1 (Reliability, Scalability & Least Privilege)
@@ -414,13 +415,15 @@ Status Definitions:
 - **Root Cause:** Development-convenience seeding logic left embedded in the production read path.
 - **Fix Implemented:**
   1. Completely removed `self.seed_locations()` from `list_locations()`. If no locations exist in DynamoDB, the function cleanly returns an empty list `[]` without side effects.
-  2. Implemented indexed GSI1 query (`IndexName="GSI1"`, `KeyConditionExpression=Key("GSI1PK").eq("ENTITY#LOCATION")`) with automatic fallback to paginated scan over `LastEvaluatedKey` filtering `entityType == "LOCATION"`.
+  2. Implemented indexed GSI1 query (`IndexName="GSI1"`, `KeyConditionExpression=Key("GSI1PK").eq("ENTITY#LOCATION")`) with automatic fallback to paginated scan over `LastEvaluatedKey` filtering `entityType == "LOCATION"`. If GSI1 returns fewer than the default catalog size (e.g. unindexed legacy records exist), it automatically merges with the fallback scan to prevent missing locations during migration.
   3. Location seeding is strictly decoupled and performed via explicit initialization scripts, deployment hooks, or admin management tools.
+  4. Non-fatal cache warming: In `GetLocationsFunction`, `dynamodb:PutItem` is retained strictly for `save_current_estimate` (`ESTIMATE#CURRENT` cache warming on read miss). Cache writes are wrapped in non-fatal exception handling so that any cache write throttle or error never crashes the read path.
 - **Tests Performed:**
   1. `test_list_locations_never_seeds_on_read_path_when_empty`: Proves that querying an empty database returns `[]` without calling `put_item` or `batch_write_item`.
   2. `test_list_locations_paginates_scan_without_side_effects`: Proves multi-page scans collect all location items across pages without side effects.
+  3. `test_get_locations_read_path_succeeds_even_when_cache_write_fails`: Proves `GetLocationsFunction` succeeds with HTTP 200 and fresh estimates even if cache write fails.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** `5db118c`
+- **Commit SHA:** `5db118c` (Refined in Acceptance Review)
 
 ### P1.4 — Admin Report Feed Bounded Pagination & Indexing
 - **Severity:** P1 (Admin Observability & Scalability)
@@ -429,11 +432,15 @@ Status Definitions:
 - **Root Cause:** Single-table scan without entity-type partitioning or pagination loop.
 - **Fix Implemented:**
   1. Leveraged `GSI1` index with `KeyConditionExpression=Key("GSI1PK").eq("ENTITY#REPORT")` and `ScanIndexForward=False` with bounded `Limit=limit`, converting $O(N)$ table scans into efficient indexed queries.
-  2. Implemented fallback paginated scan loop that traverses `LastEvaluatedKey` until `len(matching_reports) >= limit` or the table is exhausted, with a safety guard (`max_pages = 20`) preventing infinite loops.
+  2. Implemented fallback paginated scan loop that traverses `LastEvaluatedKey` until `len(matching_reports) >= limit` or the table is exhausted, with a safety guard (`max_pages = 25`) preventing infinite loops.
+  3. Incomplete retrieval disclosure: When `max_pages` is exhausted before `limit` is satisfied, `is_partial: True` is flagged in database metadata and exposed as `isPartial: true` in the admin API response.
 - **Tests Performed:**
   1. `test_list_all_reports_paginated_scan_when_first_page_has_no_matching_reports`: Mocks a multi-page table where page 1 contains only locations and page 2 contains reports; verifies that `list_all_reports` iterates to page 2 and collects the reports.
+  2. `test_admin_reports_gsi1_query_tested_independently`: Proves GSI1 query executes directly with `ScanIndexForward=False`.
+  3. `test_admin_reports_scan_fallback_tested_independently`: Proves scan fallback triggers seamlessly when GSI1 is unavailable.
+  4. `test_admin_reports_sparse_reports_across_more_than_20_pages_exposes_partial`: Proves sparse reports hitting `max_pages=25` expose `is_partial: True` and API `isPartial: true`.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** `5db118c`
+- **Commit SHA:** `5db118c` (Refined in Acceptance Review)
 
 ### P1.5 — DynamoDB GSI1 Data Model & Global Secondary Indexing
 - **Severity:** P1 (Database Performance & Architecture)
@@ -447,11 +454,15 @@ Status Definitions:
      - Reports: `GSI1PK = "ENTITY#REPORT"`, `GSI1SK = f"REPORT#{timestamp}#{report_id}"`
   3. Populated GSI1 attributes in `seed_locations`, `record_report`, and `InMemoryStorageAdapter`.
   4. Updated IAM policies in `infrastructure/template.yaml` for `GetLocationsFunction`, `GetQueueDetailsFunction`, `SubmitReportFunction`, and `GetRecommendationsFunction` to grant least-privilege permissions on `!Sub "${MainTable.Arn}/index/GSI1"`.
+  5. Sparse index handling & safe migration engine: Created `backend/shared/migration.py` (`backfill_gsi1_records`) providing idempotent, bounded backfilling with conditional updates (`attribute_not_exists(GSI1PK)`), resumption from `ExclusiveStartKey`, and dry-run capabilities. Dual-read compatibility in `list_locations` ensures legacy unindexed records remain discoverable until backfill completes.
 - **Tests Performed:**
   1. `test_template_main_table_has_gsi1_entity_type_index`: Asserts GSI1 index configuration in CloudFormation template.
   2. `test_gsi1_keys_populated_on_locations_and_reports`: Verifies `GSI1PK` and `GSI1SK` are populated accurately on write.
+  3. `test_gsi1_sparse_index_silently_omits_unindexed_records_reproduction`: Proves raw GSI1 query omits unindexed legacy records and verifies adapter fallback recovery.
+  4. `test_gsi1_backfill_migration_completes_and_is_idempotent`: Proves backfill populates GSI keys and is 100% idempotent on repeated runs.
+  5. `test_gsi1_backfill_migration_partial_and_interrupted_resumption`: Proves interrupted migration resumes cleanly from `LastEvaluatedKey`.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** `5db118c`
+- **Commit SHA:** `5db118c` (Refined in Acceptance Review)
 
 ### P1.6 — Multi-Campus Isolation & Parameterization
 - **Severity:** P1 (Portability & Multi-Tenancy Architecture)
@@ -466,7 +477,7 @@ Status Definitions:
   1. `test_template_has_campus_id_parameter_wired_to_globals`: Verifies `CampusId` parameter and environment variable mapping in SAM template.
   2. `test_campus_id_environment_selects_locations_dynamically`: Proves that toggling `CAMPUS_ID` selects the corresponding campus location catalog.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** `5db118c`
+- **Commit SHA:** `5db118c` (Refined in Acceptance Review)
 
 ### P1.7 — Location Data Provenance Metadata & Single-Table Schema Leakage Protection
 - **Severity:** P1 (Data Transparency & Information Security)
@@ -474,18 +485,19 @@ Status Definitions:
 - **Evidence:** Inspected `GET /locations` output: returned raw DynamoDB attributes `PK` and `SK` in early prototypes, and location objects had no metadata verifying the institutional source of operating hours.
 - **Root Cause:** Unstructured location dictionaries and un-sanitized API response serialization.
 - **Fix Implemented:**
-  1. Added comprehensive `provenance` metadata to all campus locations in `IITB_CAMPUS_LOCATIONS` and `VITAP_CAMPUS_LOCATIONS`:
-     - `sourceType`: `"OFFICIAL_INSTITUTIONAL_DIRECTORY"`
-     - `verifiedBy`: `"Campus Dining Operations & Student Council Audit"`
-     - `lastVerifiedDate`: `"2026-11-20"`
-     - `isCrowdsourced`: `False`
-     - `crowdsourcedAttributes`: `["queue_wait_minutes", "queue_length", "congestion_level"]`
+  1. Added truthful, community-grounded `provenance` metadata to all campus locations in `IITB_CAMPUS_LOCATIONS` and `VITAP_CAMPUS_LOCATIONS`:
+     - `sourceType`: `"COMMUNITY_DIRECTORY"` (strictly rejecting unsupported claims of official institutional directory certification)
+     - `verifiedBy`: Community bodies (e.g. `"IIT Bombay Student Mentor Program Directory"`, `"Hostel 2 Student Council Guide"`, `"VIT-AP Student Dining Guide"`)
+     - `lastVerifiedDate`: `"2026-01-15"` (the actual compilation date of the campus student guides)
+     - `isCrowdsourced`: `False` (for static directory details)
+     - `crowdsourcedAttributes`: `["reportedWaitMinutes", "queueLength", "note"]` (explicitly designating that only dynamic queue observations are crowdsourced)
   2. In `backend/functions/get_locations/app.py`, strictly stripped internal single-table keys (`PK`, `SK`, `entityType`, `GSI1PK`, `GSI1SK`) while preserving `provenance` in public responses.
 - **Tests Performed:**
   1. `test_campus_locations_have_structured_provenance_metadata`: Asserts presence and structure of provenance metadata across all catalog locations.
   2. `test_get_locations_exposes_provenance_without_leaking_internal_keys`: Verifies `GetLocationsFunction` exposes `provenance` while stripping `PK`, `SK`, `entityType`, `GSI1PK`, `GSI1SK`.
+  3. `test_provenance_integrity_and_forbidden_unsupported_claims`: Strictly asserts `sourceType == 'COMMUNITY_DIRECTORY'`, `lastVerifiedDate == '2026-01-15'`, and forbids unsupported claims like `OFFICIAL_INSTITUTIONAL_DIRECTORY` or `Campus Dining Operations`.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** `5db118c`
+- **Commit SHA:** `5db118c` (Refined in Acceptance Review)
 
 ---
 

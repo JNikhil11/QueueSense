@@ -1963,5 +1963,576 @@ def test_get_locations_exposes_provenance_without_leaking_internal_keys():
         assert "GSI1SK" not in loc
 
 
+# =========================================================================
+# Batch 1 Independent Acceptance Review Tests (Findings 1 - 5)
+# =========================================================================
+
+def test_provenance_integrity_and_forbidden_unsupported_claims():
+    """
+    Finding 1 (P1.7): Provenance Integrity & Truth Enforcement
+    Verifies that all campus locations contain truthful, student-community provenance details:
+    1. sourceType is strictly 'COMMUNITY_DIRECTORY'
+    2. verificationStatus is 'STUDENT_SOURCED'
+    3. lastVerifiedDate matches actual compilation date '2026-01-15'
+    4. NO location claims 'OFFICIAL_INSTITUTIONAL_DIRECTORY'
+    5. NO location claims unverified administrative bodies like 'Campus Dining Operations'
+    6. isCrowdsourced is False for static metadata, crowdsourcedAttributes contains queue fields.
+    """
+    from backend.shared.database import IITB_CAMPUS_LOCATIONS, VITAP_CAMPUS_LOCATIONS
+
+    all_locs = IITB_CAMPUS_LOCATIONS + VITAP_CAMPUS_LOCATIONS
+    assert len(all_locs) >= 10, "Both campus catalogs must be populated"
+
+    for loc in all_locs:
+        assert "provenance" in loc
+        prov = loc["provenance"]
+
+        # 1. Truthful community directory source
+        assert prov["sourceType"] == "COMMUNITY_DIRECTORY", (
+            f"Location {loc['id']} must declare sourceType as COMMUNITY_DIRECTORY"
+        )
+        assert loc.get("verificationStatus") == "STUDENT_SOURCED"
+        assert prov["lastVerifiedDate"] == "2026-01-15"
+
+        # 2. Strict rejection of unsupported institutional claims
+        assert prov["sourceType"] != "OFFICIAL_INSTITUTIONAL_DIRECTORY", (
+            "Must never claim OFFICIAL_INSTITUTIONAL_DIRECTORY without administrative sign-off"
+        )
+        assert "Campus Dining Operations" not in prov.get("verifiedBy", ""), (
+            f"Location {loc['id']} must not claim unverified Campus Dining Operations verification"
+        )
+
+        # 3. Dynamic attributes definition
+        assert prov["isCrowdsourced"] is False
+        assert set(prov["crowdsourcedAttributes"]) == {"reportedWaitMinutes", "queueLength", "note"}
+
+
+def test_historical_reports_boundary_exact_999_1000_1001_records_in_memory():
+    """
+    Finding 2 (P1.2): Historical Cap Boundary Verification (InMemory Adapter)
+    Tests exact boundaries at 999, 1,000, and 1,001 records:
+    - 999 items: total_retrieved=999, is_truncated=False
+    - 1,000 items: total_retrieved=1000, is_truncated=False
+    - 1,001 items: total_retrieved=1000, is_truncated=True
+    """
+    adapter = InMemoryStorageAdapter()
+    loc_id = "loc_boundary_test"
+    base_time = datetime.now(timezone.utc)
+
+    # 1. Exactly 999 records
+    for i in range(999):
+        ts = (base_time - timedelta(minutes=i + 1)).isoformat()
+        adapter._store[f"LOCATION#{loc_id}::REPORT#{ts}#rep_{i}"] = {
+            "PK": f"LOCATION#{loc_id}",
+            "SK": f"REPORT#{ts}#rep_{i}",
+            "reportId": f"rep_{i}",
+            "entityType": "REPORT",
+            "reportedWaitMinutes": 10.0,
+            "queueLength": 5,
+            "timestamp": ts,
+        }
+
+    res_999 = adapter.get_historical_reports(loc_id, days=14, limit=1000, include_metadata=True)
+    assert res_999["total_retrieved"] == 999
+    assert res_999["is_truncated"] is False
+    assert len(res_999["reports"]) == 999
+
+    # 2. Exactly 1,000 records (add 1)
+    ts_1000 = (base_time - timedelta(minutes=1000)).isoformat()
+    adapter._store[f"LOCATION#{loc_id}::REPORT#{ts_1000}#rep_999"] = {
+        "PK": f"LOCATION#{loc_id}",
+        "SK": f"REPORT#{ts_1000}#rep_999",
+        "reportId": "rep_999",
+        "entityType": "REPORT",
+        "reportedWaitMinutes": 10.0,
+        "queueLength": 5,
+        "timestamp": ts_1000,
+    }
+
+    res_1000 = adapter.get_historical_reports(loc_id, days=14, limit=1000, include_metadata=True)
+    assert res_1000["total_retrieved"] == 1000
+    assert res_1000["is_truncated"] is False
+    assert len(res_1000["reports"]) == 1000
+
+    # 3. Exactly 1,001 records (add 1 more)
+    ts_1001 = (base_time - timedelta(minutes=1001)).isoformat()
+    adapter._store[f"LOCATION#{loc_id}::REPORT#{ts_1001}#rep_1000"] = {
+        "PK": f"LOCATION#{loc_id}",
+        "SK": f"REPORT#{ts_1001}#rep_1000",
+        "reportId": "rep_1000",
+        "entityType": "REPORT",
+        "reportedWaitMinutes": 10.0,
+        "queueLength": 5,
+        "timestamp": ts_1001,
+    }
+
+    res_1001 = adapter.get_historical_reports(loc_id, days=14, limit=1000, include_metadata=True)
+    assert res_1001["total_retrieved"] == 1000
+    assert res_1001["is_truncated"] is True, "1,001 records must trigger is_truncated=True"
+    assert len(res_1001["reports"]) == 1000
+
+
+def test_historical_reports_boundary_exact_999_1000_1001_records_dynamodb(monkeypatch):
+    """
+    Finding 2 (P1.2): Historical Cap Boundary Verification (DynamoDB Adapter)
+    Tests exact boundaries at 999, 1,000, and 1,001 records in DynamoDB pagination:
+    - 999 items: total_retrieved=999, is_truncated=False
+    - 1,000 items: total_retrieved=1000, is_truncated=False
+    - 1,001 items: total_retrieved=1000, is_truncated=True
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter.__new__(DynamoDBStorageAdapter)
+    adapter.table_name = "test_table"
+    adapter._ensure_table = lambda: None
+
+    # Helper to generate page responses
+    def make_items(start_idx, count):
+        return [
+            {
+                "PK": "LOCATION#test",
+                "SK": f"REPORT#ts_{i}#rep_{i}",
+                "reportId": f"rep_{i}",
+                "reportedWaitMinutes": 10,
+                "queueLength": 5,
+                "timestamp": f"2026-11-20T12:{i:04d}:00Z",
+            }
+            for i in range(start_idx, start_idx + count)
+        ]
+
+    # Case A: Exactly 999 items (4 pages of 200, 1 page of 199 with LEK=None)
+    mock_table_999 = MagicMock()
+    mock_table_999.query.side_effect = [
+        {"Items": make_items(0, 200), "LastEvaluatedKey": {"SK": "200"}},
+        {"Items": make_items(200, 200), "LastEvaluatedKey": {"SK": "400"}},
+        {"Items": make_items(400, 200), "LastEvaluatedKey": {"SK": "600"}},
+        {"Items": make_items(600, 200), "LastEvaluatedKey": {"SK": "800"}},
+        {"Items": make_items(800, 199)},  # 999 items, no LEK
+    ]
+    adapter._table = mock_table_999
+
+    res_999 = adapter.get_historical_reports("test", days=14, limit=1000, include_metadata=True)
+    assert res_999["total_retrieved"] == 999
+    assert res_999["is_truncated"] is False
+
+    # Case B: Exactly 1,000 items (5 pages of 200 with LEK, probe discovers 0 items beyond 1,000)
+    mock_table_1000 = MagicMock()
+    mock_table_1000.query.side_effect = [
+        {"Items": make_items(0, 200), "LastEvaluatedKey": {"SK": "200"}},
+        {"Items": make_items(200, 200), "LastEvaluatedKey": {"SK": "400"}},
+        {"Items": make_items(400, 200), "LastEvaluatedKey": {"SK": "600"}},
+        {"Items": make_items(600, 200), "LastEvaluatedKey": {"SK": "800"}},
+        {"Items": make_items(800, 200), "LastEvaluatedKey": {"SK": "1000"}},
+        {"Items": []},  # Probe query discovering 0 items beyond 1,000
+    ]
+    adapter._table = mock_table_1000
+
+    res_1000 = adapter.get_historical_reports("test", days=14, limit=1000, include_metadata=True)
+    assert res_1000["total_retrieved"] == 1000
+    assert res_1000["is_truncated"] is False, "Exactly 1,000 items must have is_truncated=False"
+
+    # Case C: Exactly 1,001 items (5 pages of 200 with LEK, probe discovers item 1,001)
+    mock_table_1001 = MagicMock()
+    mock_table_1001.query.side_effect = [
+        {"Items": make_items(0, 200), "LastEvaluatedKey": {"SK": "200"}},
+        {"Items": make_items(200, 200), "LastEvaluatedKey": {"SK": "400"}},
+        {"Items": make_items(400, 200), "LastEvaluatedKey": {"SK": "600"}},
+        {"Items": make_items(600, 200), "LastEvaluatedKey": {"SK": "800"}},
+        {"Items": make_items(800, 200), "LastEvaluatedKey": {"SK": "1000"}},
+        {"Items": make_items(1000, 1)},  # Probe query discovering item 1,001
+    ]
+    adapter._table = mock_table_1001
+
+    res_1001 = adapter.get_historical_reports("test", days=14, limit=1000, include_metadata=True)
+    assert res_1001["total_retrieved"] == 1000
+    assert res_1001["is_truncated"] is True, "1,001 items must have is_truncated=True"
+
+
+def test_historical_handler_never_claims_complete_14_day_when_capped(monkeypatch):
+    """
+    Finding 2 (P1.2): API Historical Response Transparency
+    Verifies that when is_truncated is True, the response:
+    - Sets isCapped=True and coverageStatus='CAPPED_AT_1000_OBSERVATIONS'
+    - Includes summary disclaiming that sample is bounded and excludes older observations
+    - When is_truncated is False, sets isCapped=False and coverageStatus='COMPLETE_14_DAY'
+    """
+    from unittest.mock import MagicMock
+    import backend.functions.get_historical.app as hist_app
+
+    mock_db = MagicMock()
+    mock_db.get_location.return_value = {
+        "id": "iitb-mess-h12-14",
+        "name": "Hostel 12-14 Dining Complex",
+        "category": "MESS",
+        "active": True,
+    }
+
+    # Case 1: Truncated / Capped dataset
+    mock_db.get_historical_reports.return_value = {
+        "reports": [
+            {
+                "reportId": f"rep_{i}",
+                "reportedWaitMinutes": 15.0,
+                "queueLength": 10,
+                "timestamp": "2026-11-20T12:00:00Z",
+            }
+            for i in range(1000)
+        ],
+        "is_truncated": True,
+        "total_retrieved": 1000,
+        "limit": 1000,
+        "pages_evaluated": 6,
+    }
+    monkeypatch.setattr(hist_app, "QueueSenseDatabase", lambda: mock_db)
+
+    event = {"pathParameters": {"id": "iitb-mess-h12-14"}}
+    res = hist_app.lambda_handler(event, None)
+    assert res["statusCode"] == 200
+    body = json.loads(res["body"])
+    data = body["data"]
+
+    assert data["isCapped"] is True
+    assert data["coverageStatus"] == "CAPPED_AT_1000_OBSERVATIONS"
+    assert "older observations beyond cap excluded" in data["summary"]
+    assert "all 1000" not in data["summary"].lower()
+
+    # Case 2: Complete dataset (< 1000 observations)
+    mock_db.get_historical_reports.return_value = {
+        "reports": [
+            {
+                "reportId": f"rep_{i}",
+                "reportedWaitMinutes": 15.0,
+                "queueLength": 10,
+                "timestamp": "2026-11-20T12:00:00Z",
+            }
+            for i in range(50)
+        ],
+        "is_truncated": False,
+        "total_retrieved": 50,
+        "limit": 1000,
+        "pages_evaluated": 1,
+    }
+    res_complete = hist_app.lambda_handler(event, None)
+    body_complete = json.loads(res_complete["body"])
+    data_complete = body_complete["data"]
+
+    assert data_complete["isCapped"] is False
+    assert data_complete["coverageStatus"] == "COMPLETE_14_DAY"
+    assert "all 50 student-submitted observations" in data_complete["summary"]
+
+
+def test_admin_reports_gsi1_query_tested_independently(monkeypatch):
+    """
+    Finding 3 (P1.4): Admin Reports GSI1 Path Independence
+    Tests that when GSI1 is healthy, list_all_reports executes direct GSI query with ScanIndexForward=False.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter.__new__(DynamoDBStorageAdapter)
+    adapter.table_name = "test_table"
+    adapter._ensure_table = lambda: None
+
+    mock_table = MagicMock()
+    mock_table.query.return_value = {
+        "Items": [
+            {"reportId": "r1", "timestamp": "2026-11-20T12:30:00Z", "reportedWaitMinutes": 10},
+            {"reportId": "r2", "timestamp": "2026-11-20T12:00:00Z", "reportedWaitMinutes": 15},
+        ]
+    }
+    adapter._table = mock_table
+
+    res = adapter.list_all_reports(limit=50, include_metadata=True)
+    assert res["source"] == "GSI1_QUERY"
+    assert res["is_partial"] is False
+    assert len(res["reports"]) == 2
+    assert mock_table.query.call_count == 1
+    assert mock_table.scan.call_count == 0
+
+    query_kwargs = mock_table.query.call_args[1]
+    assert query_kwargs["IndexName"] == "GSI1"
+    assert query_kwargs["ScanIndexForward"] is False
+
+
+def test_admin_reports_scan_fallback_tested_independently(monkeypatch):
+    """
+    Finding 3 (P1.4): Admin Reports Fallback Scan Path Independence
+    Tests that when GSI1 query fails, list_all_reports falls back to paginated scan over LastEvaluatedKey.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter.__new__(DynamoDBStorageAdapter)
+    adapter.table_name = "test_table"
+    adapter._ensure_table = lambda: None
+
+    mock_table = MagicMock()
+    mock_table.query.side_effect = Exception("GSI1 unavailable")
+    mock_table.scan.return_value = {
+        "Items": [
+            {"reportId": "r1", "entityType": "REPORT", "timestamp": "2026-11-20T12:00:00Z"},
+            {"reportId": "r2", "entityType": "REPORT", "timestamp": "2026-11-20T12:10:00Z"},
+        ]
+    }
+    adapter._table = mock_table
+
+    res = adapter.list_all_reports(limit=50, include_metadata=True)
+    assert res["source"] == "SCAN_FALLBACK"
+    assert res["is_partial"] is False
+    assert len(res["reports"]) == 2
+    assert mock_table.scan.call_count == 1
+
+    # Verify reports are sorted reverse-chronologically
+    assert res["reports"][0]["timestamp"] == "2026-11-20T12:10:00Z"
+    assert res["reports"][1]["timestamp"] == "2026-11-20T12:00:00Z"
+
+
+def test_admin_reports_sparse_reports_across_more_than_20_pages_exposes_partial(monkeypatch):
+    """
+    Finding 3 (P1.4): Incomplete Retrieval Disclosure
+    Simulates sparse reports distributed across >25 scan pages where max_pages is hit before limit is met.
+    Verifies that list_all_reports flags is_partial=True and admin handler exposes isPartial=True.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    import backend.functions.admin.app as admin_app
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter.__new__(DynamoDBStorageAdapter)
+    adapter.table_name = "test_table"
+    adapter._ensure_table = lambda: None
+
+    mock_table = MagicMock()
+    mock_table.query.side_effect = Exception("No GSI")
+
+    # Generate 26 scan pages returning 1 report every 5 pages
+    scan_responses = []
+    for page in range(26):
+        items = (
+            [{
+                "reportId": f"r_{page}",
+                "entityType": "REPORT",
+                "reportedWaitMinutes": 10.0,
+                "queueLength": 5,
+                "timestamp": f"2026-11-20T12:{page:02d}:00Z",
+            }]
+            if page % 5 == 0
+            else []
+        )
+        scan_responses.append({"Items": items, "LastEvaluatedKey": {"PK": f"page_{page}"}})
+
+    mock_table.scan.side_effect = scan_responses
+    adapter._table = mock_table
+
+    res = adapter.list_all_reports(limit=50, include_metadata=True)
+    assert res["source"] == "SCAN_FALLBACK"
+    assert res["pages_evaluated"] == 25, "Must halt at max_pages=25"
+    assert res["is_partial"] is True, "Exhausting max_pages with remaining data must set is_partial=True"
+    assert res["total_retrieved"] < 50
+
+    # Test Admin Lambda handler exposes isPartial
+    mock_db = MagicMock()
+    mock_db.list_all_reports.return_value = res
+    monkeypatch.setattr(admin_app, "QueueSenseDatabase", lambda: mock_db)
+    monkeypatch.setattr(admin_app, "check_admin_authorization", lambda ev: (True, "admin_user", None))
+
+    event = {"queryStringParameters": {"limit": "50"}}
+    api_res = admin_app.lambda_handler(event, None)
+    assert api_res["statusCode"] == 200
+    body = json.loads(api_res["body"])
+    assert body["data"]["isPartial"] is True
+    assert body["data"]["totalReportsReturned"] == res["total_retrieved"]
+
+
+def test_gsi1_sparse_index_silently_omits_unindexed_records_reproduction(monkeypatch):
+    """
+    Finding 4 (P1.5): GSI1 Sparse Indexing & Legacy Compatibility Reproduction
+    Proves that:
+    1. A raw DynamoDB GSI1 query returns only indexed items (silently omitting legacy unindexed records).
+    2. DynamoDBStorageAdapter.list_locations detects incomplete GSI results and merges with fallback scan.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter.__new__(DynamoDBStorageAdapter)
+    adapter.table_name = "test_table"
+    adapter._ensure_table = lambda: None
+
+    # Mixed dataset: 1 indexed location, 5 legacy unindexed locations
+    indexed_loc = {"id": "loc_new", "PK": "LOCATION#loc_new", "SK": "METADATA", "name": "New Outlet", "GSI1PK": "ENTITY#LOCATION", "GSI1SK": "loc_new", "entityType": "LOCATION", "active": True}
+    legacy_locs = [
+        {"id": f"loc_leg_{i}", "PK": f"LOCATION#loc_leg_{i}", "SK": "METADATA", "name": f"Legacy Outlet {i}", "entityType": "LOCATION", "active": True}
+        for i in range(5)
+    ]
+
+    mock_table = MagicMock()
+    # 1. GSI query returns ONLY the 1 indexed location (DynamoDB sparse index behavior)
+    mock_table.query.return_value = {"Items": [indexed_loc]}
+    # 2. Scan returns all 6 locations (including legacy ones lacking GSI1PK)
+    mock_table.scan.return_value = {"Items": legacy_locs}
+    adapter._table = mock_table
+
+    # Call list_locations
+    locations = adapter.list_locations()
+
+    # Verify that all 6 locations were safely returned despite GSI1 initially having only 1 record!
+    assert len(locations) == 6
+    loc_ids = {l["id"] for l in locations}
+    assert "loc_new" in loc_ids
+    for i in range(5):
+        assert f"loc_leg_{i}" in loc_ids
+
+
+def test_gsi1_backfill_migration_completes_and_is_idempotent(monkeypatch):
+    """
+    Finding 4 (P1.5): GSI1 Backfill Migration Verification & Idempotency
+    Verifies that backfill_gsi1_records safely migrates legacy records and is 100% idempotent.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.migration import backfill_gsi1_records
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    mock_table = MagicMock()
+    legacy_items = [
+        {"PK": "LOCATION#h1", "SK": "METADATA", "id": "h1", "entityType": "LOCATION"},
+        {"PK": "LOCATION#h2", "SK": "METADATA", "id": "h2", "entityType": "LOCATION"},
+        {"PK": "LOCATION#h1", "SK": "REPORT#2026-11-20T12:00:00Z#r1", "reportId": "r1", "timestamp": "2026-11-20T12:00:00Z", "entityType": "REPORT"},
+        {"PK": "LOCATION#h2", "SK": "REPORT#2026-11-20T12:05:00Z#r2", "reportId": "r2", "timestamp": "2026-11-20T12:05:00Z", "entityType": "REPORT"},
+        {"PK": "RATELIMIT#client_hash", "SK": "WINDOW#123", "entityType": "RATELIMIT"},  # Should be skipped
+    ]
+
+    # Initial migration scan returns legacy items
+    mock_table.scan.side_effect = [
+        {"Items": legacy_items, "LastEvaluatedKey": None}
+    ]
+
+    stats = backfill_gsi1_records(mock_table, batch_size=10)
+    assert stats["migrated_locations"] == 2
+    assert stats["migrated_reports"] == 2
+    assert stats["skipped"] == 1
+    assert stats["is_complete"] is True
+    assert mock_table.update_item.call_count == 4
+
+    # Verify conditional expression on update_item
+    for call in mock_table.update_item.call_args_list:
+        kwargs = call[1]
+        assert kwargs["ConditionExpression"] == "attribute_not_exists(GSI1PK)"
+        assert kwargs["ExpressionAttributeValues"][":gpk"] in ("ENTITY#LOCATION", "ENTITY#REPORT")
+
+    # 2. Idempotency test: Re-running backfill when all items are migrated
+    mock_table.reset_mock()
+    mock_table.scan.side_effect = [{"Items": [], "LastEvaluatedKey": None}]
+
+    stats_idempotent = backfill_gsi1_records(mock_table, batch_size=10)
+    assert stats_idempotent["migrated_locations"] == 0
+    assert stats_idempotent["migrated_reports"] == 0
+    assert stats_idempotent["is_complete"] is True
+    assert mock_table.update_item.call_count == 0
+
+
+def test_gsi1_backfill_migration_partial_and_interrupted_resumption(monkeypatch):
+    """
+    Finding 4 (P1.5): GSI1 Interrupted Migration Resumption
+    Verifies that a migration stopped mid-table resumes cleanly from LastEvaluatedKey.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.migration import backfill_gsi1_records
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    mock_table = MagicMock()
+    page1_items = [
+        {"PK": f"LOCATION#loc_{i}", "SK": "METADATA", "id": f"loc_{i}", "entityType": "LOCATION"}
+        for i in range(2)
+    ]
+    page2_items = [
+        {"PK": f"LOCATION#loc_{i}", "SK": "METADATA", "id": f"loc_{i}", "entityType": "LOCATION"}
+        for i in range(2, 4)
+    ]
+
+    # Phase 1: Scan stops after page 1 with LastEvaluatedKey
+    mock_table.scan.return_value = {"Items": page1_items, "LastEvaluatedKey": {"PK": "LOCATION#loc_1", "SK": "METADATA"}}
+
+    stats_phase1 = backfill_gsi1_records(mock_table, batch_size=2, max_items=2)
+    assert stats_phase1["migrated_locations"] == 2
+    assert stats_phase1["is_complete"] is False
+    assert stats_phase1["last_evaluated_key"] == {"PK": "LOCATION#loc_1", "SK": "METADATA"}
+
+    # Phase 2: Resume migration passing exclusive_start_key
+    mock_table.reset_mock()
+    mock_table.scan.return_value = {"Items": page2_items, "LastEvaluatedKey": None}
+
+    stats_phase2 = backfill_gsi1_records(
+        mock_table, batch_size=2, exclusive_start_key=stats_phase1["last_evaluated_key"]
+    )
+    assert stats_phase2["migrated_locations"] == 2
+    assert stats_phase2["is_complete"] is True
+    assert mock_table.scan.call_args[1]["ExclusiveStartKey"] == {"PK": "LOCATION#loc_1", "SK": "METADATA"}
+
+
+def test_get_locations_read_path_succeeds_even_when_cache_write_fails(monkeypatch):
+    """
+    Finding 5 (P1.3): Read-Path Cache Write Resiliency
+    Verifies that if DynamoDB cache write (save_current_estimate) fails,
+    GET /locations does NOT crash with HTTP 500, but returns the computed estimate.
+    """
+    from backend.functions.get_locations.app import lambda_handler as locations_handler
+    from backend.shared.database import QueueSenseDatabase
+
+    # Force save_current_estimate to fail (e.g. simulated DynamoDB throttle / write error)
+    def failing_save_estimate(self, loc_id, estimate):
+        raise DatabasePersistenceError("Simulated cache write failure")
+
+    monkeypatch.setattr(QueueSenseDatabase, "save_current_estimate", failing_save_estimate)
+
+    res = locations_handler({}, None)
+    assert res["statusCode"] == 200, "Cache write failure must not fail the read path"
+    body = json.loads(res["body"])
+    assert body["success"] is True
+    assert len(body["data"]) > 0
+    for loc in body["data"]:
+        assert "estimate" in loc
+
+
+
 
 

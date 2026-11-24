@@ -38,7 +38,11 @@ def lambda_handler(event, context):
                 # Calculate from recent reports
                 reports = db.get_recent_reports(loc_id, limit=20)
                 est = calculate_queue_estimate(reports)
-                db.save_current_estimate(loc_id, est)
+                # Resilient non-fatal cache warming: failure to persist cache should never fail the read path
+                try:
+                    db.save_current_estimate(loc_id, est)
+                except Exception as cache_err:
+                    logger.warning("Cache write non-fatal failure for location %s: %s", loc_id, str(cache_err))
 
             # Strip DynamoDB single-table keys and index partitions from client view
             clean_loc = {k: v for k, v in loc.items() if k not in ("PK", "SK", "entityType", "GSI1PK", "GSI1SK")}

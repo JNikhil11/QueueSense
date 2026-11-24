@@ -397,7 +397,9 @@ class BaseStorageAdapter(ABC):
         pass
 
     @abstractmethod
-    def list_all_reports(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def list_all_reports(
+        self, limit: int = 50, include_metadata: bool = False
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         pass
 
     @abstractmethod
@@ -459,21 +461,26 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
         try:
             from boto3.dynamodb.conditions import Key, Attr  # type: ignore
 
-            # 1. Prefer GSI1 indexed query: O(N_locations) direct partition retrieval
+            # 1. Prefer GSI1 indexed query: direct partition retrieval
+            gsi_items = []
             try:
                 resp = self._table.query(
                     IndexName="GSI1",
                     KeyConditionExpression=Key("GSI1PK").eq("ENTITY#LOCATION"),
                 )
-                items = resp.get("Items", [])
-                active_items = [it for it in items if it.get("active", True)]
-                if active_items:
-                    return sorted(self._convert_decimals_to_float(active_items), key=lambda x: x.get("name", ""))
+                gsi_items = resp.get("Items", [])
             except Exception as gsi_err:
                 logger.debug("GSI1 query on ENTITY#LOCATION fell back to paginated scan: %s", str(gsi_err))
 
-            # 2. Paginated Scan fallback (traverses table pages without mutating on read path)
-            items = []
+            # If GSI1 returned all expected campus locations (>= default catalog count), return directly
+            default_count = len(get_default_campus_locations())
+            if len(gsi_items) >= default_count:
+                active_items = [it for it in gsi_items if it.get("active", True)]
+                return sorted(self._convert_decimals_to_float(active_items), key=lambda x: x.get("name", ""))
+
+            # 2. Paginated Scan fallback: discovers legacy unindexed locations lacking GSI1PK
+            items = list(gsi_items)
+            seen_ids = {it.get("id") or it.get("PK") for it in items}
             last_evaluated_key = None
             max_pages = 10
             for _ in range(max_pages):
@@ -483,13 +490,18 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
                 if last_evaluated_key:
                     scan_kwargs["ExclusiveStartKey"] = last_evaluated_key
                 resp = self._table.scan(**scan_kwargs)
-                items.extend(resp.get("Items", []))
+                for it in resp.get("Items", []):
+                    dedup_key = it.get("id") or it.get("PK")
+                    if dedup_key not in seen_ids:
+                        seen_ids.add(dedup_key)
+                        items.append(it)
                 last_evaluated_key = resp.get("LastEvaluatedKey")
                 if not last_evaluated_key:
                     break
 
             # Never seed on read path! If empty, return empty list.
-            return sorted(self._convert_decimals_to_float(items), key=lambda x: x.get("name", ""))
+            active_items = [it for it in items if it.get("active", True)]
+            return sorted(self._convert_decimals_to_float(active_items), key=lambda x: x.get("name", ""))
         except Exception as e:
             logger.error("DynamoDB list_locations failed: %s", str(e))
             raise DatabasePersistenceError(f"Failed to retrieve campus locations from database: {str(e)}")
@@ -654,47 +666,90 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
             logger.error("DynamoDB get_current_estimate failed: %s", str(e))
             raise DatabasePersistenceError("Failed to retrieve current queue estimate.")
 
-    def list_all_reports(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def list_all_reports(
+        self, limit: int = 50, include_metadata: bool = False
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         self._ensure_table()
         try:
             from boto3.dynamodb.conditions import Key, Attr  # type: ignore
 
             # 1. Prefer GSI1 indexed query: ENTITY#REPORT reverse-chronological by timestamp
             try:
+                target_fetch = limit + 1
                 resp = self._table.query(
                     IndexName="GSI1",
                     KeyConditionExpression=Key("GSI1PK").eq("ENTITY#REPORT"),
                     ScanIndexForward=False,
-                    Limit=limit,
+                    Limit=target_fetch,
                 )
                 items = resp.get("Items", [])
                 if items:
-                    return self._convert_decimals_to_float(items[:limit])
+                    is_truncated = len(items) > limit or resp.get("LastEvaluatedKey") is not None
+                    final_items = self._convert_decimals_to_float(items[:limit])
+                    if include_metadata:
+                        return {
+                            "reports": final_items,
+                            "is_partial": False,
+                            "is_truncated": is_truncated,
+                            "total_retrieved": len(final_items),
+                            "source": "GSI1_QUERY",
+                            "pages_evaluated": 1,
+                        }
+                    return final_items
             except Exception as gsi_err:
                 logger.debug("GSI1 query on ENTITY#REPORT fell back to paginated scan: %s", str(gsi_err))
 
             # 2. Paginated Scan fallback: loops over LastEvaluatedKey until limit matching reports collected
             items = []
+            seen_ids = set()
             last_evaluated_key = None
-            max_pages = 10
+            max_pages = 25
+            pages_evaluated = 0
+            is_partial = False
+
             for _ in range(max_pages):
+                pages_evaluated += 1
+                remaining = limit - len(items)
+                if remaining <= 0:
+                    break
+
                 scan_kwargs: Dict[str, Any] = {
                     "FilterExpression": Attr("entityType").eq("REPORT"),
-                    "Limit": min(limit * 2, 200),
+                    "Limit": min(remaining * 2, 200),
                 }
                 if last_evaluated_key:
                     scan_kwargs["ExclusiveStartKey"] = last_evaluated_key
 
                 resp = self._table.scan(**scan_kwargs)
-                items.extend(resp.get("Items", []))
+                for it in resp.get("Items", []):
+                    dedup_key = it.get("reportId") or (it.get("PK"), it.get("SK"))
+                    if dedup_key not in seen_ids:
+                        seen_ids.add(dedup_key)
+                        items.append(it)
+
                 if len(items) >= limit:
                     break
                 last_evaluated_key = resp.get("LastEvaluatedKey")
                 if not last_evaluated_key:
                     break
+            else:
+                # Loop exhausted max_pages while table had more records and limit was not satisfied
+                if last_evaluated_key is not None and len(items) < limit:
+                    is_partial = True
 
             items.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
-            return self._convert_decimals_to_float(items[:limit])
+            final_items = self._convert_decimals_to_float(items[:limit])
+            is_truncated = len(items) >= limit and last_evaluated_key is not None
+            if include_metadata:
+                return {
+                    "reports": final_items,
+                    "is_partial": is_partial,
+                    "is_truncated": is_truncated,
+                    "total_retrieved": len(final_items),
+                    "source": "SCAN_FALLBACK",
+                    "pages_evaluated": pages_evaluated,
+                }
+            return final_items
         except Exception as e:
             logger.error("DynamoDB list_all_reports failed: %s", str(e))
             raise DatabasePersistenceError("Failed to retrieve audit feed.")
@@ -788,9 +843,6 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
                 pages_evaluated += 1
                 remaining = limit - len(items)
                 if remaining <= 0:
-                    # Target limit satisfied
-                    if last_evaluated_key is not None:
-                        is_truncated = True
                     break
 
                 page_limit = min(remaining, 200)
@@ -815,12 +867,23 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
                     # Clean termination: all pages exhausted
                     break
             else:
-                # Exhausted all max_pages
+                # Exhausted all max_pages while more pages exist
                 if last_evaluated_key is not None:
                     is_truncated = True
 
-            if len(items) >= limit and last_evaluated_key is not None:
-                is_truncated = True
+            # If limit satisfied and last_evaluated_key is present, probe 1 item to unambiguously test truncation
+            if include_metadata and len(items) == limit and last_evaluated_key is not None and not is_truncated:
+                try:
+                    probe_resp = self._table.query(
+                        KeyConditionExpression=Key("PK").eq(pk) & Key("SK").gte(f"REPORT#{cutoff_iso}"),
+                        ScanIndexForward=False,
+                        Limit=1,
+                        ExclusiveStartKey=last_evaluated_key,
+                    )
+                    if probe_resp.get("Items"):
+                        is_truncated = True
+                except Exception:
+                    is_truncated = True
 
             final_items = self._convert_decimals_to_float(items[:limit])
             if include_metadata:
@@ -1039,12 +1102,24 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
         sk = "ESTIMATE#CURRENT"
         return self._store.get(f"{pk}::{sk}")
 
-    def list_all_reports(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def list_all_reports(
+        self, limit: int = 50, include_metadata: bool = False
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         if self._simulate_failure:
             raise DatabasePersistenceError("Simulated database failure.")
         items = [v for v in self._store.values() if v.get("entityType") == "REPORT"]
-        items.sort(key=lambda x: x["timestamp"], reverse=True)
-        return items[:limit]
+        items.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+        final_items = items[:limit]
+        if include_metadata:
+            return {
+                "reports": final_items,
+                "is_partial": False,
+                "is_truncated": len(items) > limit,
+                "total_retrieved": len(final_items),
+                "source": "IN_MEMORY",
+                "pages_evaluated": 1,
+            }
+        return final_items
 
     def check_rate_limit(self, client_hash: str, window_seconds: int = 300, max_requests: int = 5) -> bool:
         if self._simulate_rate_limit_failure or self._simulate_failure:
@@ -1217,8 +1292,10 @@ class QueueSenseDatabase:
     def get_current_estimate(self, location_id: str) -> Optional[Dict[str, Any]]:
         return self._adapter.get_current_estimate(location_id=location_id)
 
-    def list_all_reports(self, limit: int = 50) -> List[Dict[str, Any]]:
-        return self._adapter.list_all_reports(limit=limit)
+    def list_all_reports(
+        self, limit: int = 50, include_metadata: bool = False
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+        return self._adapter.list_all_reports(limit=limit, include_metadata=include_metadata)
 
     def check_rate_limit(self, client_hash: str, window_seconds: int = 300, max_requests: int = 5) -> bool:
         return self._adapter.check_rate_limit(client_hash=client_hash, window_seconds=window_seconds, max_requests=max_requests)
