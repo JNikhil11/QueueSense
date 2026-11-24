@@ -332,11 +332,12 @@ export const App: React.FC = () => {
                 </div>
                 <p className="text-xs text-[#C8D6CC] mt-1.5 leading-relaxed max-w-2xl">
                   Real-time queue estimates could not be refreshed ({errorMsg || 'Connection offline'}). Displaying retained observations from{' '}
-                  <strong className="text-white font-mono">{lastSuccessfulSyncStr || 'prior observation window'}</strong>. Estimates may not reflect current line congestion.
+                  <strong data-testid="stale-timestamp" className="text-white font-mono">{lastSuccessfulSyncStr || 'prior observation window'}</strong>. Estimates may not reflect current line congestion.
                 </p>
               </div>
             </div>
             <button
+              data-testid="stale-retry-button"
               onClick={() => loadData(true)}
               disabled={isRefreshing}
               className="shrink-0 flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#FFA028] text-black font-mono text-xs font-bold uppercase tracking-wider hover:bg-[#e68f20] transition-colors min-h-[44px] shadow-[0_0_15px_rgba(255,160,40,0.3)] disabled:opacity-50"
@@ -365,6 +366,7 @@ export const App: React.FC = () => {
               </p>
             </div>
             <button
+              data-testid="error-retry-button"
               onClick={() => loadData(true)}
               disabled={isRefreshing}
               className="mt-2 px-6 py-2.5 rounded-xl bg-[#CC162D] text-white font-mono text-xs font-bold uppercase tracking-wider hover:bg-[#b01427] transition-colors min-h-[44px] shadow-[0_0_15px_rgba(204,22,45,0.3)]"

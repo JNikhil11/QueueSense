@@ -27,13 +27,21 @@ export {
   DEVICE_ID_STORAGE_KEY,
 };
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+export const API_BASE_URL =
+  (typeof window !== 'undefined' && (window as any).__QUEUESENSE_API_URL__) ||
+  import.meta.env.VITE_API_URL ||
+  '';
 
 export const DATA_MODE: DataMode = (
-  import.meta.env.VITE_DATA_MODE || (import.meta.env.PROD ? 'production' : 'demo')
+  (typeof window !== 'undefined' && (window as any).__QUEUESENSE_DATA_MODE__) ||
+  import.meta.env.VITE_DATA_MODE ||
+  (import.meta.env.PROD ? 'production' : 'demo')
 ) as DataMode;
 
-export const CAMPUS_ID = import.meta.env.VITE_CAMPUS_ID || 'iitb';
+export const CAMPUS_ID =
+  (typeof window !== 'undefined' && (window as any).__QUEUESENSE_CAMPUS_ID__) ||
+  import.meta.env.VITE_CAMPUS_ID ||
+  'iitb';
 
 // Student-Sourced IIT Bombay Dining Directory
 export const IITB_LOCATIONS: CampusLocation[] = [
@@ -705,13 +713,26 @@ export interface ApiClientConfig {
 }
 
 export function createApiClient(config: ApiClientConfig = {}) {
-  const getBaseUrl = () => (config.apiBaseUrl !== undefined ? config.apiBaseUrl : API_BASE_URL);
-  const getDataMode = () => (config.dataMode !== undefined ? config.dataMode : DATA_MODE);
+  const getBaseUrl = () => {
+    if (config.apiBaseUrl !== undefined) return config.apiBaseUrl;
+    if (typeof window !== 'undefined' && (window as any).__QUEUESENSE_API_URL__ !== undefined) {
+      return (window as any).__QUEUESENSE_API_URL__;
+    }
+    return API_BASE_URL;
+  };
+
+  const getDataMode = () => {
+    if (config.dataMode !== undefined) return config.dataMode;
+    if (typeof window !== 'undefined' && (window as any).__QUEUESENSE_DATA_MODE__ !== undefined) {
+      return (window as any).__QUEUESENSE_DATA_MODE__;
+    }
+    return DATA_MODE;
+  };
 
   return {
     isLiveApiConfigured(): boolean {
       const url = getBaseUrl();
-      return Boolean(url && url.startsWith('http'));
+      return Boolean(url && (url.startsWith('http') || url.startsWith('/')));
     },
 
     getDataMode(): DataMode {
@@ -728,6 +749,20 @@ export function createApiClient(config: ApiClientConfig = {}) {
             const json = await res.json();
             if (!json || typeof json !== 'object' || !Array.isArray(json.data)) {
               throw new Error('Malformed API response: expected locations array');
+            }
+            // Strict field and type validation on every location item
+            for (const item of json.data) {
+              if (
+                !item ||
+                typeof item !== 'object' ||
+                typeof item.id !== 'string' ||
+                !item.id.trim() ||
+                typeof item.name !== 'string' ||
+                !item.name.trim() ||
+                typeof item.category !== 'string'
+              ) {
+                throw new Error('Malformed API response: invalid location entry in locations array');
+              }
             }
             return { data: json.data, isLive: true };
           }
@@ -766,8 +801,18 @@ export function createApiClient(config: ApiClientConfig = {}) {
           const res = await fetch(`${baseUrl}/locations/${locationId}/queue`);
           if (res.ok) {
             const json = await res.json();
-            if (!json || typeof json !== 'object' || !json.data || typeof json.data !== 'object') {
-              throw new Error('Malformed API response: expected queue data object');
+            if (
+              !json ||
+              typeof json !== 'object' ||
+              !json.data ||
+              typeof json.data !== 'object' ||
+              !json.data.location ||
+              typeof json.data.location !== 'object' ||
+              !json.data.estimate ||
+              typeof json.data.estimate !== 'object' ||
+              !Array.isArray(json.data.reports)
+            ) {
+              throw new Error('Malformed API response: expected queue data object with location, estimate, and reports');
             }
             return { ...json.data, isLive: true };
           }
@@ -837,6 +882,16 @@ export function createApiClient(config: ApiClientConfig = {}) {
 
           if (res.status === 200 || res.status === 201) {
             const json = await res.json();
+            if (
+              !json ||
+              typeof json !== 'object' ||
+              !json.data ||
+              typeof json.data !== 'object' ||
+              !json.data.report ||
+              !json.data.updatedEstimate
+            ) {
+              throw new Error('Malformed API response: expected report and updatedEstimate');
+            }
             return { ...json.data, isLive: true };
           }
 
@@ -892,8 +947,17 @@ export function createApiClient(config: ApiClientConfig = {}) {
           const res = await fetch(`${baseUrl}/recommendations`);
           if (res.ok) {
             const json = await res.json();
-            if (!json || typeof json !== 'object' || !json.data || typeof json.data !== 'object' || Array.isArray(json.data)) {
-              throw new Error('Malformed API response: expected recommendation object');
+            if (
+              !json ||
+              typeof json !== 'object' ||
+              !json.data ||
+              typeof json.data !== 'object' ||
+              Array.isArray(json.data) ||
+              typeof json.data.isEligible !== 'boolean' ||
+              typeof json.data.reason !== 'string' ||
+              typeof json.data.confidence !== 'number'
+            ) {
+              throw new Error('Malformed API response: expected recommendation object with isEligible, reason, and confidence');
             }
             return { data: json.data, isLive: true };
           }
@@ -1010,8 +1074,14 @@ export function createApiClient(config: ApiClientConfig = {}) {
           const res = await fetch(`${baseUrl}/locations/${locationId}/historical`);
           if (res.ok) {
             const json = await res.json();
-            if (!json || typeof json !== 'object' || !json.data || typeof json.data !== 'object') {
-              throw new Error('Malformed API response: expected historical data object');
+            if (
+              !json ||
+              typeof json !== 'object' ||
+              !json.data ||
+              typeof json.data !== 'object' ||
+              (!Array.isArray(json.data.hourlyTrends) && typeof json.data.historicalAverageWaitMinutes !== 'number')
+            ) {
+              throw new Error('Malformed API response: expected historical data object with hourly trends');
             }
             return { data: json.data, isLive: true };
           }
@@ -1112,6 +1182,15 @@ export function createApiClient(config: ApiClientConfig = {}) {
           });
           if (res.ok) {
             const json = await res.json();
+            if (
+              !json ||
+              typeof json !== 'object' ||
+              !json.data ||
+              typeof json.data !== 'object' ||
+              !Array.isArray(json.data.reports)
+            ) {
+              throw new Error('Malformed API response: expected admin reports array');
+            }
             return { reports: json.data.reports, isLive: true };
           }
           if (res.status === 401 || res.status === 403) {

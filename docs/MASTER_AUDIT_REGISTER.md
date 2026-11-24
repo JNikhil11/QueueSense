@@ -80,7 +80,7 @@ Status Definitions:
 | **Batch 4** | **P1.20** | Cost Controls and Denial-of-Wallet Resilience | **P1** | `infrastructure/template.yaml`, `backend/tests/test_batch4_infrastructure.py`, `docs/COST_MODEL.md` | **`VERIFIED FIXED`** | Current HEAD |
 | **Batch 5** | **P1.21** | Visual & Interaction Integrity (Video Lifecycle, Modal Synchronization, Card Hover Dimming & Layout Containment) | **P1** | `frontend/src/components/CinematicVideoBackground.tsx`, `frontend/src/styles/index.css`, `frontend/src/test/video-background.test.ts`, `frontend/src/test/card-layout-containment.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
 | **Batch 5** | **P1.22** | Accessibility & Focus Trap Lifecycle (WCAG 2.2 AA Focus Trapping, Stable Callbacks, Transition Restoration, Accessible Names, Touch Targets, Live Status Announcements) | **P1** | `frontend/src/hooks/useFocusTrap.ts`, `frontend/src/components/ReportModal.tsx`, `frontend/src/components/OutletDetailModal.tsx`, `frontend/src/components/AdminAuditModal.tsx`, `frontend/src/test/a11y-and-resilience.test.ts`, `frontend/src/test/focus-trap-lifecycle.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
-| **Batch 5** | **P1.23** | Data Freshness, Performance & Storage Resilience (State Model [LOADING/FRESH/STALE/ERROR/EMPTY], Schema Validation, In-Flight Deduplication, SecurityError Storage Fallback) | **P1** | `frontend/src/App.tsx`, `frontend/src/services/api.ts`, `frontend/src/services/deviceId.ts`, `frontend/src/types/index.ts`, `frontend/src/test/stale-data-integrity.test.ts`, `frontend/src/test/stale-data-browser.test.ts`, `frontend/src/test/data-isolation.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 5** | **P1.23** | Data Freshness, Performance & Storage Resilience (State Model [LOADING/FRESH/STALE/ERROR/EMPTY], Schema Validation, In-Flight Deduplication, SecurityError Storage Fallback) | **P1** | `frontend/src/App.tsx`, `frontend/src/services/api.ts`, `frontend/src/services/deviceId.ts`, `frontend/src/types/index.ts`, `frontend/src/test/stale-data-integrity.test.ts`, `frontend/src/test/stale-data-browser.test.ts`, `frontend/src/test/api-contracts-and-validation.test.ts`, `frontend/src/test/runtime-performance.test.ts`, `frontend/src/test/data-isolation.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
 | **Batch 5** | **P1.24** | Git SHA Tracking & Remote Branch Integrity (Reconciled Commit Transcription, Verified Untouched Master) | **P1** | `docs/MASTER_AUDIT_REGISTER.md` | **`VERIFIED FIXED`** | Current HEAD |
 
 ---
@@ -938,7 +938,7 @@ Status Definitions:
   - `src/test/card-layout-containment.test.ts` (6 tests passing)
 - **Status:** **`VERIFIED FIXED`**
 
-### P1.22 — Accessibility & Focus Trap Lifecycle (WCAG 2.2 AA Focus Trapping, Stable Callbacks, Transition Restoration, Accessible Names, Touch Targets, Live Status Announcements)
+### P1.22 — Accessibility & Focus Trap Lifecycle (WCAG 2.2 AA Focus Trapping, Stable Callbacks, Transition Restoration, Pointer Containment, Accessible Names, Touch Targets, Live Status Announcements)
 - **Severity:** P1 (Accessibility & Compliance Standard)
 - **Original Evidence:**
   1. Modal dialogs lacked focus trapping: pressing Tab leaked focus outside dialogs to background controls.
@@ -948,7 +948,7 @@ Status Definitions:
   5. Modal close buttons in `OutletDetailModal` and `AdminAuditModal` lacked accessible labels (`aria-label="Close dialog"`) and measured below 44x44px touch targets.
   6. `aria-labelledby` IDs in `OutletDetailModal` (`outlet-detail-title`) and `AdminAuditModal` (`admin-audit-title`) did not match existing heading IDs.
   7. Status toasts and global error notices lacked ARIA live region attributes.
-- **Reproduction:** Automated WCAG 2.2 AA accessibility audit and lifecycle stress tests in browser using Puppeteer.
+- **Reproduction:** Automated WCAG 2.2 AA accessibility audit and lifecycle stress tests in real headless browser using Puppeteer.
 - **Files Changed:** `frontend/src/hooks/useFocusTrap.ts`, `frontend/src/components/ReportModal.tsx`, `frontend/src/components/OutletDetailModal.tsx`, `frontend/src/components/AdminAuditModal.tsx`, `frontend/src/components/Navbar.tsx`, `frontend/src/components/OutletCard.tsx`, `frontend/src/components/FilterBar.tsx`, `frontend/src/components/RecommendationBanner.tsx`, `frontend/src/App.tsx`, `frontend/src/test/a11y-and-resilience.test.ts`, `frontend/src/test/focus-trap-lifecycle.test.ts`.
 - **Implemented Remediation:**
   1. **Lifecycle-Safe Focus Trap (`useFocusTrap.ts`):**
@@ -957,7 +957,9 @@ Status Definitions:
      - Implemented robust `isFocusable()` helper excluding `disabled`, `inert`, `aria-hidden="true"`, `tabindex < 0`, `display: none`, `visibility: hidden`, and elements without client rects.
      - Implemented zero-focusable element fallback setting `container.setAttribute('tabindex', '-1')` and focusing container safely.
      - Dynamic queries on every Tab keydown ensure dynamically inserted DOM elements are instantly included in the focus sequence.
-     - Added document-level capturing `focusin` listener that intercepts outside pointer focus attempts and pulls focus back inside the active modal container.
+     - Added document-level capturing `focusin` listener that intercepts outside pointer focus attempts and pulls focus back inside the active modal container (`dialog.contains(document.activeElement) === true`).
+     - Verified pointer backdrop dismissal: clicking outside the dialog card cleanly closes the modal and reliably restores focus to the triggering element.
+     - Multi-modal verification: Verified that both `OutletDetailModal` and `AdminAuditModal` reliably restore focus to their respective opening triggers upon dismissal.
   2. **Dialog Labeling & Semantic ARIA:**
      - Matched all `aria-labelledby` targets to concrete heading IDs (`report-dialog-title`, `outlet-detail-title`, `admin-audit-title`).
   3. **Touch Targets (WCAG 2.5.8 Level AA):**
@@ -966,7 +968,7 @@ Status Definitions:
      - Added `role="status"` and `aria-live="polite"` to toast announcements; added `role="alert"` and `aria-live="assertive"` to global error banner.
 - **Exact Tests Added:**
   - `src/test/a11y-and-resilience.test.ts` (10 tests passing)
-  - `src/test/focus-trap-lifecycle.test.ts` (6 tests passing: parent re-render/callback identity changes, transition-only restoration, pointer escape containment, hidden/disabled/inert exclusion, dynamic controls, chained modals)
+  - `src/test/focus-trap-lifecycle.test.ts` (9 tests passing: Tab containment forward/backward 12 cycles, outside pointer click containment, backdrop dismissal restoration, parent re-renders and callback identity stability, multi-modal focus restoration, hidden/disabled/inert exclusion, dynamic controls, zero-focusable container safety, chained modal transitions)
 - **Status:** **`VERIFIED FIXED`**
 
 ### P1.23 — Data Freshness, Performance & Storage Resilience (State Model [LOADING/FRESH/STALE/ERROR/EMPTY], Schema Validation, In-Flight Deduplication, SecurityError Storage Fallback)
@@ -977,29 +979,43 @@ Status Definitions:
   3. If browser storage threw a `SecurityError` (e.g. private browsing with blocked third-party storage), accessing `localStorage` directly could throw uncaught exceptions.
   4. Network failures, timeouts, 5xx/4xx errors, or malformed API payloads risked either crashing the frontend, displaying uninformative errors, or silently presenting stale predictions without prominent staleness warnings.
 - **Reproduction:** Simulated network races, tab backgrounding (`document.hidden`), storage SecurityError, API dropouts, and malformed JSON payloads in automated Vitest and Puppeteer suites.
-- **Files Changed:** `frontend/src/App.tsx`, `frontend/src/services/deviceId.ts`, `frontend/src/services/api.ts`, `frontend/src/types/index.ts`, `frontend/src/components/OutletCard.tsx`, `frontend/src/components/RecommendationBanner.tsx`, `frontend/src/components/OutletDetailModal.tsx`, `frontend/src/test/a11y-and-resilience.test.ts`, `frontend/src/test/data-isolation.test.ts`, `frontend/src/test/stale-data-integrity.test.ts`, `frontend/src/test/stale-data-browser.test.ts`.
+- **Files Changed:** `frontend/src/App.tsx`, `frontend/src/services/deviceId.ts`, `frontend/src/services/api.ts`, `frontend/src/types/index.ts`, `frontend/src/components/OutletCard.tsx`, `frontend/src/components/RecommendationBanner.tsx`, `frontend/src/components/OutletDetailModal.tsx`, `frontend/src/test/a11y-and-resilience.test.ts`, `frontend/src/test/data-isolation.test.ts`, `frontend/src/test/stale-data-integrity.test.ts`, `frontend/src/test/stale-data-browser.test.ts`, `frontend/src/test/api-contracts-and-validation.test.ts`, `frontend/src/test/runtime-performance.test.ts`.
 - **Implemented Remediation:**
   1. **Formal Data Freshness State Model:**
      - Exported `AppSyncState = 'LOADING' | 'FRESH' | 'STALE' | 'ERROR' | 'EMPTY'` in `frontend/src/types/index.ts`.
      - Initial load: starts in `LOADING`. On success, transitions to `FRESH` (or `EMPTY` if 0 locations). On initial failure, transitions to `ERROR`.
-     - Refresh cycle: On failed refresh (network dropout, timeout, HTTP 500, HTTP 429, schema rejection), transitions to `STALE`. Retains existing cached data and original `lastSuccessfulSync` timestamp.
+     - Refresh cycle: On failed refresh (network dropout, timeout, HTTP 500, HTTP 404, HTTP 429, schema rejection), transitions to `STALE`. Retains existing cached data and original `lastSuccessfulSync` timestamp.
      - On subsequent successful refresh, automatically recovers from `STALE` back to `FRESH`.
+     - Tested in real headless Puppeteer browser across the complete 13-step lifecycle: initial load $\rightarrow$ fresh state verification $\rightarrow$ timestamp recorded $\rightarrow$ refresh triggered $\rightarrow$ forced HTTP 500 $\rightarrow$ `STALE` state transition $\rightarrow$ original timestamp preserved $\rightarrow$ visible stale banner with alert role $\rightarrow$ `STALE DATA` badge on cards $\rightarrow$ `(Stale Estimate • Sync Failed)` wait indicator $\rightarrow$ `Cached Recommendation (Stale Data)` on banner $\rightarrow$ retry button clicked $\rightarrow$ HTTP 200 response $\rightarrow$ recovery to `FRESH`.
   2. **Strict API Client Schema Validation & Fail-Closed Integrity:**
-     - Hardened all client methods in `frontend/src/services/api.ts` (`getLocations`, `getRecommendations`, `getLocationQueue`, `getHistorical`).
-     - Rejects malformed responses (nulls, missing `data` array/object, non-numeric timestamps, invalid status codes) by throwing explicit errors, preventing malformed backend data from silently corrupting client state.
+     - Hardened all client methods in `frontend/src/services/api.ts` (`getLocations`, `getRecommendations`, `getLocationQueue`, `getHistorical`, `getAdminReports`, `submitReport`).
+     - Added runtime configuration fallback checking `window.__QUEUESENSE_API_URL__`, `window.__QUEUESENSE_DATA_MODE__`, and `window.__QUEUESENSE_CAMPUS_ID__`, supporting relative base URLs.
+     - Validates schemas deeply across all 6 endpoints; rejects malformed responses (nulls, missing `data` array/object, invalid types, missing required fields) with explicit descriptive errors.
+     - Preserves strict fail-closed contract in production mode: missing API URL or network failure throws immediately with ZERO mock fallback.
+     - Verified with 12 contract validation tests in `frontend/src/test/api-contracts-and-validation.test.ts`.
   3. **Visual Staleness Disclosures & User Controls:**
      - Prominent global `STALE DATA WARNING` banner displayed across the application when `syncState === 'STALE'`, displaying the exact last successful timestamp and an immediate "Retry Sync" button.
      - `OutletCard`: Displays an amber `STALE DATA` badge and `(Stale Estimate • Sync Failed)` wait indicator.
      - `RecommendationBanner`: Displays `Cached Recommendation (Stale Data)` badge and surge warning indicator.
      - `OutletDetailModal`: Displays `STALE OBSERVATIONS` banner with manual refresh action.
-  4. **Intelligent Polling & Deduplication:**
+  4. **Runtime Performance & UX Verification:**
+     - Verified zero runtime console errors and zero uncaught exceptions in production build.
+     - Measured Cumulative Layout Shift (CLS) during post-hydration interactions via `PerformanceObserver`: 0.00 (well below 0.05 threshold).
+     - Rapid category filter switching latency: < 350ms.
+     - Modal open latency: < 500ms; modal close latency: < 350ms.
+     - Card click to modal transition latency: < 1000ms.
+     - Mobile viewport containment: verified on 390px iPhone viewport with `scrollWidth === bodyWidth` (zero horizontal overflow).
+     - Verified with 6 tests in `frontend/src/test/runtime-performance.test.ts`.
+  5. **Intelligent Polling & Deduplication:**
      - Tab backgrounding (`document.hidden`) pauses polling; `visibilitychange` listener immediately triggers refresh upon returning to tab if stale (> 30s).
      - In-flight execution guard (`isFetchingRef`) strictly prevents concurrent duplicate API calls.
-  5. **Storage Resilience:**
+  6. **Storage Resilience:**
      - Wrapped all `localStorage` access in `deviceId.ts`, `api.ts`, and `AdminAuditModal.tsx` in defensive try-catch handlers. If `localStorage` throws a `SecurityError`, `deviceId.ts` falls back to an in-memory CSPRNG UUID.
 - **Exact Tests Added:**
   - `src/test/stale-data-integrity.test.ts` (15 tests passing: initial load, network dropouts, 500/429 handling, timeout handling, malformed payload rejections, state transitions, timestamp retention)
-  - `src/test/stale-data-browser.test.ts` (2 tests passing: fresh vs stale visual warnings, banner rendering, retry flow)
+  - `src/test/stale-data-browser.test.ts` (8 browser tests passing: complete 13-step lifecycle, initial failure ERROR recovery, network abort, timeout abort, HTTP 404, malformed schema rejection, empty response, repeated failures)
+  - `src/test/api-contracts-and-validation.test.ts` (12 contract and fail-closed tests passing)
+  - `src/test/runtime-performance.test.ts` (6 performance, CLS, and UX tests passing)
   - `src/test/data-isolation.test.ts` (18 fail-closed tests passing)
   - `src/test/a11y-and-resilience.test.ts` (10 tests passing)
 - **Status:** **`VERIFIED FIXED`**

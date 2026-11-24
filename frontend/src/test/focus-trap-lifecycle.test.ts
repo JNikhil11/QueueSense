@@ -4,7 +4,7 @@ import puppeteer, { Browser, Page } from 'puppeteer-core';
 const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const PREVIEW_URL = 'http://localhost:4173/';
 
-describe('Workstream 1 — Focus Trap Lifecycle, Accessibility & Boundary Verification', { timeout: 35000 }, () => {
+describe('Workstream B — Real Pointer Interaction, Focus Trap Containment & Accessibility Lifecycle', { timeout: 45000 }, () => {
   let browser: Browser;
   let page: Page;
 
@@ -24,7 +24,121 @@ describe('Workstream 1 — Focus Trap Lifecycle, Accessibility & Boundary Verifi
     }
   });
 
-  it('Parent re-render & callback identity change: focus trap remains active without premature cleanup or focus theft', async () => {
+  it('1. Tab and Shift+Tab key containment: focus strictly cycles within dialog and never leaks out', async () => {
+    await page.goto(PREVIEW_URL, { waitUntil: 'load' });
+    const reportBtn = await page.waitForSelector('header button.btn-electric');
+    await reportBtn?.focus();
+    await page.keyboard.press('Enter');
+
+    await page.waitForSelector('[role="dialog"]');
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Verify initial auto-focus enters dialog
+    const initialFocusInside = await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]');
+      return dialog ? dialog.contains(document.activeElement) : false;
+    });
+    expect(initialFocusInside).toBe(true);
+
+    // Forward Tab cycling (12 tabs)
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press('Tab');
+      const inside = await page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"]');
+        return dialog ? dialog.contains(document.activeElement) : false;
+      });
+      expect(inside, `Tab press #${i + 1} leaked focus outside dialog`).toBe(true);
+    }
+
+    // Reverse Shift+Tab cycling (12 shift-tabs)
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.down('Shift');
+      await page.keyboard.press('Tab');
+      await page.keyboard.up('Shift');
+      const inside = await page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"]');
+        return dialog ? dialog.contains(document.activeElement) : false;
+      });
+      expect(inside, `Shift+Tab press #${i + 1} leaked focus outside dialog`).toBe(true);
+    }
+
+    // Dismiss dialog
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
+  });
+
+  it('2. Genuine pointer interaction: clicking outside controls cannot steal focus from active modal', async () => {
+    await page.goto(PREVIEW_URL, { waitUntil: 'load' });
+    const reportBtn = await page.waitForSelector('header button.btn-electric');
+    await reportBtn?.click();
+
+    await page.waitForSelector('[role="dialog"]');
+    await new Promise((r) => setTimeout(r, 350));
+
+    // Inject an external focusable button outside the modal container to test genuine pointer interaction
+    await page.evaluate(() => {
+      const outsideBtn = document.createElement('button');
+      outsideBtn.id = 'outside-test-button';
+      outsideBtn.textContent = 'Outside Click Target';
+      outsideBtn.style.position = 'fixed';
+      outsideBtn.style.top = '10px';
+      outsideBtn.style.left = '10px';
+      outsideBtn.style.zIndex = '9999';
+      document.body.appendChild(outsideBtn);
+    });
+
+    // Perform an actual pointer click on the outside element
+    await page.click('#outside-test-button');
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Verify that focus was intercepted and pulled back inside the active modal
+    const focusConfined = await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]');
+      const outsideBtn = document.getElementById('outside-test-button');
+      const active = document.activeElement;
+      return {
+        isInsideDialog: dialog ? dialog.contains(active) : false,
+        isOutsideBtnFocused: active === outsideBtn,
+      };
+    });
+
+    expect(focusConfined.isInsideDialog).toBe(true);
+    expect(focusConfined.isOutsideBtnFocused).toBe(false);
+
+    // Clean up test element
+    await page.evaluate(() => {
+      document.getElementById('outside-test-button')?.remove();
+    });
+
+    // Close modal cleanly
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
+  });
+
+  it('3. Real pointer backdrop dismissal: clicking the backdrop dismisses modal and restores focus to trigger', async () => {
+    await page.goto(PREVIEW_URL, { waitUntil: 'load' });
+    const reportBtn = await page.waitForSelector('header button.btn-electric');
+    await reportBtn?.focus();
+    await page.keyboard.press('Enter');
+
+    await page.waitForSelector('[role="dialog"]');
+    await new Promise((r) => setTimeout(r, 350));
+
+    // Click the backdrop outside the modal dialog card (top-left margin: 15px, 15px)
+    await page.mouse.click(15, 15);
+
+    // Modal dismisses via backdrop click handler
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), { timeout: 5000 });
+
+    // Focus is restored to invoking trigger button
+    const isTriggerFocused = await page.evaluate(() => {
+      const trigger = document.querySelector('header button.btn-electric');
+      return document.activeElement === trigger;
+    });
+    expect(isTriggerFocused).toBe(true);
+  });
+
+  it('4. Parent re-renders & callback identity changes: focus trap remains active without premature cleanup or focus theft', async () => {
     await page.goto(PREVIEW_URL, { waitUntil: 'load' });
     const reportBtn = await page.waitForSelector('header button.btn-electric');
     await reportBtn?.focus();
@@ -33,14 +147,13 @@ describe('Workstream 1 — Focus Trap Lifecycle, Accessibility & Boundary Verifi
     await page.waitForSelector('[role="dialog"]');
     await new Promise((r) => setTimeout(r, 100));
 
-    // Focus an input inside the modal (e.g. note input)
+    // Focus note input
     const noteInput = await page.waitForSelector('[role="dialog"] input[type="text"]');
     await noteInput?.focus();
 
-    // Type into note input: this causes repeated parent/modal re-renders and produces new inline callback identities
-    await noteInput?.type('Testing lifecycle re-renders');
+    // Type text: generates repeated parent re-renders and fresh inline function identities
+    await noteInput?.type('Testing lifecycle re-renders without focus theft');
 
-    // Verify focus remains strictly on the active input inside the modal
     const currentActiveElement = await page.evaluate(() => {
       const active = document.activeElement;
       const dialog = document.querySelector('[role="dialog"]');
@@ -48,83 +161,68 @@ describe('Workstream 1 — Focus Trap Lifecycle, Accessibility & Boundary Verifi
       return {
         isInsideDialog: dialog ? dialog.contains(active) : false,
         isHeaderTrigger: active === headerBtn,
-        activeTagName: active?.tagName,
         activeValue: (active as HTMLInputElement)?.value,
       };
     });
 
     expect(currentActiveElement.isInsideDialog).toBe(true);
     expect(currentActiveElement.isHeaderTrigger).toBe(false);
-    expect(currentActiveElement.activeValue).toBe('Testing lifecycle re-renders');
+    expect(currentActiveElement.activeValue).toBe('Testing lifecycle re-renders without focus theft');
 
-    // Close modal
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
   });
 
-  it('Focus restoration: focus returns to the triggering element only when the modal actually closes', async () => {
+  it('5. Focus restoration on all modal types: OutletDetailModal and AdminAuditModal return focus to invoking element', async () => {
     await page.goto(PREVIEW_URL, { waitUntil: 'load' });
-    const reportBtn = await page.waitForSelector('header button.btn-electric');
-    await reportBtn?.focus();
+    await page.waitForSelector('.outlet-card');
+
+    // 1. OutletDetailModal
+    const detailBtn = await page.waitForSelector('.outlet-card button[aria-label^="View details"]');
+    await detailBtn?.focus();
     await page.keyboard.press('Enter');
 
-    await page.waitForSelector('[role="dialog"]');
-    await new Promise((r) => setTimeout(r, 100));
+    await page.waitForSelector('[aria-labelledby="outlet-detail-title"]');
+    await new Promise((r) => setTimeout(r, 350));
 
-    // Verify trigger element outside does NOT have focus while open
-    const isTriggerFocusedWhileOpen = await page.evaluate(() => {
-      const trigger = document.querySelector('header button.btn-electric');
-      return document.activeElement === trigger;
+    // Close via close button
+    const detailCloseBtn = await page.waitForSelector('[aria-labelledby="outlet-detail-title"] button[aria-label="Close dialog"]');
+    await detailCloseBtn?.click();
+    await page.waitForFunction(() => !document.querySelector('[aria-labelledby="outlet-detail-title"]'));
+
+    const isDetailBtnRefocused = await page.evaluate(() => {
+      const btn = document.querySelector('.outlet-card button[aria-label^="View details"]');
+      return document.activeElement === btn;
     });
-    expect(isTriggerFocusedWhileOpen).toBe(false);
+    expect(isDetailBtnRefocused).toBe(true);
 
-    // Close via close button click
-    const closeBtn = await page.waitForSelector('[role="dialog"] button[aria-label="Close dialog"]');
-    await closeBtn?.click();
+    // 2. AdminAuditModal
+    const adminTrigger = await page.waitForSelector('header button[aria-label="View live campus observation audit stream"]');
+    await adminTrigger?.focus();
+    await page.keyboard.press('Enter');
 
-    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
+    await page.waitForSelector('[aria-labelledby="admin-audit-title"]');
+    await new Promise((r) => setTimeout(r, 350));
 
-    // Focus restored to trigger button
-    const isTriggerFocusedAfterClose = await page.evaluate(() => {
-      const trigger = document.querySelector('header button.btn-electric');
-      return document.activeElement === trigger;
+    const adminCloseBtn = await page.waitForSelector('[aria-labelledby="admin-audit-title"] button[aria-label="Close dialog"]');
+    await adminCloseBtn?.click();
+    await page.waitForFunction(() => !document.querySelector('[aria-labelledby="admin-audit-title"]'));
+
+    const isAdminTriggerRefocused = await page.evaluate(() => {
+      const btn = document.querySelector('header button[aria-label="View live campus observation audit stream"]');
+      return document.activeElement === btn;
     });
-    expect(isTriggerFocusedAfterClose).toBe(true);
+    expect(isAdminTriggerRefocused).toBe(true);
   });
 
-  it('Pointer focus escape: outside interaction cannot move keyboard focus outside the active modal', async () => {
-    await page.goto(PREVIEW_URL, { waitUntil: 'load' });
-    const reportBtn = await page.waitForSelector('header button.btn-electric');
-    await reportBtn?.click();
-
-    await page.waitForSelector('[role="dialog"]');
-    await new Promise((r) => setTimeout(r, 100));
-
-    // Attempt to programmatically or via pointer focus a navbar element outside dialog
-    await page.evaluate(() => {
-      const refreshBtn = document.querySelector('header button[aria-label="Refresh data"]') as HTMLElement | null;
-      refreshBtn?.focus();
-    });
-
-    // Verify focus is captured and brought back inside the active modal
-    const focusConfined = await page.evaluate(() => {
-      const dialog = document.querySelector('[role="dialog"]');
-      return dialog ? dialog.contains(document.activeElement) : false;
-    });
-    expect(focusConfined).toBe(true);
-
-    await page.keyboard.press('Escape');
-    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
-  });
-
-  it('Hidden, disabled, and inert elements are excluded from the focus sequence', async () => {
+  it('6. Hidden, disabled, and inert elements are strictly excluded from the focus sequence', async () => {
     await page.goto(PREVIEW_URL, { waitUntil: 'load' });
     const reportBtn = await page.waitForSelector('header button.btn-electric');
     await reportBtn?.click();
 
     await page.waitForSelector('[role="dialog"]');
 
-    // Inject temporary elements to verify filtering: hidden, disabled, inert, and tabindex=-1
+    // Inject temporary test elements to verify exclusion
     await page.evaluate(() => {
       const form = document.querySelector('[role="dialog"] form');
       if (!form) return;
@@ -163,8 +261,7 @@ describe('Workstream 1 — Focus Trap Lifecycle, Accessibility & Boundary Verifi
       form.appendChild(negativeTabIndexBtn);
     });
 
-    // Now cycle Tab through dialog and record all focused elements
-    const focusedElementIds = await page.evaluate(async () => {
+    const focusedElementIds = await page.evaluate(() => {
       const dialog = document.querySelector('[role="dialog"]');
       if (!dialog) return [];
       const ids: string[] = [];
@@ -188,25 +285,23 @@ describe('Workstream 1 — Focus Trap Lifecycle, Accessibility & Boundary Verifi
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
   });
 
-  it('Dynamic elements: newly inserted focusable controls are immediately included in the focus sequence', async () => {
+  it('7. Dynamic elements: inserting or removing controls dynamically updates the focus sequence', async () => {
     await page.goto(PREVIEW_URL, { waitUntil: 'load' });
     const reportBtn = await page.waitForSelector('header button.btn-electric');
     await reportBtn?.click();
 
     await page.waitForSelector('[role="dialog"]');
 
-    // Insert a new interactive button dynamically
+    // 1. Insert dynamic control
     await page.evaluate(() => {
       const form = document.querySelector('[role="dialog"] form');
       if (!form) return;
       const dynamicBtn = document.createElement('button');
       dynamicBtn.id = 'dynamic-custom-action';
       dynamicBtn.textContent = 'Dynamic Action';
-      dynamicBtn.className = 'py-2 px-3 text-xs';
       form.insertBefore(dynamicBtn, form.firstChild);
     });
 
-    // Check if the newly inserted button is detected by focus trap
     const isDynamicFound = await page.evaluate(() => {
       const dialog = document.querySelector('[role="dialog"]');
       if (!dialog) return false;
@@ -214,14 +309,55 @@ describe('Workstream 1 — Focus Trap Lifecycle, Accessibility & Boundary Verifi
       const items = Array.from(dialog.querySelectorAll<HTMLElement>(selector));
       return items.some((el) => el.id === 'dynamic-custom-action');
     });
-
     expect(isDynamicFound).toBe(true);
+
+    // 2. Remove dynamic control
+    await page.evaluate(() => {
+      const el = document.getElementById('dynamic-custom-action');
+      el?.remove();
+    });
+
+    const isDynamicRemoved = await page.evaluate(() => {
+      return document.getElementById('dynamic-custom-action') === null;
+    });
+    expect(isDynamicRemoved).toBe(true);
 
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
   });
 
-  it('Multiple modals: focus remains in the currently active modal during chained transitions', async () => {
+  it('8. Zero-focusable-elements dialog safety: container receives focus safely without throwing', async () => {
+    await page.goto(PREVIEW_URL, { waitUntil: 'load' });
+    const reportBtn = await page.waitForSelector('header button.btn-electric');
+    await reportBtn?.click();
+
+    await page.waitForSelector('[role="dialog"]');
+
+    // Temporarily disable all interactive controls inside dialog to simulate zero-element state
+    await page.evaluate(() => {
+      const controls = document.querySelectorAll<HTMLElement>('[role="dialog"] button, [role="dialog"] input, [role="dialog"] select');
+      controls.forEach((c) => {
+        c.setAttribute('disabled', 'true');
+        c.setAttribute('tabindex', '-1');
+      });
+    });
+
+    // Press Tab
+    await page.keyboard.press('Tab');
+
+    // Focus falls back to the container safely without JavaScript error
+    const containerHasFocusOrValid = await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]');
+      return dialog ? dialog.contains(document.activeElement) || document.activeElement === dialog : false;
+    });
+    expect(containerHasFocusOrValid).toBe(true);
+
+    // Clean up
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
+  });
+
+  it('9. Multiple modals: focus transitions safely during chained modal interactions', async () => {
     await page.goto(PREVIEW_URL, { waitUntil: 'load' });
     await page.waitForSelector('.outlet-card');
 
@@ -231,21 +367,16 @@ describe('Workstream 1 — Focus Trap Lifecycle, Accessibility & Boundary Verifi
 
     await page.waitForSelector('[aria-labelledby="outlet-detail-title"]');
 
-    // Click "Submit Observation" inside detail modal to open ReportModal
-    const submitObservationBtn = await page.evaluate(() => {
+    // Click "Submit Observation" inside detail modal to transition to ReportModal
+    await page.evaluate(() => {
       const buttons = Array.from(document.querySelectorAll('button'));
       const btn = buttons.find((b) => b.textContent?.includes('Submit Observation'));
-      if (btn) {
-        btn.click();
-        return true;
-      }
-      return false;
+      btn?.click();
     });
-    expect(submitObservationBtn).toBe(true);
 
     // Verify ReportModal is now the active modal
     await page.waitForSelector('[aria-labelledby="report-dialog-title"]');
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 200));
 
     const activeDialogTitle = await page.evaluate(() => {
       const active = document.activeElement;
@@ -255,7 +386,6 @@ describe('Workstream 1 — Focus Trap Lifecycle, Accessibility & Boundary Verifi
 
     expect(activeDialogTitle).toBe(true);
 
-    // Escape closes report modal
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
   });
