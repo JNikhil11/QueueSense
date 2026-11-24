@@ -356,13 +356,15 @@ def test_get_locations_template_and_ssm_policy_configuration():
     assert "dynamodb:PutItem" in loc_sec_text
     assert "!GetAtt MainTable.Arn" in loc_sec_text
 
-    # Verify SubmitReportFunction has ssm:GetParameter and RATE_LIMIT_SALT_PARAMETER_NAME
+    # Verify SubmitReportFunction has ssm:GetParameter, RATE_LIMIT_SALT_PARAMETER_NAME, and dynamodb:TransactWriteItems
     submit_section = re.search(r"SubmitReportFunction:.*?(?=GetRecommendationsFunction:)", template_text, re.DOTALL)
     assert submit_section, "SubmitReportFunction must be present in template"
     sub_sec_text = submit_section.group(0)
     assert "RATE_LIMIT_SALT_PARAMETER_NAME" in sub_sec_text
     assert "ssm:GetParameter" in sub_sec_text
     assert "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/queuesense/${Environment}/rate_limit_salt" in sub_sec_text
+    assert "dynamodb:TransactWriteItems" in sub_sec_text, "SubmitReportFunction must have dynamodb:TransactWriteItems for idempotent writes"
+    assert "dynamodb:*" not in sub_sec_text, "SubmitReportFunction must not grant wildcard dynamodb:*"
 
 
 def test_production_salt_fetched_from_ssm_securestring(monkeypatch):
