@@ -31,13 +31,20 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   const idempotencyKeyRef = useRef<string | null>(null);
 
   const handleClose = () => {
+    // A request may already have committed even when the browser has not received
+    // its response. Keep the modal and its idempotency key alive until it settles.
+    if (isSubmitting) return;
     idempotencyKeyRef.current = null;
     onClose();
   };
 
   // Clear retained idempotency key whenever the submission inputs change or modal closes
   useEffect(() => {
-    idempotencyKeyRef.current = null;
+    // Never discard the key while a request is unresolved. Inputs are disabled
+    // during submission, but this guard also protects against programmatic changes.
+    if (!isSubmitting) {
+      idempotencyKeyRef.current = null;
+    }
   }, [selectedLocationId, waitMinutes, queueLength, note, isOpen]);
 
   // WCAG 2.2 AA Focus Trapping & Restoration
@@ -115,7 +122,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
       aria-modal="true"
       aria-labelledby="report-dialog-title"
       onClick={(e) => {
-        if (e.target === e.currentTarget) handleClose();
+        if (!isSubmitting && e.target === e.currentTarget) handleClose();
       }}
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in"
     >
@@ -135,6 +142,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
           </div>
           <button
             onClick={handleClose}
+            disabled={isSubmitting}
             className="p-2.5 rounded-xl text-[#8E9E93] hover:text-white hover:bg-white/[0.06] transition-colors min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 flex items-center justify-center"
             style={{ minHeight: '44px', minWidth: '44px' }}
             aria-label="Close dialog"
@@ -168,6 +176,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
               id="report-location-select"
               value={selectedLocationId}
               onChange={(e) => setSelectedLocationId(e.target.value)}
+              disabled={isSubmitting}
               className="w-full px-4 py-3 rounded-2xl bg-[#090E0B] border border-white/[0.1] text-base sm:text-sm text-white focus:outline-none focus:border-[#39FF14]/60 transition-colors cursor-pointer min-h-[44px]"
             >
               {locations.map((loc) => (
@@ -206,6 +215,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                     type="button"
                     key={val}
                     onClick={() => setWaitMinutes(val)}
+                    disabled={isSubmitting}
                     aria-pressed={isSelected}
                     aria-label={`${val} minutes wait`}
                     className={`py-2 text-xs font-mono rounded-xl border transition-all min-h-[44px] flex items-center justify-center ${
@@ -228,6 +238,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
               step="1"
               value={waitMinutes}
               onChange={(e) => setWaitMinutes(Number(e.target.value))}
+              disabled={isSubmitting}
               aria-label="Observed wait time in minutes"
               className="w-full accent-[#39FF14] cursor-pointer h-2 bg-[#17221A] rounded-lg"
             />
@@ -254,6 +265,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                     type="button"
                     key={val}
                     onClick={() => setQueueLength(val)}
+                    disabled={isSubmitting}
                     aria-pressed={isSelected}
                     aria-label={`${val} people in line`}
                     className={`py-2 text-xs font-mono rounded-xl border transition-all min-h-[44px] flex items-center justify-center ${
@@ -276,6 +288,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
               step="1"
               value={queueLength}
               onChange={(e) => setQueueLength(Number(e.target.value))}
+              disabled={isSubmitting}
               aria-label="Observed queue length in number of people"
               className="w-full accent-[#7DF9FF] cursor-pointer h-2 bg-[#17221A] rounded-lg"
             />
@@ -297,6 +310,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
               maxLength={140}
               value={note}
               onChange={(e) => setNote(e.target.value)}
+              disabled={isSubmitting}
               placeholder="e.g. Counter 2 moving briskly, main line surging"
               className="w-full px-4 py-3 rounded-2xl bg-[#090E0B] border border-white/[0.08] text-base sm:text-sm text-[#F4F7F5] placeholder-[#5A695F] focus:outline-none focus:border-[#39FF14]/60 transition-colors min-h-[44px]"
             />
