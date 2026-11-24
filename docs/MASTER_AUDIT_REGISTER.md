@@ -59,12 +59,12 @@ Status Definitions:
 | :---: | :--- | :--- | :---: | :--- | :---: | :---: |
 | **Pre** | **P0.1** | DynamoDB Transaction Permission Mismatch | **P0** | `infrastructure/template.yaml`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | `e9fce4d` |
 | **Pre** | **P1.1** | Fixed-Window Rate Limiting (Boundary Burst Vulnerability) | **P1** | `backend/shared/database.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | `bb59119` / `6bda5e5` |
-| **Batch 1** | **P1.2** | Historical Reports Pagination (Multi-Page Ingestion & 1,000 Cap) | **P1** | `backend/functions/get_historical/app.py`, `backend/shared/database.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | *Batch 1 Commit* |
-| **Batch 1** | **P1.3** | Location Listing Read-Path Purity (Never Mutate DB on Read) | **P1** | `backend/shared/database.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | *Batch 1 Commit* |
-| **Batch 1** | **P1.4** | Admin Report Feed Bounded Pagination & Indexing | **P1** | `backend/shared/database.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | *Batch 1 Commit* |
-| **Batch 1** | **P1.5** | DynamoDB GSI1 Data Model & Global Secondary Indexing | **P1** | `infrastructure/template.yaml`, `backend/shared/database.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | *Batch 1 Commit* |
-| **Batch 1** | **P1.6** | Multi-Campus Isolation & Parameterization | **P1** | `infrastructure/template.yaml`, `backend/shared/database.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | *Batch 1 Commit* |
-| **Batch 1** | **P1.7** | Location Data Provenance Metadata & Internal Key Stripping | **P1** | `backend/shared/database.py`, `backend/functions/get_locations/app.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | *Batch 1 Commit* |
+| **Batch 1** | **P1.2** | Historical Reports Pagination (Multi-Page Ingestion & 1,000 Cap) | **P1** | `backend/functions/get_historical/app.py`, `backend/shared/database.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | `5db118c` |
+| **Batch 1** | **P1.3** | Location Listing Read-Path Purity (Never Mutate DB on Read) | **P1** | `backend/shared/database.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | `5db118c` |
+| **Batch 1** | **P1.4** | Admin Report Feed Bounded Pagination & Indexing | **P1** | `backend/shared/database.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | `5db118c` |
+| **Batch 1** | **P1.5** | DynamoDB GSI1 Data Model & Global Secondary Indexing | **P1** | `infrastructure/template.yaml`, `backend/shared/database.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | `5db118c` |
+| **Batch 1** | **P1.6** | Multi-Campus Isolation & Parameterization | **P1** | `infrastructure/template.yaml`, `backend/shared/database.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | `5db118c` |
+| **Batch 1** | **P1.7** | Location Data Provenance Metadata & Internal Key Stripping | **P1** | `backend/shared/database.py`, `backend/functions/get_locations/app.py`, `backend/tests/test_production_hardening.py` | **`VERIFIED FIXED`** | `5db118c` |
 
 ---
 
@@ -401,7 +401,7 @@ Status Definitions:
   10. `test_historical_reports_deduplication_of_boundary_overlap`: Proves that duplicate reports appearing across consecutive page boundaries are safely deduplicated.
   11. `test_historical_reports_exact_1000_cap_metadata_and_api_exposure`: Asserts that `get_historical` Lambda handler exposes `isCapped`, `maxObservationCap: 1000`, and `coverageStatus` honestly in production responses.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** Pending Batch 1 Commit (Pre-remediated in `b657cf1`)
+- **Commit SHA:** `5db118c` (remediated in Batch 1; initial pagination in `b657cf1`)
 - **Mathematical & Architectural Rationale for 1,000-Item Cap:**
   - *Statistical Adequacy:* For a 24-hour hour-of-day curve over 14 days, 1,000 observations provides an average of $\approx 42$ observations per hour (or $\approx 100+$ observations per active meal rush hour). According to the Central Limit Theorem ($N > 30$), sample means and medians achieve standard error $\sigma / \sqrt{N} < 0.15 \sigma$, satisfying all statistical significance criteria.
   - *Lambda Performance Boundary:* Retrieving and parsing $>1,000$ DynamoDB items requires multiple network round-trips (>5 pages) and $>50$ms serialization overhead, threatening the <300ms SLA and 128MB RAM limits.
@@ -420,7 +420,7 @@ Status Definitions:
   1. `test_list_locations_never_seeds_on_read_path_when_empty`: Proves that querying an empty database returns `[]` without calling `put_item` or `batch_write_item`.
   2. `test_list_locations_paginates_scan_without_side_effects`: Proves multi-page scans collect all location items across pages without side effects.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** Pending Batch 1 Commit
+- **Commit SHA:** `5db118c`
 
 ### P1.4 — Admin Report Feed Bounded Pagination & Indexing
 - **Severity:** P1 (Admin Observability & Scalability)
@@ -433,7 +433,7 @@ Status Definitions:
 - **Tests Performed:**
   1. `test_list_all_reports_paginated_scan_when_first_page_has_no_matching_reports`: Mocks a multi-page table where page 1 contains only locations and page 2 contains reports; verifies that `list_all_reports` iterates to page 2 and collects the reports.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** Pending Batch 1 Commit
+- **Commit SHA:** `5db118c`
 
 ### P1.5 — DynamoDB GSI1 Data Model & Global Secondary Indexing
 - **Severity:** P1 (Database Performance & Architecture)
@@ -451,7 +451,7 @@ Status Definitions:
   1. `test_template_main_table_has_gsi1_entity_type_index`: Asserts GSI1 index configuration in CloudFormation template.
   2. `test_gsi1_keys_populated_on_locations_and_reports`: Verifies `GSI1PK` and `GSI1SK` are populated accurately on write.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** Pending Batch 1 Commit
+- **Commit SHA:** `5db118c`
 
 ### P1.6 — Multi-Campus Isolation & Parameterization
 - **Severity:** P1 (Portability & Multi-Tenancy Architecture)
@@ -466,7 +466,7 @@ Status Definitions:
   1. `test_template_has_campus_id_parameter_wired_to_globals`: Verifies `CampusId` parameter and environment variable mapping in SAM template.
   2. `test_campus_id_environment_selects_locations_dynamically`: Proves that toggling `CAMPUS_ID` selects the corresponding campus location catalog.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** Pending Batch 1 Commit
+- **Commit SHA:** `5db118c`
 
 ### P1.7 — Location Data Provenance Metadata & Single-Table Schema Leakage Protection
 - **Severity:** P1 (Data Transparency & Information Security)
@@ -485,7 +485,7 @@ Status Definitions:
   1. `test_campus_locations_have_structured_provenance_metadata`: Asserts presence and structure of provenance metadata across all catalog locations.
   2. `test_get_locations_exposes_provenance_without_leaking_internal_keys`: Verifies `GetLocationsFunction` exposes `provenance` while stripping `PK`, `SK`, `entityType`, `GSI1PK`, `GSI1SK`.
 - **Result:** **`VERIFIED FIXED`**
-- **Commit SHA:** Pending Batch 1 Commit
+- **Commit SHA:** `5db118c`
 
 ---
 
