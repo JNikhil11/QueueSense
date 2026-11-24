@@ -178,6 +178,120 @@ def test_client_rate_limiting_enforced():
     assert body["errorCode"] == "RATE_LIMIT_EXCEEDED"
 
 
+def test_sliding_window_rate_limiting_boundary_burst_mitigation():
+    """
+    Priority 1.1 Remediation:
+    Verify that the sliding-window counter algorithm mitigates the fixed-window 2x boundary burst.
+    A client submitting 5 requests at second 299 cannot submit another 5 requests at second 301.
+    """
+    from unittest.mock import patch
+    from backend.shared.database import InMemoryStorageAdapter
+
+    adapter = InMemoryStorageAdapter()
+    client_hash = "adv_client_boundary_test"
+    window_s = 300
+    max_req = 5
+
+    # 1. At second 299 (end of window 0): client submits 5 requests (all should succeed)
+    with patch("time.time", return_value=299.0):
+        results_299 = [adapter.check_rate_limit(client_hash, window_s, max_req) for _ in range(5)]
+        assert all(results_299) is True
+
+    # 2. At second 301 (2 seconds later, start of window 1): boundary burst attack
+    # Under fixed window, all 5 would succeed. Under sliding window, ALL MUST BE REJECTED.
+    with patch("time.time", return_value=301.0):
+        results_301 = [adapter.check_rate_limit(client_hash, window_s, max_req) for _ in range(5)]
+        assert any(results_301) is False
+        assert sum(results_301) == 0
+
+    # 3. At second 360 (60s later, 1 token recovered): exactly 1 request allowed
+    with patch("time.time", return_value=360.0):
+        assert adapter.check_rate_limit(client_hash, window_s, max_req) is True
+        assert adapter.check_rate_limit(client_hash, window_s, max_req) is False
+
+
+def test_sliding_window_concurrent_requests_race_condition():
+    """
+    Priority 1.1 Remediation:
+    Verify that concurrent multi-threaded requests from the same client hash
+    cannot bypass the rate limit due to race conditions.
+    """
+    import concurrent.futures
+    from backend.shared.database import InMemoryStorageAdapter
+
+    adapter = InMemoryStorageAdapter()
+    client_hash = "concurrent_burst_client"
+    window_s = 300
+    max_req = 5
+
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [
+            executor.submit(adapter.check_rate_limit, client_hash, window_s, max_req)
+            for _ in range(20)
+        ]
+        for f in concurrent.futures.as_completed(futures):
+            results.append(f.result())
+
+    # Exactly 5 must succeed, exactly 15 must be rejected
+    assert sum(results) == max_req
+    assert results.count(False) == 15
+
+
+def test_dynamodb_adapter_sliding_window_conditional_update():
+    """
+    Priority 1.1 Remediation:
+    Verify DynamoDBStorageAdapter calculates max_allowed_n_curr, uses ConditionExpression,
+    and returns False on ConditionalCheckFailedException.
+    """
+    from unittest.mock import MagicMock, patch
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    # Scenario A: Previous window had 5 requests; current offset is 1s (weight ~ 0.9967)
+    # effective_prev = 4.983 -> max_allowed_n_curr = floor(5 - 1 - 4.983) = -1 < 0
+    # Should return False immediately without calling update_item
+    mock_table.get_item.return_value = {"Item": {"reqCount": 5}}
+
+    with patch("time.time", return_value=301.0):
+        allowed = adapter.check_rate_limit("test_client", 300, 5)
+        assert allowed is False
+        assert mock_table.update_item.call_count == 0
+
+    # Scenario B: Previous window had 0 requests; should call update_item with ConditionExpression
+    mock_table.get_item.return_value = {}
+    with patch("time.time", return_value=301.0):
+        allowed = adapter.check_rate_limit("test_client", 300, 5)
+        assert allowed is True
+        mock_table.update_item.assert_called_once()
+        call_kwargs = mock_table.update_item.call_args[1]
+        assert "ConditionExpression" in call_kwargs
+        assert ":max_n" in call_kwargs["ExpressionAttributeValues"]
+        assert call_kwargs["ExpressionAttributeValues"][":max_n"] == 4
+
+    # Scenario C: ConditionalCheckFailedException returns False without failing closed
+    class MockClientError(Exception):
+        def __init__(self, code, message=""):
+            self.response = {"Error": {"Code": code, "Message": message}}
+            super().__init__(f"{code}: {message}")
+
+    mock_table.update_item.side_effect = MockClientError("ConditionalCheckFailedException", "The conditional request failed")
+    with patch("time.time", return_value=301.0):
+        allowed = adapter.check_rate_limit("test_client", 300, 5)
+        assert allowed is False
+
+    # Scenario D: Unexpected DynamoDB error must FAIL CLOSED (raise DatabasePersistenceError)
+    mock_table.update_item.side_effect = MockClientError("InternalServerError", "DynamoDB unavailable")
+    from backend.shared.database import DatabasePersistenceError
+    import pytest
+    with pytest.raises(DatabasePersistenceError):
+        with patch("time.time", return_value=301.0):
+            adapter.check_rate_limit("test_client", 300, 5)
+
+
 def test_rate_limit_storage_failure_fails_closed():
     """
     Priority 0: If rate limit storage check fails, must fail closed with 503 RATE_LIMIT_CHECK_FAILED.

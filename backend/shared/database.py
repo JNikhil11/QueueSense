@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import math
 import uuid
 import logging
 import threading
@@ -526,28 +527,64 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
             raise DatabasePersistenceError("Failed to retrieve audit feed.")
 
     def check_rate_limit(self, client_hash: str, window_seconds: int = 300, max_requests: int = 5) -> bool:
+        """
+        Sliding-Window Counter Rate Limiter.
+        Prevents 2x boundary bursts by weighting request volume from the previous window.
+        Effective count in rolling window of duration `window_seconds`:
+            effective_prev = count_prev * ((window_seconds - time_offset) / window_seconds)
+            projected_total = effective_prev + count_curr + 1
+        If projected_total > max_requests, the request is denied.
+        Atomic conditional update on count_curr ensures concurrency safety.
+        Fails closed on storage or connectivity errors.
+        """
         self._ensure_table()
         current_epoch = int(time.time())
         window_idx = current_epoch // window_seconds
+        time_offset = current_epoch % window_seconds
+        weight_prev = max(0.0, float(window_seconds - time_offset) / float(window_seconds))
+
         pk = f"RATELIMIT#{client_hash}"
-        sk = f"WINDOW#{window_idx}"
+        sk_curr = f"WINDOW#{window_idx}"
+        sk_prev = f"WINDOW#{window_idx - 1}"
         ttl = current_epoch + (window_seconds * 2)
 
         try:
-            resp = self._table.update_item(
-                Key={"PK": pk, "SK": sk},
+            # 1. Read previous window count
+            prev_resp = self._table.get_item(Key={"PK": pk, "SK": sk_prev})
+            prev_item = prev_resp.get("Item")
+            n_prev = int(prev_item.get("reqCount", 0)) if prev_item else 0
+
+            # 2. Compute effective previous count and maximum allowed current requests
+            effective_prev = n_prev * weight_prev
+            # Condition for another request: effective_prev + n_curr + 1 <= max_requests
+            # Equivalent to: n_curr <= floor(max_requests - 1 - effective_prev)
+            max_allowed_n_curr = math.floor(max_requests - 1 - effective_prev)
+
+            if max_allowed_n_curr < 0:
+                # Sliding window capacity exhausted by previous window's decaying burst
+                return False
+
+            # 3. Atomically increment current window count subject to conditional limit
+            self._table.update_item(
+                Key={"PK": pk, "SK": sk_curr},
                 UpdateExpression="ADD reqCount :inc SET #t = :ttl, entityType = :ent",
+                ConditionExpression="attribute_not_exists(reqCount) OR reqCount <= :max_n",
                 ExpressionAttributeNames={"#t": "ttl"},
                 ExpressionAttributeValues={
                     ":inc": 1,
                     ":ttl": ttl,
                     ":ent": "RATELIMIT",
+                    ":max_n": int(max_allowed_n_curr),
                 },
                 ReturnValues="UPDATED_NEW",
             )
-            count = int(resp.get("Attributes", {}).get("reqCount", 1))
-            return count <= max_requests
+            return True
+
         except Exception as e:
+            error_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            if error_code == "ConditionalCheckFailedException":
+                # Rate limit exceeded in current window
+                return False
             logger.error("DynamoDB rate limit check failed: %s", str(e), exc_info=True)
             # FAIL CLOSED: Do not return True. Raise DatabasePersistenceError to deny or return controlled error.
             raise DatabasePersistenceError(f"Rate limit storage verification failed: {str(e)}")
@@ -762,12 +799,24 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
     def check_rate_limit(self, client_hash: str, window_seconds: int = 300, max_requests: int = 5) -> bool:
         if self._simulate_rate_limit_failure or self._simulate_failure:
             raise DatabasePersistenceError("Simulated rate limit storage failure.")
-        current_window = int(time.time()) // window_seconds
-        key = f"{client_hash}::{current_window}"
+        current_epoch = int(time.time())
+        window_idx = current_epoch // window_seconds
+        time_offset = current_epoch % window_seconds
+        weight_prev = max(0.0, float(window_seconds - time_offset) / float(window_seconds))
+
+        key_prev = f"{client_hash}::{window_idx - 1}"
+        key_curr = f"{client_hash}::{window_idx}"
+
         with self._lock:
-            count = self._rate_limits.get(key, 0) + 1
-            self._rate_limits[key] = count
-            return count <= max_requests
+            n_prev = self._rate_limits.get(key_prev, 0)
+            n_curr = self._rate_limits.get(key_curr, 0)
+
+            effective_prev = n_prev * weight_prev
+            if effective_prev + n_curr + 1 > max_requests:
+                return False
+
+            self._rate_limits[key_curr] = n_curr + 1
+            return True
 
     def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 200) -> List[Dict[str, Any]]:
         if self._simulate_failure:
