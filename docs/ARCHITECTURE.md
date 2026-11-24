@@ -150,22 +150,30 @@ QueueSense infrastructure is authored with dynamic CloudFormation intrinsics (`$
 ### 4.2 High-Traffic & Sustained Abuse Scenario
 *Attack Scenario: An adversary attempts 10,000,000 requests over 48 hours (~58 req/sec) targeting `POST /locations/{id}/reports`.*
 
-* **Layer 1 Mitigation — API Gateway Throttling:**
-  - Route throttle (Burst 20, Rate 10 req/s) caps admitted requests to $10 \text{ req/s} \times 172,800 \text{ s} \approx 1,728,000$ requests.
-  - The remaining ~8,272,000 requests are rejected with HTTP 429 at the API Gateway edge.
-  - **Billing Impact:** API Gateway bills for all evaluated requests (admitted and throttled) at $1.00 per million: $10\text{M} \times \$1.00/\text{M} = \mathbf{\$10.00}$.
+* **Layer 1 Mitigation — API Gateway Throttling (Best-Effort):**
+  - Route throttle settings (`Burst: 20`, `Rate: 10 req/s`) evaluate incoming traffic to shed excess load via HTTP 429 at the API Gateway edge. Under nominal token-bucket operation, admitted requests to Lambda are estimated at approximately $10 \text{ req/s} \times 172,800 \text{ s} \approx 1,728,000$ requests, while the remaining ~8,272,000 requests receive HTTP 429.
+  - **Billing Impact:** API Gateway bills for all evaluated requests (both admitted and throttled) at $1.00 per million: $10\text{M} \times \$1.00/\text{M} = \mathbf{\$10.00}$.
 * **Layer 2 Mitigation — Lambda Concurrency Ceilings:**
   - `SubmitReportFunction` has `ReservedConcurrentExecutions: 20`, capping maximum parallel compute and protecting account-wide capacity.
-  - The 1,728,000 admitted requests execute in Lambda. The application-tier rate limiter rejects non-compliant requests within 5ms.
+  - Admitted requests execute in Lambda, where the application-tier rate limiter rejects non-compliant requests within 5ms.
   - **Billing Impact:** $1,728,000 \times 0.005\text{s} \times 0.256\text{GB} = 2,211\text{ GB-seconds} \approx \$0.04$. Invocation fee: $1.728\text{M} \times \$0.20/\text{M} = \$0.35$. Total Lambda: $\mathbf{\$0.39}$.
 * **Layer 3 Mitigation — Dual-Budget Database Protection:**
   - Campus NAT ceiling (30 req / 5 min = 0.1 req/s per subnet) limits DynamoDB write transactions to a maximum of ~17,280 writes: $17,280 \times \$1.25/\text{M} \approx \mathbf{\$0.02}$.
 * **CloudWatch Ingestion:**
   - 1.728M log entries (~300 bytes each) = ~500 MB = $\mathbf{\$0.25}$.
-* **Total Calculated Abuse Exposure:** $\mathbf{\approx \$10.66}$ over 48 hours.
+* **Calculated Scenario Estimate:** $\mathbf{\approx \$10.66}$ over 48 hours under this assumed nominal scenario.
 
-### 4.3 Operational Cost Governance Caveats
-1. **Concurrency vs Billing:** Reserved concurrency bounds *simultaneous parallel execution instances* to protect account quotas and prevent cascading system failure; it does *not* cap cumulative invocation counts over a calendar month.
-2. **API Gateway Throttled Request Fees:** While HTTP 429 throttling prevents Lambda execution and database writes, API Gateway bills for evaluating incoming HTTP requests ($1.00/million).
-3. **Account-Level Budget Enforcement:** A hard account-level financial cap requires configuring an AWS Budget in the AWS Billing Console with automated SNS alerts and IAM stop-actions, which must be provisioned in the live AWS account.
+### 4.3 Illustrative Sustained 500 Req/Sec Scenario Estimate
+*Illustrative Scenario: A hypothetical adversary continuously sends 500 requests/second targeting the API over an entire 31-day billing month ($31 \times 86,400\text{ s} \times 500\text{ req/s} \approx 1,339,200,000$ evaluated requests; or ~1,335,360,000 requests over 30.9 days).*
+
+* **Evaluated Request Charges:** $1,335.36\text{M requests} \times \$1.00/\text{M} \approx \mathbf{\$1,335.36}$ (or ~$1,339.20 for 31 full days).
+* **Critical FinOps Classification:** This $1,335.36 figure is strictly an **illustrative scenario estimate** based on the hypothetical 500 req/s load assumption. It is **NOT** a guaranteed spending cap, hard financial bound, or worst-case ceiling.
+* **Best-Effort Throttling Reality:** Because API Gateway HTTP API throttling operates on a distributed, token-bucket, best-effort basis across regional infrastructure, actual admitted traffic and resulting charges may exceed this scenario estimate during distributed bursts, network retries, or DNS fan-outs.
+* **Lambda & Database Decoupling:** Even under this elevated request evaluation volume, Lambda reserved concurrency (190 total across the stack) and application-tier dual-budget limits prevent upstream request volume from multiplying into runaway concurrent compute or unbounded database write costs.
+
+### 4.4 Operational Cost Governance Caveats
+1. **Best-Effort Throttling:** API Gateway HTTP API throttling is inherently best-effort and does not guarantee a rigid, mathematically hard request ceiling or maximum admitted traffic volume.
+2. **Concurrency vs Billing:** Lambda `ReservedConcurrentExecutions` bounds *simultaneous parallel execution instances* to protect account quotas from exhaustion; it does *not* cap cumulative invocation counts or request billing over a calendar month.
+3. **API Gateway Throttled Request Fees:** While HTTP 429 throttling prevents downstream Lambda execution and database writes, API Gateway still meters and bills for evaluating incoming HTTP requests ($1.00/million).
+4. **Enforceable Account Spending Limits:** True financial caps and hard spending stops cannot be implemented solely inside CloudFormation template parameters. An enforceable financial stop requires provisioning an AWS Budget in the AWS Billing Console with automated SNS alerts and an AWS Budget action (or custom Lambda/IAM stop-action) to curtail resources if spend thresholds are reached.
 
