@@ -82,6 +82,7 @@ Status Definitions:
 | **Batch 5** | **P1.22** | Accessibility & Focus Trap Lifecycle (WCAG 2.2 AA Focus Trapping, Stable Callbacks, Transition Restoration, Accessible Names, Touch Targets, Live Status Announcements) | **P1** | `frontend/src/hooks/useFocusTrap.ts`, `frontend/src/components/ReportModal.tsx`, `frontend/src/components/OutletDetailModal.tsx`, `frontend/src/components/AdminAuditModal.tsx`, `frontend/src/test/a11y-and-resilience.test.ts`, `frontend/src/test/focus-trap-lifecycle.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
 | **Batch 5** | **P1.23** | Data Freshness, Performance & Storage Resilience (State Model [LOADING/FRESH/STALE/ERROR/EMPTY], Schema Validation, In-Flight Deduplication, SecurityError Storage Fallback) | **P1** | `frontend/src/App.tsx`, `frontend/src/services/api.ts`, `frontend/src/services/deviceId.ts`, `frontend/src/types/index.ts`, `frontend/src/test/stale-data-integrity.test.ts`, `frontend/src/test/stale-data-browser.test.ts`, `frontend/src/test/api-contracts-and-validation.test.ts`, `frontend/src/test/runtime-performance.test.ts`, `frontend/src/test/data-isolation.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
 | **Batch 5** | **P1.24** | Git SHA Tracking & Remote Branch Integrity (Reconciled Commit Transcription, Verified Untouched Master) | **P1** | `docs/MASTER_AUDIT_REGISTER.md` | **`VERIFIED FIXED`** | Current HEAD |
+| **Batch 5** | **P1.25** | API Contract & Validation Remediation (DEF-01..08: Location openHours/active, Freshness Enum, Backend Report locationId, Peak Hours, Queue Length, Strict ISO-8601 Calendar, Modal Retry Idempotency) | **P1** | `backend/functions/get_queue/app.py`, `frontend/src/services/api.ts`, `frontend/src/types/index.ts`, `frontend/src/components/ReportModal.tsx`, `frontend/src/test/api-contracts-and-validation.test.ts` | **`VERIFIED FIXED`** | Current HEAD |
 
 ---
 
@@ -1043,8 +1044,24 @@ Status Definitions:
   - Implemented automated verification step ensuring `git rev-parse HEAD` and `git ls-remote origin refs/heads/feature/production-hardening` match prior to reporting.
 - **Status:** **`VERIFIED FIXED`**
 
----
-
-## 5. Verification Sign-Off
+### P1.25 — API Contract, Schema Hardening & Modal Retry Idempotency (DEF-01 through DEF-08)
+- **Severity:** P1 (API Consistency, Schema Validation & Idempotency Integrity)
+- **Findings & Root Causes:**
+  1. **DEF-01:** `validateCampusLocation` unvalidated `active` and `openHours`; `getLocations()` permitted unestimated locations.
+  2. **DEF-02:** `VALID_FRESHNESS_STATES` declared but uncalled in `validateQueueEstimate`; `INSUFFICIENT DATA` missing from types.
+  3. **DEF-03:** `backend/functions/get_queue/app.py` `clean_reports` omitted `locationId`; client didn't match report route IDs.
+  4. **DEF-04 & DEF-06:** Historical `busiestHour`, `quietestHour`, and hourly `averageQueueLength` unvalidated against boundaries.
+  5. **DEF-05:** `ReportModal.tsx` lacked retained idempotency key across UI-level submission retries.
+  6. **DEF-07:** `isValidIsoDate` utilized permissive `new Date()` accepting invalid formats (year-only, date-only, Feb 31).
+  7. **DEF-08:** `isPartial` in `getLocations` and envelope audit metadata in `getAdminReports` were discarded.
+- **Remediation Implemented:**
+  1. Added `typeof l.active === 'boolean'` and `isNonEmptyString(l.openHours)` to `validateCampusLocation`; enforced mandatory estimate in `getLocations()`.
+  2. Enforced `VALID_FRESHNESS_STATES.has(e.freshness)` in `validateQueueEstimate` and added `INSUFFICIENT DATA` to `FreshnessState`.
+  3. Included `"locationId": location_id` in `clean_reports` in `get_queue/app.py`; enforced route locationId equality across `getLocationQueue` and `submitReport`.
+  4. Validated `busiestHour` and `quietestHour` boundaries (`hour` [0, 23], `averageWaitMinutes` [0, 120]) and hourly `averageQueueLength` [0, 300].
+  5. Refactored `ReportModal.tsx` using `useRef<string | null>` and `generateSecureIdempotencyKey()` to preserve key across retries and reset on input edits.
+  6. Implemented strict ISO-8601 extended calendar validation rejecting non-ISO and invalid calendar dates while accepting Python UTC/offset strings.
+  7. Preserved `isPartial` in `getLocations()` and returned typed audit metadata in `getAdminReports()`.
+- **Status:** **`VERIFIED FIXED`**
 
 All remediated findings have been independently inspected, root-caused, repaired, and rigorously verified. The QueueSense codebase on `feature/production-hardening` meets zero-compromise commercial production standards.

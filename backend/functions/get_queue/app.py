@@ -58,6 +58,7 @@ def lambda_handler(event, context):
         clean_reports = [
             {
                 "reportId": r.get("reportId"),
+                "locationId": location_id,
                 "reportedWaitMinutes": float(r.get("reportedWaitMinutes", 0)),
                 "queueLength": int(r.get("queueLength", 0)),
                 "note": r.get("note"),

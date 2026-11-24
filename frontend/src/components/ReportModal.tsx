@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CampusLocation, ReportSubmissionPayload } from '../types';
 import { X, Send, AlertTriangle, CheckCircle2, Clock, Users } from 'lucide-react';
 import { useFocusTrap } from '../hooks/useFocusTrap';
+import { generateSecureIdempotencyKey } from '../services/api';
 
 interface ReportModalProps {
   isOpen: boolean;
@@ -27,11 +28,22 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const idempotencyKeyRef = useRef<string | null>(null);
+
+  const handleClose = () => {
+    idempotencyKeyRef.current = null;
+    onClose();
+  };
+
+  // Clear retained idempotency key whenever the submission inputs change or modal closes
+  useEffect(() => {
+    idempotencyKeyRef.current = null;
+  }, [selectedLocationId, waitMinutes, queueLength, note, isOpen]);
 
   // WCAG 2.2 AA Focus Trapping & Restoration
   const containerRef = useFocusTrap<HTMLDivElement>({
     isOpen,
-    onClose,
+    onClose: handleClose,
     autoFocusSelector: 'select, button[aria-label="Close dialog"]',
   });
 
@@ -69,19 +81,26 @@ export const ReportModal: React.FC<ReportModalProps> = ({
 
     try {
       setIsSubmitting(true);
+      if (!idempotencyKeyRef.current) {
+        idempotencyKeyRef.current = generateSecureIdempotencyKey();
+      }
       await onSubmit(selectedLocationId, {
         reportedWaitMinutes: waitMinutes,
         queueLength: queueLength,
         note: note.trim() || undefined,
+        idempotencyKey: idempotencyKeyRef.current,
       });
 
+      // Clear idempotency key on successful durable submission
+      idempotencyKeyRef.current = null;
       setSuccessMsg('Thank you! Observation verified and queue estimate updated.');
       setTimeout(() => {
         setSuccessMsg(null);
-        onClose();
+        handleClose();
       }, 1500);
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to submit report. Please check connection.');
+      // Retain idempotencyKeyRef.current on failure so subsequent UI retry reuses the key
     } finally {
       setIsSubmitting(false);
     }
@@ -96,7 +115,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
       aria-modal="true"
       aria-labelledby="report-dialog-title"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) handleClose();
       }}
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#070A08]/85 backdrop-blur-md animate-fade-in"
     >
@@ -115,7 +134,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             </p>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2.5 rounded-xl text-[#8E9E93] hover:text-white hover:bg-white/[0.06] transition-colors min-h-[44px] min-w-[44px] h-11 w-11 shrink-0 flex items-center justify-center"
             style={{ minHeight: '44px', minWidth: '44px' }}
             aria-label="Close dialog"
@@ -287,7 +306,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
           <div className="pt-3 flex items-center justify-end gap-3 border-t border-white/[0.06] shrink-0">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               disabled={isSubmitting}
               className="px-5 py-2.5 text-xs font-mono uppercase tracking-wider rounded-xl btn-glass min-h-[44px]"
             >

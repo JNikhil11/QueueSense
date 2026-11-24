@@ -2,6 +2,11 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   createApiClient,
   generateSecureIdempotencyKey,
+  isValidIsoDate,
+  validateCampusLocation,
+  validateQueueEstimate,
+  validateQueueReport,
+  VALID_FRESHNESS_STATES,
 } from '../services/api';
 import * as deviceIdModule from '../services/deviceId';
 
@@ -107,6 +112,7 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
             data: {
               report: {
                 reportId: 'rep_1',
+                locationId: 'loc-1',
                 reportedWaitMinutes: 5,
                 queueLength: 2,
                 timestamp: new Date().toISOString(),
@@ -212,6 +218,7 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
             data: {
               report: {
                 reportId: `rep_${Date.now()}`,
+                locationId: 'loc-1',
                 reportedWaitMinutes: 5,
                 queueLength: 2,
                 timestamp: new Date().toISOString(),
@@ -266,6 +273,7 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
             data: {
               report: {
                 reportId: 'rep_1',
+                locationId: 'loc-1',
                 reportedWaitMinutes: 5,
                 queueLength: 2,
                 timestamp: new Date().toISOString(),
@@ -301,6 +309,7 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
             data: {
               report: {
                 reportId: 'rep_1',
+                locationId: 'loc-1',
                 reportedWaitMinutes: 5,
                 queueLength: 2,
                 timestamp: new Date().toISOString(),
@@ -343,6 +352,7 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
             data: {
               report: {
                 reportId: 'rep_1',
+                locationId: 'loc-1',
                 reportedWaitMinutes: 5,
                 queueLength: 2,
                 timestamp: new Date().toISOString(),
@@ -423,6 +433,8 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
                 id: 'loc-1',
                 name: 'Mess',
                 category: 'MESS',
+                openHours: '08:00-22:00',
+                active: true,
                 estimate: {
                   confidence: true, // boolean where number expected!
                   congestion: 'LOW',
@@ -446,6 +458,8 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
                 id: 'loc-1',
                 name: 'Mess',
                 category: 'MESS',
+                openHours: '08:00-22:00',
+                active: true,
                 estimate: {
                   confidence: 1.5, // > 1.0
                   congestion: 'LOW',
@@ -469,6 +483,8 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
                 id: 'loc-1',
                 name: 'Mess',
                 category: 'MESS',
+                openHours: '08:00-22:00',
+                active: true,
                 estimate: {
                   confidence: 0.8,
                   congestion: 'LOW',
@@ -493,6 +509,8 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
                 id: 'loc-1',
                 name: 'Hostel 12 Mess',
                 category: 'MESS',
+                openHours: '08:00-22:00',
+                active: true,
                 estimate: {
                   confidence: 1.0,
                   congestion: 'SURGE',
@@ -507,6 +525,8 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
                 id: 'loc-2',
                 name: 'Hostel 2 Mess',
                 category: 'CANTEEN',
+                openHours: '08:00-22:00',
+                active: true,
                 estimate: {
                   confidence: 0.0, // boundary min
                   congestion: 'UNKNOWN',
@@ -533,14 +553,14 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
           status: 200,
           json: async () => ({
             data: {
-              location: { id: '', name: 'Mess' }, // empty id
+              location: { id: 'loc-1', name: '', category: 'MESS', openHours: '08:00-22:00', active: true }, // empty name
               estimate: { confidence: 0.8, congestion: 'LOW', freshness: 'LIVE' },
               reports: [],
             },
           }),
         } as Response);
 
-        await expect(prodApi.getLocationQueue('loc-1')).rejects.toThrow(/id must be a non-empty string/);
+        await expect(prodApi.getLocationQueue('loc-1')).rejects.toThrow(/name must be a non-empty string/);
       });
 
       it('rejects queue response when estimate has invalid congestion enum', async () => {
@@ -549,7 +569,7 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
           status: 200,
           json: async () => ({
             data: {
-              location: { id: 'loc-1', name: 'Mess', category: 'MESS' },
+              location: { id: 'loc-1', name: 'Mess', category: 'MESS', openHours: '08:00-22:00', active: true },
               estimate: { confidence: 0.8, congestion: 'CROWDED_LINE', freshness: 'LIVE' }, // invalid enum
               reports: [],
             },
@@ -565,11 +585,12 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
           status: 200,
           json: async () => ({
             data: {
-              location: { id: 'loc-1', name: 'Mess', category: 'MESS' },
+              location: { id: 'loc-1', name: 'Mess', category: 'MESS', openHours: '08:00-22:00', active: true },
               estimate: { confidence: 0.8, congestion: 'LOW', freshness: 'LIVE' },
               reports: [
                 {
                   reportId: 'rep-1',
+                  locationId: 'loc-1',
                   reportedWaitMinutes: -2, // negative!
                   queueLength: 5,
                   timestamp: new Date().toISOString(),
@@ -588,11 +609,12 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
           status: 200,
           json: async () => ({
             data: {
-              location: { id: 'loc-1', name: 'Mess', category: 'MESS' },
+              location: { id: 'loc-1', name: 'Mess', category: 'MESS', openHours: '08:00-22:00', active: true },
               estimate: { confidence: 0.8, congestion: 'LOW', freshness: 'LIVE' },
               reports: [
                 {
                   reportId: 'rep-1',
+                  locationId: 'loc-1',
                   reportedWaitMinutes: 5,
                   queueLength: 4.5, // fractional people!
                   timestamp: new Date().toISOString(),
@@ -611,11 +633,12 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
           status: 200,
           json: async () => ({
             data: {
-              location: { id: 'loc-1', name: 'Mess', category: 'MESS' },
+              location: { id: 'loc-1', name: 'Mess', category: 'MESS', openHours: '08:00-22:00', active: true },
               estimate: { confidence: 0.8, congestion: 'LOW', freshness: 'LIVE' },
               reports: [
                 {
                   reportId: 'rep-1',
+                  locationId: 'loc-1',
                   reportedWaitMinutes: 5,
                   queueLength: 4,
                   timestamp: 'invalid-date-string-not-iso',
@@ -810,6 +833,7 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
               reports: [
                 {
                   reportId: 'rep-1',
+                  locationId: 'loc-1',
                   reportedWaitMinutes: 10,
                   queueLength: -1, // negative!
                   timestamp: new Date().toISOString(),
@@ -884,6 +908,540 @@ describe('Workstream A, B, C & D — API Consistency, Idempotency, Device Identi
       globalThis.fetch = vi.fn().mockRejectedValue(new Error('Request timed out'));
 
       await expect(api.getRecommendations()).rejects.toThrow(/Request timed out/);
+    });
+  });
+
+  // =========================================================================
+  // WORKSTREAM E: TARGETED BATCH 5 FINAL REMEDIATION VALIDATION (DEF-01..DEF-08)
+  // =========================================================================
+  describe('Workstream E — Batch 5 Targeted Defect Remediation & Contract Hardening', () => {
+    const prodApi = createApiClient({
+      dataMode: 'production',
+      apiBaseUrl: 'https://api.queuesense.iitb.ac.in',
+    });
+
+    // -----------------------------------------------------------------------
+    // DEF-01: CampusLocation.active and openHours validation
+    // -----------------------------------------------------------------------
+    describe('DEF-01: CampusLocation active & openHours validation', () => {
+      it('rejects location when active property is missing or not boolean', () => {
+        expect(() =>
+          validateCampusLocation({
+            id: 'loc-1',
+            name: 'Mess 1',
+            category: 'MESS',
+            openHours: '07:30-21:30',
+            // active omitted
+          })
+        ).toThrow(/active must be a boolean/);
+
+        expect(() =>
+          validateCampusLocation({
+            id: 'loc-1',
+            name: 'Mess 1',
+            category: 'MESS',
+            openHours: '07:30-21:30',
+            active: 'true', // string instead of boolean
+          })
+        ).toThrow(/active must be a boolean/);
+      });
+
+      it('rejects location when openHours is missing or empty', () => {
+        expect(() =>
+          validateCampusLocation({
+            id: 'loc-1',
+            name: 'Mess 1',
+            category: 'MESS',
+            active: true,
+            // openHours omitted
+          })
+        ).toThrow(/openHours must be a non-empty string/);
+
+        expect(() =>
+          validateCampusLocation({
+            id: 'loc-1',
+            name: 'Mess 1',
+            category: 'MESS',
+            active: true,
+            openHours: '   ', // whitespace only
+          })
+        ).toThrow(/openHours must be a non-empty string/);
+      });
+
+      it('rejects getLocations response when an item has missing estimate', async () => {
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: [
+              {
+                id: 'loc-1',
+                name: 'Hostel 12 Mess',
+                category: 'MESS',
+                openHours: '07:30-21:30',
+                active: true,
+                // estimate missing!
+              },
+            ],
+          }),
+        } as Response);
+
+        await expect(prodApi.getLocations()).rejects.toThrow(/locations\[0\]\.estimate is required/);
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // DEF-02: QueueEstimate freshness states validation
+    // -----------------------------------------------------------------------
+    describe('DEF-02: QueueEstimate freshness states validation', () => {
+      it('rejects estimate with unrecognized freshness value', () => {
+        expect(() =>
+          validateQueueEstimate({
+            confidence: 0.8,
+            congestion: 'LOW',
+            freshness: 'FRESH', // not in VALID_FRESHNESS_STATES
+          })
+        ).toThrow(/freshness has invalid value 'FRESH'/);
+      });
+
+      it('accepts all permitted freshness states including INSUFFICIENT DATA', () => {
+        expect(VALID_FRESHNESS_STATES.has('INSUFFICIENT DATA')).toBe(true);
+        for (const state of VALID_FRESHNESS_STATES) {
+          const result = validateQueueEstimate({
+            confidence: 0.5,
+            congestion: 'LOW',
+            freshness: state,
+          });
+          expect(result.freshness).toBe(state);
+        }
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // DEF-03: QueueReport locationId contract & route alignment
+    // -----------------------------------------------------------------------
+    describe('DEF-03: QueueReport locationId contract & route alignment', () => {
+      it('rejects queue report when locationId is missing or empty', () => {
+        expect(() =>
+          validateQueueReport({
+            reportId: 'rep-1',
+            reportedWaitMinutes: 5,
+            queueLength: 2,
+            timestamp: '2026-11-24T12:00:00Z',
+          })
+        ).toThrow(/locationId must be a non-empty string/);
+      });
+
+      it('rejects getLocationQueue when location.id does not match route id', async () => {
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              location: {
+                id: 'wrong-location',
+                name: 'Wrong Mess',
+                category: 'MESS',
+                openHours: '08:00-22:00',
+                active: true,
+              },
+              estimate: { confidence: 0.8, congestion: 'LOW', freshness: 'LIVE' },
+              reports: [],
+            },
+          }),
+        } as Response);
+
+        await expect(prodApi.getLocationQueue('loc-1')).rejects.toThrow(
+          /location id mismatch, expected 'loc-1' but got 'wrong-location'/
+        );
+      });
+
+      it('rejects getLocationQueue when a report locationId does not match route id', async () => {
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              location: {
+                id: 'loc-1',
+                name: 'Hostel 1 Mess',
+                category: 'MESS',
+                openHours: '08:00-22:00',
+                active: true,
+              },
+              estimate: { confidence: 0.8, congestion: 'LOW', freshness: 'LIVE' },
+              reports: [
+                {
+                  reportId: 'rep-1',
+                  locationId: 'loc-other',
+                  reportedWaitMinutes: 5,
+                  queueLength: 2,
+                  timestamp: '2026-11-24T12:00:00Z',
+                },
+              ],
+            },
+          }),
+        } as Response);
+
+        await expect(prodApi.getLocationQueue('loc-1')).rejects.toThrow(
+          /queue\.reports\[0\]\.locationId mismatch, expected 'loc-1' but got 'loc-other'/
+        );
+      });
+
+      it('rejects submitReport when returned report locationId does not match submitted locationId', async () => {
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 201,
+          json: async () => ({
+            data: {
+              report: {
+                reportId: 'rep-1',
+                locationId: 'loc-mismatch',
+                reportedWaitMinutes: 5,
+                queueLength: 2,
+                timestamp: '2026-11-24T12:00:00Z',
+              },
+              updatedEstimate: { confidence: 0.8, congestion: 'LOW', freshness: 'LIVE' },
+            },
+          }),
+        } as Response);
+
+        await expect(
+          prodApi.submitReport('loc-1', { reportedWaitMinutes: 5, queueLength: 2 })
+        ).rejects.toThrow(
+          /submitted report locationId mismatch, expected 'loc-1' but got 'loc-mismatch'/
+        );
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // DEF-04 & DEF-06: Historical busiestHour, quietestHour & hourly queue length
+    // -----------------------------------------------------------------------
+    describe('DEF-04 & DEF-06: Historical peak hours & average queue length validation', () => {
+      it('rejects getHistorical when returned locationId mismatches requested route id', async () => {
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              locationId: 'wrong-id',
+              status: 'available',
+              totalObservations: 10,
+              hourlyTrends: [],
+            },
+          }),
+        } as Response);
+
+        await expect(prodApi.getHistorical('loc-1')).rejects.toThrow(
+          /historical locationId mismatch, expected 'loc-1' but got 'wrong-id'/
+        );
+      });
+
+      it('rejects getHistorical when busiestHour has invalid hour', async () => {
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              locationId: 'loc-1',
+              status: 'available',
+              totalObservations: 10,
+              hourlyTrends: [],
+              busiestHour: {
+                hour: 24, // out of range [0, 23]
+                label: '24:00',
+                averageWaitMinutes: 15,
+              },
+            },
+          }),
+        } as Response);
+
+        await expect(prodApi.getHistorical('loc-1')).rejects.toThrow(
+          /busiestHour\.hour must be an integer between 0 and 23/
+        );
+      });
+
+      it('rejects getHistorical when busiestHour has negative averageWaitMinutes', async () => {
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              locationId: 'loc-1',
+              status: 'available',
+              totalObservations: 10,
+              hourlyTrends: [],
+              busiestHour: {
+                hour: 13,
+                label: '13:00',
+                averageWaitMinutes: -5,
+              },
+            },
+          }),
+        } as Response);
+
+        await expect(prodApi.getHistorical('loc-1')).rejects.toThrow(
+          /busiestHour\.averageWaitMinutes must be a number between 0 and 120/
+        );
+      });
+
+      it('rejects getHistorical when quietestHour is not an object or null', async () => {
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              locationId: 'loc-1',
+              status: 'available',
+              totalObservations: 10,
+              hourlyTrends: [],
+              quietestHour: 'invalid-string',
+            },
+          }),
+        } as Response);
+
+        await expect(prodApi.getHistorical('loc-1')).rejects.toThrow(
+          /quietestHour must be an object or null/
+        );
+      });
+
+      it('rejects getHistorical when hourlyTrends averageQueueLength is negative or exceeds 300', async () => {
+        // Negative queue length
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              locationId: 'loc-1',
+              status: 'available',
+              totalObservations: 10,
+              hourlyTrends: [
+                {
+                  hour: 12,
+                  label: '12:00',
+                  averageWaitMinutes: 10,
+                  averageQueueLength: -2,
+                  observationCount: 3,
+                },
+              ],
+            },
+          }),
+        } as Response);
+
+        await expect(prodApi.getHistorical('loc-1')).rejects.toThrow(
+          /hourlyTrends\[0\]\.averageQueueLength must be null or number between 0 and 300/
+        );
+
+        // Exceeds 300
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              locationId: 'loc-1',
+              status: 'available',
+              totalObservations: 10,
+              hourlyTrends: [
+                {
+                  hour: 12,
+                  label: '12:00',
+                  averageWaitMinutes: 10,
+                  averageQueueLength: 350,
+                  observationCount: 3,
+                },
+              ],
+            },
+          }),
+        } as Response);
+
+        await expect(prodApi.getHistorical('loc-1')).rejects.toThrow(
+          /hourlyTrends\[0\]\.averageQueueLength must be null or number between 0 and 300/
+        );
+      });
+
+      it('accepts compliant historical data with busiestHour and quietestHour', async () => {
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              locationId: 'loc-1',
+              status: 'available',
+              totalObservations: 25,
+              hourlyTrends: [
+                {
+                  hour: 13,
+                  label: '13:00',
+                  averageWaitMinutes: 14.5,
+                  averageQueueLength: 22,
+                  observationCount: 15,
+                },
+              ],
+              busiestHour: {
+                hour: 13,
+                label: '13:00',
+                averageWaitMinutes: 14.5,
+                sampleCount: 15,
+              },
+              quietestHour: {
+                hour: 16,
+                label: '16:00',
+                averageWaitMinutes: 3.0,
+                sampleCount: 5,
+              },
+            },
+          }),
+        } as Response);
+
+        const res = await prodApi.getHistorical('loc-1');
+        expect(res.data.busiestHour?.hour).toBe(13);
+        expect(res.data.quietestHour?.hour).toBe(16);
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // DEF-07: Strict ISO-8601 calendar date validation
+    // -----------------------------------------------------------------------
+    describe('DEF-07: Strict ISO-8601 calendar date format validation', () => {
+      it('rejects year-only, date-only, space-separated, and non-ISO format dates', () => {
+        expect(isValidIsoDate('2024')).toBe(false);
+        expect(isValidIsoDate('2026-11-24')).toBe(false);
+        expect(isValidIsoDate('11/24/2026')).toBe(false);
+        expect(isValidIsoDate('November 24, 2026')).toBe(false);
+        expect(isValidIsoDate('2026-11-24 16:00:00')).toBe(false);
+        expect(isValidIsoDate('')).toBe(false);
+        expect(isValidIsoDate(null)).toBe(false);
+        expect(isValidIsoDate(undefined)).toBe(false);
+      });
+
+      it('rejects invalid calendar dates (e.g. Feb 31 or invalid leap years)', () => {
+        expect(isValidIsoDate('2024-02-31T00:00:00Z')).toBe(false);
+        expect(isValidIsoDate('2023-02-29T12:00:00Z')).toBe(false); // 2023 not leap year
+        expect(isValidIsoDate('2024-04-31T12:00:00Z')).toBe(false); // April has 30 days
+      });
+
+      it('accepts valid UTC and offset-extended ISO-8601 strings produced by Python/backend', () => {
+        expect(isValidIsoDate('2026-11-24T17:36:03Z')).toBe(true);
+        expect(isValidIsoDate('2026-11-24T17:36:03.393557+00:00')).toBe(true);
+        expect(isValidIsoDate('2026-11-24T23:06:03+05:30')).toBe(true);
+        expect(isValidIsoDate('2024-02-29T12:00:00Z')).toBe(true); // 2024 leap year
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // DEF-08: Envelope metadata & partial data preservation
+    // -----------------------------------------------------------------------
+    describe('DEF-08: Metadata preservation in responses', () => {
+      it('getLocations preserves isPartial flag', async () => {
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: [
+              {
+                id: 'loc-1',
+                name: 'Hostel 12 Mess',
+                category: 'MESS',
+                openHours: '07:30-21:30',
+                active: true,
+                estimate: {
+                  confidence: 0.8,
+                  congestion: 'LOW',
+                  freshness: 'LIVE',
+                },
+              },
+            ],
+            isPartial: true,
+          }),
+        } as Response);
+
+        const res = await prodApi.getLocations();
+        expect(res.isLive).toBe(true);
+        expect(res.isPartial).toBe(true);
+      });
+
+      it('getAdminReports returns structured audit metadata', async () => {
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              totalReportsReturned: 42,
+              outlierCount: 3,
+              isPartial: false,
+              isTruncated: false,
+              retrievalSource: 'DYNAMODB_GSI',
+              operatorIdentity: 'admin-auditor-1',
+              reports: [
+                {
+                  reportId: 'rep-1',
+                  locationId: 'loc-1',
+                  reportedWaitMinutes: 5,
+                  queueLength: 2,
+                  timestamp: '2026-11-24T12:00:00Z',
+                  isOutlier: false,
+                },
+              ],
+            },
+          }),
+        } as Response);
+
+        const res = await prodApi.getAdminReports('valid-token');
+        expect(res.isLive).toBe(true);
+        expect(res.reports.length).toBe(1);
+        expect(res.metadata).toBeDefined();
+        expect(res.metadata?.totalReportsReturned).toBe(42);
+        expect(res.metadata?.outlierCount).toBe(3);
+        expect(res.metadata?.retrievalSource).toBe('DYNAMODB_GSI');
+        expect(res.metadata?.operatorIdentity).toBe('admin-auditor-1');
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // DEF-05: UI-level idempotency retries
+    // -----------------------------------------------------------------------
+    describe('DEF-05: UI-level retry idempotency behaviour', () => {
+      it('preserves caller idempotencyKey across retry submissions', async () => {
+        const client = createApiClient({
+          dataMode: 'production',
+          apiBaseUrl: 'https://api.queuesense.iitb.ac.in',
+        });
+
+        const capturedKeys: string[] = [];
+        globalThis.fetch = vi.fn().mockImplementation(async (_url, init) => {
+          capturedKeys.push(init.headers['X-Idempotency-Key']);
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({ error: 'Database busy' }),
+          } as Response;
+        });
+
+        const testKey = generateSecureIdempotencyKey();
+
+        // Attempt 1
+        await expect(
+          client.submitReport('loc-1', {
+            reportedWaitMinutes: 5,
+            queueLength: 2,
+            idempotencyKey: testKey,
+          })
+        ).rejects.toThrow();
+
+        // Attempt 2 (UI retry with retained key)
+        await expect(
+          client.submitReport('loc-1', {
+            reportedWaitMinutes: 5,
+            queueLength: 2,
+            idempotencyKey: testKey,
+          })
+        ).rejects.toThrow();
+
+        expect(capturedKeys.length).toBe(2);
+        expect(capturedKeys[0]).toBe(testKey);
+        expect(capturedKeys[1]).toBe(testKey);
+        expect(capturedKeys[0]).toBe(capturedKeys[1]);
+      });
     });
   });
 });

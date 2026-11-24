@@ -1,6 +1,6 @@
 export type CongestionLevel = 'LOW' | 'MODERATE' | 'HIGH' | 'VERY_HIGH' | 'UNKNOWN';
 
-export type FreshnessState = 'LIVE' | 'RECENT' | 'STALE' | 'NO RECENT DATA';
+export type FreshnessState = 'LIVE' | 'RECENT' | 'STALE' | 'NO RECENT DATA' | 'INSUFFICIENT DATA';
 
 export type ConfidenceLabel = 'HIGH' | 'MODERATE' | 'LIMITED' | 'VERY LOW' | 'NO DATA' | 'INSUFFICIENT DATA';
 
@@ -116,4 +116,13 @@ export interface HistoricalData {
     sampleCount?: number;
   } | null;
   summary: string;
+}
+
+export interface AdminReportsMetadata {
+  totalReportsReturned?: number;
+  outlierCount?: number;
+  isPartial?: boolean;
+  isTruncated?: boolean;
+  retrievalSource?: string;
+  operatorIdentity?: string | null;
 }

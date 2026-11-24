@@ -725,8 +725,17 @@ export function isValidInteger(val: unknown, min = -Infinity, max = Infinity): v
 
 export function isValidIsoDate(val: unknown): boolean {
   if (typeof val !== 'string' || !val.trim()) return false;
-  const d = new Date(val);
-  return !Number.isNaN(d.getTime());
+  const str = val.trim();
+  const match = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:\.(\d+))?(Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(str);
+  if (!match) return false;
+  const d = new Date(str);
+  if (Number.isNaN(d.getTime())) return false;
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (day > daysInMonth) return false;
+  return true;
 }
 
 export const VALID_CONGESTION_LEVELS = new Set(['LOW', 'MODERATE', 'HIGH', 'VERY_HIGH', 'SURGE', 'UNKNOWN']);
@@ -765,9 +774,9 @@ export function validateQueueEstimate(est: unknown, context = 'estimate'): Queue
     throw new Error(`Malformed API response: ${context}.congestion has invalid value '${e.congestion}'`);
   }
 
-  // freshness: non-empty string
-  if (typeof e.freshness !== 'string' || !e.freshness.trim()) {
-    throw new Error(`Malformed API response: ${context}.freshness must be a non-empty string`);
+  // freshness: non-empty string in VALID_FRESHNESS_STATES
+  if (typeof e.freshness !== 'string' || !VALID_FRESHNESS_STATES.has(e.freshness)) {
+    throw new Error(`Malformed API response: ${context}.freshness has invalid value '${e.freshness}'`);
   }
 
   // predictedWaitMinutes: null or number [0, 120]
@@ -809,6 +818,12 @@ export function validateCampusLocation(loc: unknown, context = 'location'): Camp
   if (!isNonEmptyString(l.category) || (!VALID_LOCATION_CATEGORIES.has(l.category) && !VALID_LOCATION_CATEGORIES.has(l.category.toUpperCase()))) {
     throw new Error(`Malformed API response: ${context}.category has invalid value '${l.category}'`);
   }
+  if (typeof l.active !== 'boolean') {
+    throw new Error(`Malformed API response: ${context}.active must be a boolean, got ${typeof l.active}`);
+  }
+  if (!isNonEmptyString(l.openHours)) {
+    throw new Error(`Malformed API response: ${context}.openHours must be a non-empty string`);
+  }
 
   if (l.estimate !== undefined && l.estimate !== null) {
     validateQueueEstimate(l.estimate, `${context}.estimate`);
@@ -832,6 +847,10 @@ export function validateQueueReport(rep: unknown, context = 'report'): QueueRepo
   // Standardize reportId
   if (!r.reportId && r.id) {
     r.reportId = r.id;
+  }
+
+  if (!isNonEmptyString(r.locationId)) {
+    throw new Error(`Malformed API response: ${context}.locationId must be a non-empty string`);
   }
 
   if (!isValidNumber(r.reportedWaitMinutes, 0, 120)) {
@@ -908,7 +927,7 @@ export function createApiClient(config: ApiClientConfig = {}) {
       return getDataMode();
     },
 
-    async getLocations(): Promise<{ data: CampusLocation[]; isLive: boolean }> {
+    async getLocations(): Promise<{ data: CampusLocation[]; isLive: boolean; isPartial?: boolean }> {
       const mode = getDataMode();
       const baseUrl = getBaseUrl();
       if (this.isLiveApiConfigured()) {
@@ -922,8 +941,12 @@ export function createApiClient(config: ApiClientConfig = {}) {
             // Strict field and type validation on every location item
             for (let i = 0; i < json.data.length; i++) {
               validateCampusLocation(json.data[i], `locations[${i}]`);
+              if (!json.data[i].estimate) {
+                throw new Error(`Malformed API response: locations[${i}].estimate is required`);
+              }
+              validateQueueEstimate(json.data[i].estimate, `locations[${i}].estimate`);
             }
-            return { data: json.data, isLive: true };
+            return { data: json.data, isLive: true, isPartial: json.isPartial ?? false };
           }
           if (mode === 'production') {
             throw new Error(`API returned status ${res.status}`);
@@ -944,7 +967,7 @@ export function createApiClient(config: ApiClientConfig = {}) {
         estimate: computeClientEstimate(mockReports[loc.id] || []),
       }));
 
-      return { data: locationsWithEstimates, isLive: false };
+      return { data: locationsWithEstimates, isLive: false, isPartial: false };
     },
 
     async getLocationQueue(locationId: string): Promise<{
@@ -972,10 +995,16 @@ export function createApiClient(config: ApiClientConfig = {}) {
             ) {
               throw new Error('Malformed API response: expected queue data object with location, estimate, and reports');
             }
+            if (json.data.location.id !== locationId) {
+              throw new Error(`Malformed API response: location id mismatch, expected '${locationId}' but got '${json.data.location.id}'`);
+            }
             validateCampusLocation(json.data.location, 'queue.location');
             validateQueueEstimate(json.data.estimate, 'queue.estimate');
             for (let i = 0; i < json.data.reports.length; i++) {
               validateQueueReport(json.data.reports[i], `queue.reports[${i}]`);
+              if (json.data.reports[i].locationId !== locationId) {
+                throw new Error(`Malformed API response: queue.reports[${i}].locationId mismatch, expected '${locationId}' but got '${json.data.reports[i].locationId}'`);
+              }
             }
             return { ...json.data, isLive: true };
           }
@@ -1060,6 +1089,9 @@ export function createApiClient(config: ApiClientConfig = {}) {
               throw new Error('Malformed API response: expected report and updatedEstimate');
             }
             validateQueueReport(json.data.report, 'submitReport.report');
+            if (json.data.report.locationId !== locationId) {
+              throw new Error(`Malformed API response: submitted report locationId mismatch, expected '${locationId}' but got '${json.data.report.locationId}'`);
+            }
             validateQueueEstimate(json.data.updatedEstimate, 'submitReport.updatedEstimate');
             return { ...json.data, isLive: true };
           }
@@ -1286,6 +1318,10 @@ export function createApiClient(config: ApiClientConfig = {}) {
               throw new Error('Malformed API response: expected historical data object with hourly trends');
             }
 
+            if (json.data.locationId !== locationId) {
+              throw new Error(`Malformed API response: historical locationId mismatch, expected '${locationId}' but got '${json.data.locationId}'`);
+            }
+
             const hData = json.data;
             if (!isValidInteger(hData.totalObservations, 0)) {
               throw new Error('Malformed API response: historical totalObservations must be a non-negative integer');
@@ -1306,11 +1342,39 @@ export function createApiClient(config: ApiClientConfig = {}) {
               if (wait !== null && wait !== undefined && !isValidNumber(wait, 0, 120)) {
                 throw new Error(`Malformed API response: hourlyTrends[${i}].averageWaitMinutes must be null or number between 0 and 120, got ${wait}`);
               }
+              const qLen = trend.averageQueueLength !== undefined ? trend.averageQueueLength : trend.historicalAverageQueueLength;
+              if (qLen !== null && qLen !== undefined && !isValidNumber(qLen, 0, 300)) {
+                throw new Error(`Malformed API response: hourlyTrends[${i}].averageQueueLength must be null or number between 0 and 300, got ${qLen}`);
+              }
               const count = trend.observationCount !== undefined ? trend.observationCount : trend.sampleCount;
               if (count !== undefined && !isValidInteger(count, 0)) {
                 throw new Error(`Malformed API response: hourlyTrends[${i}].observationCount must be a non-negative integer`);
               }
             }
+
+            const validatePeakHour = (peak: any, fieldName: string) => {
+              if (peak === null || peak === undefined) return;
+              if (typeof peak !== 'object' || Array.isArray(peak)) {
+                throw new Error(`Malformed API response: ${fieldName} must be an object or null`);
+              }
+              if (!isValidInteger(peak.hour, 0, 23)) {
+                throw new Error(`Malformed API response: ${fieldName}.hour must be an integer between 0 and 23, got ${peak.hour}`);
+              }
+              if (!isNonEmptyString(peak.label)) {
+                throw new Error(`Malformed API response: ${fieldName}.label must be a non-empty string`);
+              }
+              const wait = peak.averageWaitMinutes !== undefined ? peak.averageWaitMinutes : peak.historicalAverageWaitMinutes;
+              if (wait === null || wait === undefined || !isValidNumber(wait, 0, 120)) {
+                throw new Error(`Malformed API response: ${fieldName}.averageWaitMinutes must be a number between 0 and 120, got ${wait}`);
+              }
+              const count = peak.sampleCount !== undefined ? peak.sampleCount : peak.observationCount;
+              if (count !== undefined && !isValidInteger(count, 0)) {
+                throw new Error(`Malformed API response: ${fieldName}.sampleCount must be a non-negative integer`);
+              }
+            };
+
+            validatePeakHour(hData.busiestHour, 'busiestHour');
+            validatePeakHour(hData.quietestHour, 'quietestHour');
 
             return { data: json.data, isLive: true };
           }
@@ -1385,7 +1449,18 @@ export function createApiClient(config: ApiClientConfig = {}) {
       };
     },
 
-    async getAdminReports(bearerToken?: string): Promise<{ reports: QueueReport[]; isLive: boolean }> {
+    async getAdminReports(bearerToken?: string): Promise<{
+      reports: QueueReport[];
+      isLive: boolean;
+      metadata?: {
+        totalReportsReturned?: number;
+        outlierCount?: number;
+        isPartial?: boolean;
+        isTruncated?: boolean;
+        retrievalSource?: string;
+        operatorIdentity?: string | null;
+      };
+    }> {
       const mode = getDataMode();
       const baseUrl = getBaseUrl();
       let token = bearerToken || '';
@@ -1424,7 +1499,18 @@ export function createApiClient(config: ApiClientConfig = {}) {
             for (let i = 0; i < json.data.reports.length; i++) {
               validateQueueReport(json.data.reports[i], `adminReports[${i}]`);
             }
-            return { reports: json.data.reports, isLive: true };
+            return {
+              reports: json.data.reports,
+              isLive: true,
+              metadata: {
+                totalReportsReturned: json.data.totalReportsReturned ?? json.data.reports.length,
+                outlierCount: json.data.outlierCount ?? 0,
+                isPartial: json.data.isPartial ?? false,
+                isTruncated: json.data.isTruncated ?? false,
+                retrievalSource: json.data.retrievalSource,
+                operatorIdentity: json.data.operatorIdentity,
+              },
+            };
           }
           if (res.status === 401 || res.status === 403) {
             throw new Error('UNAUTHORIZED');
@@ -1448,7 +1534,18 @@ export function createApiClient(config: ApiClientConfig = {}) {
       });
       allReports.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-      return { reports: allReports, isLive: false };
+      return {
+        reports: allReports,
+        isLive: false,
+        metadata: {
+          totalReportsReturned: allReports.length,
+          outlierCount: 0,
+          isPartial: false,
+          isTruncated: false,
+          retrievalSource: 'LOCAL_FIXTURES',
+          operatorIdentity: 'demo-local',
+        },
+      };
     },
   };
 }

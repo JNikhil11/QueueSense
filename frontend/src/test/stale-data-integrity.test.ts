@@ -25,6 +25,20 @@ describe('Workstream 2 — Data Freshness State Model & Stale-Data Integrity', (
           landmarkLocation: 'Lakeside Road',
           openHours: '07:30-21:30',
           active: true,
+          estimate: {
+            predictedWaitMinutes: 10,
+            predictedQueueLength: 5,
+            congestion: 'LOW',
+            confidence: 0.9,
+            confidenceLabel: 'HIGH',
+            freshness: 'LIVE',
+            reportCount: 5,
+            recentReportCount: 3,
+            disagreementMinutes: 0,
+            outliersExcluded: 0,
+            evidenceExplanation: 'Consistent observations',
+            updatedAt: new Date().toISOString(),
+          },
         },
       ];
 
