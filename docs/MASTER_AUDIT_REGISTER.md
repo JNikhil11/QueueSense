@@ -354,6 +354,30 @@ Status Definitions:
     2. **Low Submission Frequency:** Physical queue reporting is an infrequent event (a student reports once upon joining or completing a meal). A throughput of 1 report per minute across a dining hall provides sufficient sampling density without overloading backend Lambda concurrency.
     3. **Production Roadmap:** If NAT collision becomes severe during campus rollout, the rate-limit key can incorporate a client-generated ephemeral device token (stored in `localStorage` and rotated daily) combined with IP hash, or transition to student Cognito identity tokens upon opting into authenticated reporting.
 
+### P1.2 — Historical Reports Pagination (Multi-Page Ingestion)
+- **Severity:** P1 (Read Scalability & Historical Intelligence Integrity)
+- **Defect:** `get_historical_reports()` in `DynamoDBStorageAdapter` executed a single DynamoDB `query` with `Limit=200` without checking or paginating over `LastEvaluatedKey`. If an outlet had $>200$ reports over the 14-day history window (or if DynamoDB returned a partial page due to 1MB size limits), all older reports were silently dropped.
+- **Evidence:** Reproduction test with a mock table holding 350 reports across 2 pages confirmed that the previous implementation executed only 1 query and returned 200 items, silently losing 150 reports.
+- **Root Cause:** Single-page `query` invocation without a pagination loop following `ExclusiveStartKey=LastEvaluatedKey`.
+- **Fix Implemented:**
+  1. Implemented a bounded pagination loop in `DynamoDBStorageAdapter.get_historical_reports` in `backend/shared/database.py`:
+     - Queries in chunks (`page_limit = min(remaining, 200)`), passes `ExclusiveStartKey=last_evaluated_key`, and aggregates items until `len(items) >= limit` or `LastEvaluatedKey` is absent.
+     - Enforces an adversarial safety guard (`max_pages = 20`) to prevent runaway infinite pagination if DynamoDB repeatedly returns keys.
+     - Slices `items[:limit]` before returning to enforce exact limit boundaries.
+     - Fails closed with `DatabasePersistenceError` if any query page fails.
+  2. Increased default history retrieval limit from 200 to 1000 across `BaseStorageAdapter`, `DynamoDBStorageAdapter`, `InMemoryStorageAdapter`, and `QueueSenseDatabase`.
+  3. In `backend/functions/get_historical/app.py`, explicitly requests `limit=1000`, ensuring the full 14-day history across meal sessions is accurately analyzed for 24-hour hour-of-day distributions.
+- **Tests Performed:**
+  1. `test_historical_reports_dynamodb_pagination_follows_last_evaluated_key`: Verifies 350 reports across 2 pages are fully collected via `ExclusiveStartKey`.
+  2. `test_historical_reports_dynamodb_pagination_respects_custom_limit`: Verifies custom limit (250 items from a 500-item table) terminates query loop after page 2 with exact item count and `Limit=50` on second call.
+  3. `test_historical_reports_dynamodb_pagination_stops_cleanly_when_no_more_pages`: Verifies single-page queries (<200 items) terminate cleanly after 1 call.
+  4. `test_historical_reports_dynamodb_pagination_max_pages_safety_guard`: Verifies infinite simulated `LastEvaluatedKey` stream stops at `max_pages=20` without hanging.
+  5. `test_historical_reports_dynamodb_pagination_failure_fails_closed`: Verifies DynamoDB failure on page 2 raises `DatabasePersistenceError` and never returns partial data.
+  6. `test_historical_handler_end_to_end_with_large_paginated_history`: End-to-end integration test verifying `get_historical` Lambda handler ingests 250 reports without truncation and computes accurate hourly buckets.
+- **Result:** **`VERIFIED FIXED`**
+- **Commit SHA:** `feature/production-hardening`
+- **Residual Risk:** In extremely high-volume dining halls with $>1000$ reports over 14 days, reports beyond the 1000-item safety cap will not be ingested. This bounded cap is an intentional architectural safeguard to keep Lambda execution within 300ms and 128MB memory constraints. In a future milestone, pre-aggregated daily/hourly rollup items can be generated asynchronously via DynamoDB Streams.
+
 ---
 
 ## 5. Verification Sign-Off

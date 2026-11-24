@@ -61,8 +61,8 @@ def lambda_handler(event, context):
                 request_id=request_id,
             )
 
-        # Retrieve historical reports (strictly enforced 14 days cutoff in DB query)
-        reports = db.get_historical_reports(location_id, days=14)
+        # Retrieve historical reports (strictly enforced 14 days cutoff in DB query, bounded to 1000 reports across pages)
+        reports = db.get_historical_reports(location_id, days=14, limit=1000)
 
         # Aggregate by hour (0-23) in campus timezone (Asia/Kolkata, UTC+05:30)
         hourly_buckets = defaultdict(lambda: {"wait_sum": 0.0, "queue_sum": 0.0, "count": 0})

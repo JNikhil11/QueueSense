@@ -1241,3 +1241,237 @@ def test_client_supplied_timestamp_is_strictly_ignored_by_backend():
     assert before_utc <= report_dt <= after_utc
 
 
+# =========================================================================
+# Priority 1.2: Historical Reports Pagination Tests
+# =========================================================================
+
+def test_historical_reports_dynamodb_pagination_follows_last_evaluated_key(monkeypatch):
+    """
+    Priority 1.2: Verify DynamoDBStorageAdapter follows LastEvaluatedKey across multiple pages
+    until all matching historical items within the 14-day window are collected.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    page1_items = [
+        {"PK": "LOCATION#iitb-mess-h12-14", "SK": f"REPORT#2026-11-20T{i:02d}:00:00#rep_{i}", "reportedWaitMinutes": 10.0, "queueLength": 5}
+        for i in range(200)
+    ]
+    page2_items = [
+        {"PK": "LOCATION#iitb-mess-h12-14", "SK": f"REPORT#2026-11-15T{i:02d}:00:00#rep_{i+200}", "reportedWaitMinutes": 15.0, "queueLength": 8}
+        for i in range(150)
+    ]
+
+    last_key = {"PK": "LOCATION#iitb-mess-h12-14", "SK": "REPORT#2026-11-20T199:00:00#rep_199"}
+
+    def mock_query(**kwargs):
+        if "ExclusiveStartKey" not in kwargs:
+            return {"Items": page1_items, "LastEvaluatedKey": last_key}
+        else:
+            assert kwargs["ExclusiveStartKey"] == last_key
+            return {"Items": page2_items}
+
+    mock_table.query.side_effect = mock_query
+
+    reports = adapter.get_historical_reports("iitb-mess-h12-14", days=14, limit=1000)
+
+    assert len(reports) == 350
+    assert mock_table.query.call_count == 2
+    # Verify both pages are converted and present
+    assert reports[0]["reportedWaitMinutes"] == 10.0
+    assert reports[200]["reportedWaitMinutes"] == 15.0
+
+
+def test_historical_reports_dynamodb_pagination_respects_custom_limit(monkeypatch):
+    """
+    Priority 1.2: Verify pagination stops immediately once the caller-specified limit is satisfied,
+    preventing over-fetching and unnecessary DynamoDB RCUs.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    page1_items = [{"PK": "LOCATION#loc", "SK": f"REPORT#{i}", "reportedWaitMinutes": 5.0} for i in range(200)]
+    page2_items = [{"PK": "LOCATION#loc", "SK": f"REPORT#{i+200}", "reportedWaitMinutes": 6.0} for i in range(200)]
+    page3_items = [{"PK": "LOCATION#loc", "SK": f"REPORT#{i+400}", "reportedWaitMinutes": 7.0} for i in range(100)]
+
+    def mock_query(**kwargs):
+        limit_requested = kwargs.get("Limit", 200)
+        start_key = kwargs.get("ExclusiveStartKey")
+        if start_key is None:
+            return {"Items": page1_items[:limit_requested], "LastEvaluatedKey": {"PK": "loc", "SK": "199"}}
+        elif start_key == {"PK": "loc", "SK": "199"}:
+            return {"Items": page2_items[:limit_requested], "LastEvaluatedKey": {"PK": "loc", "SK": "399"}}
+        else:
+            return {"Items": page3_items[:limit_requested]}
+
+    mock_table.query.side_effect = mock_query
+
+    # Request limit=250: Page 1 gives 200, Page 2 requests min(50, 200) = 50. Total 250.
+    reports = adapter.get_historical_reports("loc", days=14, limit=250)
+
+    assert len(reports) == 250
+    assert mock_table.query.call_count == 2
+    # Verify second query was called with page_limit=50
+    second_call_kwargs = mock_table.query.call_args_list[1][1]
+    assert second_call_kwargs["Limit"] == 50
+
+
+def test_historical_reports_dynamodb_pagination_stops_cleanly_when_no_more_pages(monkeypatch):
+    """
+    Priority 1.2: Single-page dataset terminates cleanly after 1 call when LastEvaluatedKey is absent.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    mock_table.query.return_value = {
+        "Items": [{"PK": "LOCATION#loc", "SK": f"REPORT#{i}", "reportedWaitMinutes": 8.0} for i in range(45)]
+    }
+
+    reports = adapter.get_historical_reports("loc", days=14, limit=1000)
+    assert len(reports) == 45
+    assert mock_table.query.call_count == 1
+
+
+def test_historical_reports_dynamodb_pagination_max_pages_safety_guard(monkeypatch):
+    """
+    Priority 1.2: Adversarial safety guard.
+    If DynamoDB continually returns LastEvaluatedKey (e.g. simulated infinite stream),
+    the loop terminates at max_pages=20 without hanging or unbounded memory growth.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from backend.shared.database import DynamoDBStorageAdapter
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    # Each page returns 10 items and a LastEvaluatedKey indefinitely
+    def mock_query(**kwargs):
+        return {
+            "Items": [{"PK": "LOCATION#infinite", "SK": "REPORT#ts", "reportedWaitMinutes": 5.0} for _ in range(10)],
+            "LastEvaluatedKey": {"PK": "LOCATION#infinite", "SK": "REPORT#next"},
+        }
+
+    mock_table.query.side_effect = mock_query
+
+    # Even with limit=5000, max_pages=20 must break the loop
+    reports = adapter.get_historical_reports("infinite", days=14, limit=5000)
+    assert mock_table.query.call_count == 20
+    assert len(reports) == 200  # 20 pages * 10 items
+
+
+def test_historical_reports_dynamodb_pagination_failure_fails_closed(monkeypatch):
+    """
+    Priority 1.2: Fail-closed verification.
+    If DynamoDB fails during any page of a multi-page historical query,
+    it MUST raise DatabasePersistenceError rather than returning partial/corrupted silent results.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    import pytest
+    from backend.shared.database import DynamoDBStorageAdapter, DatabasePersistenceError
+
+    mock_boto3 = MagicMock()
+    monkeypatch.setitem(sys.modules, "boto3", mock_boto3)
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb", MagicMock())
+    monkeypatch.setitem(sys.modules, "boto3.dynamodb.conditions", MagicMock())
+
+    adapter = DynamoDBStorageAdapter("TestTable", "ap-southeast-2")
+    mock_table = MagicMock()
+    adapter._table = mock_table
+
+    page1_items = [{"PK": "LOCATION#err", "SK": "REPORT#1", "reportedWaitMinutes": 10.0}]
+
+    class MockClientError(Exception):
+        pass
+
+    def mock_query(**kwargs):
+        if "ExclusiveStartKey" not in kwargs:
+            return {"Items": page1_items, "LastEvaluatedKey": {"PK": "err", "SK": "1"}}
+        else:
+            raise MockClientError("DynamoDB transient network failure on page 2")
+
+    mock_table.query.side_effect = mock_query
+
+    with pytest.raises(DatabasePersistenceError, match="Failed to query historical observations"):
+        adapter.get_historical_reports("err", days=14, limit=1000)
+
+
+def test_historical_handler_end_to_end_with_large_paginated_history():
+    """
+    Priority 1.2: End-to-end integration test with get_historical Lambda handler.
+    Verify that when >200 historical reports exist across the 14-day window,
+    the handler ingests all reports without truncation and aggregates accurate hourly trends.
+    """
+    reset_shared_test_adapter()
+    adapter = get_shared_test_adapter()
+    db = QueueSenseDatabase(adapter=adapter)
+
+    now_utc = datetime.now(timezone.utc)
+    # Populate 250 reports across 14 days at Hour 13 IST (07:30 UTC)
+    for i in range(250):
+        days_ago = (i % 13) + 1  # 1 to 13 days ago (all within 14-day cutoff)
+        dt = (now_utc - timedelta(days=days_ago)).replace(hour=7, minute=30, second=0, microsecond=0)
+        iso_str = dt.isoformat()
+        adapter._store[f"LOCATION#iitb-mess-h12-14::REPORT#paginated_{i:04d}"] = {
+            "PK": "LOCATION#iitb-mess-h12-14",
+            "SK": f"REPORT#{iso_str}#rep_{i:04d}",
+            "entityType": "REPORT",
+            "reportId": f"rep_{i:04d}",
+            "locationId": "iitb-mess-h12-14",
+            "reportedWaitMinutes": 20.0,
+            "queueLength": 30,
+            "timestamp": iso_str,
+        }
+
+    event = {"pathParameters": {"id": "iitb-mess-h12-14"}}
+    res = historical_handler(event, None)
+    assert res["statusCode"] == 200
+    body = json.loads(res["body"])
+    assert body["success"] is True
+    data = body["data"]
+
+    # All 250 reports must be aggregated (NOT truncated to 200)
+    assert data["totalObservations"] == 250
+    bucket_13 = [b for b in data["hourlyTrends"] if b["hour"] == 13][0]
+    assert bucket_13["sampleCount"] == 250
+    assert bucket_13["historicalAverageWaitMinutes"] == 20.0
+
+
+

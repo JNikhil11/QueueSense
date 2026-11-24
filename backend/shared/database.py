@@ -298,7 +298,7 @@ class BaseStorageAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 200) -> List[Dict[str, Any]]:
+    def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 1000) -> List[Dict[str, Any]]:
         pass
 
 
@@ -589,7 +589,7 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
             # FAIL CLOSED: Do not return True. Raise DatabasePersistenceError to deny or return controlled error.
             raise DatabasePersistenceError(f"Rate limit storage verification failed: {str(e)}")
 
-    def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 200) -> List[Dict[str, Any]]:
+    def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 1000) -> List[Dict[str, Any]]:
         self._ensure_table()
         pk = f"LOCATION#{location_id}"
         cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
@@ -597,14 +597,34 @@ class DynamoDBStorageAdapter(BaseStorageAdapter):
 
         try:
             from boto3.dynamodb.conditions import Key  # type: ignore
-            # Enforce 14-day cutoff at DynamoDB query index level (SK >= REPORT#{cutoff_iso})
-            resp = self._table.query(
-                KeyConditionExpression=Key("PK").eq(pk) & Key("SK").gte(f"REPORT#{cutoff_iso}"),
-                ScanIndexForward=False,
-                Limit=limit,
-            )
-            items = resp.get("Items", [])
-            return self._convert_decimals_to_float(items)
+
+            items: List[Dict[str, Any]] = []
+            last_evaluated_key = None
+            max_pages = 20  # Bounded pagination safety guard against runaway loops
+
+            for _ in range(max_pages):
+                remaining = limit - len(items)
+                if remaining <= 0:
+                    break
+
+                page_limit = min(remaining, 200)
+                query_kwargs: Dict[str, Any] = {
+                    "KeyConditionExpression": Key("PK").eq(pk) & Key("SK").gte(f"REPORT#{cutoff_iso}"),
+                    "ScanIndexForward": False,
+                    "Limit": page_limit,
+                }
+                if last_evaluated_key:
+                    query_kwargs["ExclusiveStartKey"] = last_evaluated_key
+
+                resp = self._table.query(**query_kwargs)
+                page_items = resp.get("Items", [])
+                items.extend(page_items)
+
+                last_evaluated_key = resp.get("LastEvaluatedKey")
+                if not last_evaluated_key:
+                    break
+
+            return self._convert_decimals_to_float(items[:limit])
         except Exception as e:
             logger.error("DynamoDB get_historical_reports failed: %s", str(e))
             raise DatabasePersistenceError(f"Failed to query historical observations: {str(e)}")
@@ -818,7 +838,7 @@ class InMemoryStorageAdapter(BaseStorageAdapter):
             self._rate_limits[key_curr] = n_curr + 1
             return True
 
-    def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 200) -> List[Dict[str, Any]]:
+    def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 1000) -> List[Dict[str, Any]]:
         if self._simulate_failure:
             raise DatabasePersistenceError("Simulated database failure.")
         cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
@@ -953,5 +973,5 @@ class QueueSenseDatabase:
     def check_rate_limit(self, client_hash: str, window_seconds: int = 300, max_requests: int = 5) -> bool:
         return self._adapter.check_rate_limit(client_hash=client_hash, window_seconds=window_seconds, max_requests=max_requests)
 
-    def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 200) -> List[Dict[str, Any]]:
+    def get_historical_reports(self, location_id: str, days: int = 14, limit: int = 1000) -> List[Dict[str, Any]]:
         return self._adapter.get_historical_reports(location_id=location_id, days=days, limit=limit)
