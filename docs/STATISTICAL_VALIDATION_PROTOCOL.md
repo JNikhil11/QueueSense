@@ -24,6 +24,13 @@ Unit tests, deterministic synthetic replays, and adversarial property tests esta
 
 However, **internal consistency does not establish empirical real-world accuracy**. A statistical model can pass 100% of synthetic test suites while producing uncalibrated estimates in the physical dining halls. Until the field validation protocol specified in this document is executed and verified against independent physical measurements, **QueueSense explicitly refrains from claiming calibrated predictive accuracy or Bayesian probability calibration**. All confidence metrics are categorized as heuristic composite scores (`HEURISTIC_COMPOSITE`).
 
+### 1.3 Distinct Client Identifiers vs. Independent Human Observers
+The QueueSense estimation and recommendation engines track `distinctDevicesCount`, which measures distinct client instance identifiers (random UUIDs generated via client CSPRNG and stored in browser local storage).
+
+> [!IMPORTANT]
+> **Scientific & Security Boundary:**  
+> Distinct client device identifiers **do not constitute mathematical proof of distinct human observers**, nor do they guarantee Sybil resistance. In an unauthenticated crowdsourced system without institutional Single Sign-On (SSO), an individual clearing cookies, rotating browsers, or running automated scripts can present multiple distinct client identifiers. While the backend's dual-budget rate limiter (individual device budget capped within a shared campus NAT ceiling) bounds abuse velocity, true observer identity verification requires institutional SSO. All documentation and APIs report `distinctDevicesCount` strictly as distinct client instances.
+
 ---
 
 ## 2. Field Observation Collection Protocol
@@ -166,3 +173,4 @@ When resources permit institutional ground-truth deployment, the following phase
 2. **Phase B (Empirical Parameter Calibration):** Fit decay constant $\tau$ and MAD thresholds to minimize MAE against the empirical field dataset.
 3. **Phase C (Automated Turnstile / POS Integration):** Ingest real-time counter transaction velocity from dining hall billing POS terminals (de-identified transaction rate $\lambda$) to dynamically validate queue throughput without manual observers.
 4. **Phase D (Published Validation Audit):** Publish verified MAE, RMSE, and bias figures alongside 95% confidence intervals in this protocol document.
+

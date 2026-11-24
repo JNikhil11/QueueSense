@@ -117,3 +117,124 @@ def test_get_historical_handler():
     assert body["data"]["locationId"] == "iitb-mess-h12-14"
 
 
+def test_get_recommendations_handler_fail_closed_verification(monkeypatch):
+    """Handler-level test verifying fail-closed policy: only recognized verified statuses qualify."""
+    qualifying_estimate_verified = {
+        "predictedWaitMinutes": 15.0,
+        "predictedQueueLength": 20,
+        "congestion": "MODERATE",
+        "confidence": 0.85,
+        "confidenceLabel": "HIGH",
+        "freshness": "LIVE",
+        "recentReportCount": 4,
+        "distinctDevicesCount": 4,
+        "newestReportAgeMinutes": 2.0,
+    }
+    qualifying_estimate_unverified = {
+        "predictedWaitMinutes": 3.0,  # Shorter wait, but unverified
+        "predictedQueueLength": 5,
+        "congestion": "LOW",
+        "confidence": 0.90,
+        "confidenceLabel": "HIGH",
+        "freshness": "LIVE",
+        "recentReportCount": 5,
+        "distinctDevicesCount": 5,
+        "newestReportAgeMinutes": 1.0,
+    }
+
+    mock_locations = [
+        # 1. Verified active outlet with qualifying evidence
+        {
+            "id": "loc-verified",
+            "name": "Verified Outlet",
+            "active": True,
+            "verificationStatus": "STUDENT_SOURCED",
+        },
+        # 2. Explicitly unverified active outlet (UNVERIFIED)
+        {
+            "id": "loc-explicit-unverified",
+            "name": "Unverified Outlet",
+            "active": True,
+            "verificationStatus": "UNVERIFIED",
+        },
+        # 3. Missing verification status (None)
+        {
+            "id": "loc-missing-status",
+            "name": "Missing Status Outlet",
+            "active": True,
+            "verificationStatus": None,
+        },
+        # 4. Unknown verification status
+        {
+            "id": "loc-unknown-status",
+            "name": "Unknown Status Outlet",
+            "active": True,
+            "verificationStatus": "RANDOM_EXTERNAL_STATUS",
+        },
+        # 5. Inactive outlet (active: False)
+        {
+            "id": "loc-inactive",
+            "name": "Inactive Outlet",
+            "active": False,
+            "verificationStatus": "STUDENT_SOURCED",
+        },
+    ]
+
+    from backend.shared.database import QueueSenseDatabase
+    monkeypatch.setattr(QueueSenseDatabase, "list_locations", lambda self: mock_locations)
+    monkeypatch.setattr(
+        QueueSenseDatabase,
+        "get_current_estimate",
+        lambda self, loc_id: qualifying_estimate_verified if loc_id == "loc-verified" else qualifying_estimate_unverified,
+    )
+
+    res = rec_handler({}, None)
+    assert res["statusCode"] == 200
+    body = json.loads(res["body"])
+    assert body["success"] is True
+    rec_data = body["data"]
+
+    # 6. Verified outlet MUST win over unverified outlet with lower wait
+    assert rec_data["state"] == "recommended"
+    assert rec_data["recommendedLocationId"] == "loc-verified"
+    assert rec_data["recommendedLocationName"] == "Verified Outlet"
+    assert rec_data["predictedWaitMinutes"] == 15.0
+    assert rec_data["eligibleCount"] == 1
+
+
+def test_get_recommendations_handler_disqualifies_all_unverified(monkeypatch):
+    """When all campus outlets are unverified or missing status, recommendation fails-closed."""
+    qualifying_estimate = {
+        "predictedWaitMinutes": 5.0,
+        "predictedQueueLength": 10,
+        "congestion": "MODERATE",
+        "confidence": 0.80,
+        "confidenceLabel": "HIGH",
+        "freshness": "LIVE",
+        "recentReportCount": 3,
+        "distinctDevicesCount": 3,
+        "newestReportAgeMinutes": 2.0,
+    }
+
+    mock_locations = [
+        {"id": "loc-u1", "name": "Unverified 1", "active": True, "verificationStatus": "UNVERIFIED"},
+        {"id": "loc-u2", "name": "Unverified 2", "active": True, "verificationStatus": None},
+        {"id": "loc-u3", "name": "Unverified 3", "active": True, "verificationStatus": "UNKNOWN_CLAIM"},
+    ]
+
+    from backend.shared.database import QueueSenseDatabase
+    monkeypatch.setattr(QueueSenseDatabase, "list_locations", lambda self: mock_locations)
+    monkeypatch.setattr(QueueSenseDatabase, "get_current_estimate", lambda self, loc_id: qualifying_estimate)
+
+    res = rec_handler({}, None)
+    assert res["statusCode"] == 200
+    body = json.loads(res["body"])
+    assert body["success"] is True
+    rec_data = body["data"]
+
+    # Must fail-closed: no outlet recommended
+    assert rec_data["isEligible"] is False
+    assert rec_data["recommendedLocationId"] is None
+    assert rec_data["eligibleCount"] == 0
+
+

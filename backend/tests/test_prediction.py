@@ -151,6 +151,7 @@ def test_smart_recommendation_selection():
             "id": "mess-a",
             "name": "Mess A",
             "active": True,
+            "verificationStatus": "STUDENT_SOURCED",
             "estimate": {
                 "predictedWaitMinutes": 14.0,
                 "confidence": 0.85,
@@ -165,6 +166,7 @@ def test_smart_recommendation_selection():
             "id": "mess-b",
             "name": "Mess B",
             "active": True,
+            "verificationStatus": "STUDENT_SOURCED",
             "estimate": {
                 "predictedWaitMinutes": 4.5,
                 "confidence": 0.75,
@@ -179,6 +181,7 @@ def test_smart_recommendation_selection():
             "id": "canteen-c",
             "name": "Canteen C (Stale Data)",
             "active": True,
+            "verificationStatus": "STUDENT_SOURCED",
             "estimate": {
                 "predictedWaitMinutes": 1.0,  # Very short wait, but stale! Must be disqualified
                 "confidence": 0.10,

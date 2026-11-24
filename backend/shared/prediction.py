@@ -37,9 +37,17 @@ MAD_MIN_SCALE_MINUTES = 5.0            # Prevents division by zero or zero-devia
 MAD_CUTOFF_MULTIPLIER = 3.5            # Multiplier on scale for candidate deviation
 MAD_MIN_CUTOFF_MINUTES = 25.0          # Minimum deviation threshold before considering an outlier
 SURGE_CORROBORATION_MIN_COUNT = 2      # Minimum concurrent reports to corroborate a surge
-SURGE_CORROBORATION_WINDOW_MIN = 30.0  # Time window to consider reports mutually corroborating
+SURGE_CORROBORATION_WINDOW_MIN = 30.0  # Time window (minutes) to consider reports mutually corroborating
 SURGE_CONSISTENCY_DELTA_MIN = 20.0     # Maximum delta between corroborating surge reports
-SURGE_QUEUE_THRESHOLD = 20             # Queue length that independently corroborates an elevated wait
+
+# Recognized verified location statuses (Fail-Closed Recommendation Policy)
+VERIFIED_LOCATION_STATUSES = {
+    "VERIFIED",
+    "VERIFIED_CAMPUS_DIRECTORY",
+    "STUDENT_SOURCED",
+    "COMMUNITY_LISTING",
+    "COMMUNITY_DIRECTORY",
+}
 
 
 def parse_iso_timestamp(ts_str: str) -> datetime:
@@ -121,6 +129,17 @@ def determine_freshness_status(newest_age_minutes: Optional[float]) -> str:
     return "NO RECENT DATA"
 
 
+def extract_report_timestamp(report: Dict[str, Any]) -> Optional[datetime]:
+    """Safely extract and parse an ISO 8601 timestamp from a report dictionary."""
+    raw_ts = report.get("timestamp")
+    if not raw_ts:
+        return None
+    try:
+        return parse_iso_timestamp(str(raw_ts))
+    except (ValueError, TypeError):
+        return None
+
+
 def filter_outliers(
     reports: List[Dict[str, Any]],
     now: Optional[datetime] = None,
@@ -137,11 +156,13 @@ def filter_outliers(
        Computes median wait time and Median Absolute Deviation (MAD).
        Enforces minimum scale (>= 5.0m) and rush-tolerant cutoff (>= 25.0m deviation).
        Corroborated Surge Detection:
-       If a candidate spike (wait > median + cutoff) is corroborated by:
-       - At least one other concurrent high observation (within 30m, delta <= 20m), OR
-       - An elevated queue length (queue >= 20 people),
-       the report represents a genuine rush-hour surge and is RETAINED.
-       Uncorroborated isolated extreme spikes/drops are flagged and excluded.
+       Candidate deviations (wait > median + cutoff) represent a genuine surge ONLY IF
+       corroborated by at least one other eligible peer report within SURGE_CORROBORATION_WINDOW_MIN
+       (30 minutes) from a distinct client device identifier (where available) with value
+       consistency (delta <= 20 minutes).
+       Reports with missing or unparseable timestamps cannot establish timing and cannot
+       corroborate surges. Elevated queue count alone does NOT substitute for peer corroboration.
+       Uncorroborated isolated extreme spikes/drops are isolated and excluded.
     """
     if now is None:
         now = datetime.now(timezone.utc)
@@ -218,36 +239,83 @@ def filter_outliers(
         else:
             normal_reports.append(r)
 
-    # Evaluate candidate spikes with Corroborated Surge Detection
+    # Evaluate candidate spikes with strict temporal and observer Corroborated Surge Detection
     corroborated_spikes: List[Dict[str, Any]] = []
     for r in candidate_spikes:
         wait = float(r["reportedWaitMinutes"])
+        ts_r = extract_report_timestamp(r)
+        dev_r = r.get("deviceId") or r.get("clientHash") or r.get("reporterId")
 
-        # Genuine rush-hour surge requires peer corroboration from at least one other
-        # concurrent report. A single isolated submission cannot corroborate itself
-        # even if it injects a high queue length.
+        # If timing cannot be established, report cannot be corroborated as concurrent
+        if ts_r is None:
+            outliers.append({**r, "outlierReason": "UNCORROBORATED_MISSING_TIMESTAMP"})
+            continue
+
         is_corroborated_by_peers = False
-        if len(candidate_spikes) >= SURGE_CORROBORATION_MIN_COUNT:
-            peer_matches = 0
-            for peer in candidate_spikes:
-                if peer is not r:
-                    peer_wait = float(peer["reportedWaitMinutes"])
-                    if abs(wait - peer_wait) <= SURGE_CONSISTENCY_DELTA_MIN:
-                        peer_matches += 1
-            if peer_matches >= 1:
-                is_corroborated_by_peers = True
+        peer_matches = 0
 
-        if is_corroborated_by_peers:
+        for peer in candidate_spikes:
+            if peer is r:
+                continue
+
+            ts_peer = extract_report_timestamp(peer)
+            if ts_peer is None:
+                continue
+
+            # Check 1: Temporal proximity within SURGE_CORROBORATION_WINDOW_MIN (30.0 min)
+            time_delta_min = abs((ts_r - ts_peer).total_seconds()) / 60.0
+            if time_delta_min > SURGE_CORROBORATION_WINDOW_MIN:
+                continue
+
+            # Check 2: Distinct client device identifiers if available
+            dev_peer = peer.get("deviceId") or peer.get("clientHash") or peer.get("reporterId")
+            if dev_r and dev_peer and dev_r == dev_peer:
+                # Same client identifier cannot establish peer consensus
+                continue
+
+            # Check 3: Value consistency within SURGE_CONSISTENCY_DELTA_MIN (20.0 min)
+            peer_wait = float(peer["reportedWaitMinutes"])
+            if abs(wait - peer_wait) <= SURGE_CONSISTENCY_DELTA_MIN:
+                peer_matches += 1
+
+        if peer_matches >= 1:
             corroborated_spikes.append(r)
         else:
             outliers.append({**r, "outlierReason": "UNCORROBORATED_ISOLATED_SPIKE"})
 
-    # Evaluate candidate drops (e.g. sudden drop from high wait)
+    # Evaluate candidate drops with strict temporal and observer corroboration
     corroborated_drops: List[Dict[str, Any]] = []
     for r in candidate_drops:
         wait = float(r["reportedWaitMinutes"])
-        # If multiple reports indicate the line cleared, corroborate it
-        if len(candidate_drops) >= 2:
+        ts_r = extract_report_timestamp(r)
+        dev_r = r.get("deviceId") or r.get("clientHash") or r.get("reporterId")
+
+        if ts_r is None:
+            outliers.append({**r, "outlierReason": "UNCORROBORATED_MISSING_TIMESTAMP"})
+            continue
+
+        peer_matches = 0
+        for peer in candidate_drops:
+            if peer is r:
+                continue
+
+            ts_peer = extract_report_timestamp(peer)
+            if ts_peer is None:
+                continue
+
+            time_delta_min = abs((ts_r - ts_peer).total_seconds()) / 60.0
+            if time_delta_min > SURGE_CORROBORATION_WINDOW_MIN:
+                continue
+
+            dev_peer = peer.get("deviceId") or peer.get("clientHash") or peer.get("reporterId")
+            if dev_r and dev_peer and dev_r == dev_peer:
+                continue
+
+            peer_wait = float(peer["reportedWaitMinutes"])
+            if abs(wait - peer_wait) <= SURGE_CONSISTENCY_DELTA_MIN:
+                peer_matches += 1
+
+        if peer_matches >= 1:
             corroborated_drops.append(r)
         else:
             outliers.append({**r, "outlierReason": "UNCORROBORATED_ISOLATED_DROP"})
@@ -410,10 +478,12 @@ def calculate_queue_estimate(
         # Epistemic single-source uncertainty cap: a single report carries higher variance
         confidence = round(min(0.40, renormalized_score * 0.70), 2)
 
-    # Qualitative label
+    # Qualitative label (P1.15)
+    # Strictly > 0.40 with at least 2 reports receives MODERATE.
+    # Scores <= 0.40 receive LIMITED. Single-report confidence is capped <= 0.40 and receives LIMITED.
     if confidence >= 0.70:
         confidence_label = "HIGH"
-    elif confidence >= 0.40:
+    elif confidence > 0.40 and len(recent_reports) >= 2:
         confidence_label = "MODERATE"
     elif confidence >= 0.20:
         confidence_label = "LIMITED"
@@ -427,9 +497,12 @@ def calculate_queue_estimate(
     if confidence_label == "HIGH":
         explanation = f"Strong agreement across {count_str}; latest report from {age_str}."
     elif confidence_label == "MODERATE":
-        explanation = f"Solid estimate based on {count_str}; updated {age_str}."
+        explanation = f"Moderate consensus based on {count_str}; updated {age_str}."
     elif confidence_label == "LIMITED":
-        explanation = f"Based on a single observation from {age_str}. More reports will improve accuracy."
+        if len(recent_reports) == 1:
+            explanation = f"Based on a single observation from {age_str}. More reports will improve accuracy."
+        else:
+            explanation = f"Limited evidence based on {count_str}; updated {age_str}."
     else:
         explanation = f"Observations are aging ({age_str}); estimate may not reflect sudden rushes."
 
@@ -485,8 +558,10 @@ def compute_smart_recommendation(
             continue
         has_active_locations = True
 
-        # Check operational verification status (must not be explicitly unverified)
-        if loc.get("verificationStatus") == "UNVERIFIED":
+        # Check operational verification status (Fail-Closed Policy P1.16)
+        # Only recognized verified statuses qualify. Missing, None, empty, or unknown strings are disqualified.
+        v_status = loc.get("verificationStatus")
+        if not v_status or not isinstance(v_status, str) or v_status not in VERIFIED_LOCATION_STATUSES:
             continue
 
         est = loc.get("estimate", {})
@@ -525,7 +600,7 @@ def compute_smart_recommendation(
             reason = (
                 f"Not enough recent queue reports across campus to make a reliable recommendation yet. "
                 f"At least {min_reports} fresh observations (within 20 minutes), {int(min_confidence * 100)}%+ "
-                f"confidence, and independent corroboration from multiple devices are required."
+                f"confidence, and corroboration from multiple distinct client devices are required."
             )
 
         return {

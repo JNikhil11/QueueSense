@@ -46,13 +46,14 @@ def test_p1_13_scenario_1_normal_queue_low_variance():
 
 def test_p1_13_scenario_2_isolated_extremely_high_wait_time():
     """Scenario 2: One extremely high wait-time report among normal reports (isolated -> outlier)."""
+    now_ts = "2026-11-24T12:00:00Z"
     reports = [
-        {"reportedWaitMinutes": 8.0, "queueLength": 10},
-        {"reportedWaitMinutes": 9.0, "queueLength": 12},
-        {"reportedWaitMinutes": 8.5, "queueLength": 11},
-        {"reportedWaitMinutes": 8.0, "queueLength": 10},
-        {"reportedWaitMinutes": 9.0, "queueLength": 12},
-        {"reportedWaitMinutes": 110.0, "queueLength": 15},  # Isolated spike
+        {"reportedWaitMinutes": 8.0, "queueLength": 10, "timestamp": now_ts},
+        {"reportedWaitMinutes": 9.0, "queueLength": 12, "timestamp": now_ts},
+        {"reportedWaitMinutes": 8.5, "queueLength": 11, "timestamp": now_ts},
+        {"reportedWaitMinutes": 8.0, "queueLength": 10, "timestamp": now_ts},
+        {"reportedWaitMinutes": 9.0, "queueLength": 12, "timestamp": now_ts},
+        {"reportedWaitMinutes": 110.0, "queueLength": 15, "timestamp": now_ts},  # Isolated spike
     ]
     valid, outliers = filter_outliers(reports)
     assert len(valid) == 5
@@ -63,13 +64,14 @@ def test_p1_13_scenario_2_isolated_extremely_high_wait_time():
 
 def test_p1_13_scenario_3_isolated_extremely_low_report():
     """Scenario 3: One extremely low report among high reports (isolated -> outlier)."""
+    now_ts = "2026-11-24T12:00:00Z"
     reports = [
-        {"reportedWaitMinutes": 45.0, "queueLength": 60},
-        {"reportedWaitMinutes": 48.0, "queueLength": 65},
-        {"reportedWaitMinutes": 46.0, "queueLength": 62},
-        {"reportedWaitMinutes": 50.0, "queueLength": 68},
-        {"reportedWaitMinutes": 47.0, "queueLength": 63},
-        {"reportedWaitMinutes": 2.0, "queueLength": 5},   # Isolated drop
+        {"reportedWaitMinutes": 45.0, "queueLength": 60, "timestamp": now_ts},
+        {"reportedWaitMinutes": 48.0, "queueLength": 65, "timestamp": now_ts},
+        {"reportedWaitMinutes": 46.0, "queueLength": 62, "timestamp": now_ts},
+        {"reportedWaitMinutes": 50.0, "queueLength": 68, "timestamp": now_ts},
+        {"reportedWaitMinutes": 47.0, "queueLength": 63, "timestamp": now_ts},
+        {"reportedWaitMinutes": 2.0, "queueLength": 5, "timestamp": now_ts},   # Isolated drop
     ]
     valid, outliers = filter_outliers(reports)
     assert len(valid) == 5
@@ -80,17 +82,18 @@ def test_p1_13_scenario_3_isolated_extremely_low_report():
 
 def test_p1_13_scenario_4_genuine_rush_hour_surge_corroborated():
     """Scenario 4: Genuine rush-hour surge supported by multiple reports (corroborated -> retained)."""
+    now = datetime(2026, 11, 24, 12, 0, 0, tzinfo=timezone.utc)
     reports = [
-        {"reportedWaitMinutes": 5.0, "queueLength": 6},
-        {"reportedWaitMinutes": 6.0, "queueLength": 7},
-        {"reportedWaitMinutes": 5.5, "queueLength": 6},
-        {"reportedWaitMinutes": 6.0, "queueLength": 8},
-        {"reportedWaitMinutes": 5.0, "queueLength": 6},
-        # Corroborating surge: Two students report ~35m wait with elevated queues
-        {"reportedWaitMinutes": 35.0, "queueLength": 45},
-        {"reportedWaitMinutes": 38.0, "queueLength": 50},
+        {"reportedWaitMinutes": 5.0, "queueLength": 6, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "dev-b1"},
+        {"reportedWaitMinutes": 6.0, "queueLength": 7, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "dev-b2"},
+        {"reportedWaitMinutes": 5.5, "queueLength": 6, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "dev-b3"},
+        {"reportedWaitMinutes": 6.0, "queueLength": 8, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "dev-b4"},
+        {"reportedWaitMinutes": 5.0, "queueLength": 6, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "dev-b5"},
+        # Corroborating surge: Two students report ~35m wait with elevated queues within 30m from distinct devices
+        {"reportedWaitMinutes": 35.0, "queueLength": 45, "timestamp": (now - timedelta(minutes=2)).isoformat(), "deviceId": "dev-surge-1"},
+        {"reportedWaitMinutes": 38.0, "queueLength": 50, "timestamp": (now - timedelta(minutes=4)).isoformat(), "deviceId": "dev-surge-2"},
     ]
-    valid, outliers = filter_outliers(reports)
+    valid, outliers = filter_outliers(reports, now=now)
     assert len(valid) == 7, "Corroborated surge reports must NOT be discarded as outliers"
     assert len(outliers) == 0
 
@@ -496,3 +499,266 @@ def test_p1_17_scientific_honesty_composite_type():
     assert est["confidenceScoreType"] == "HEURISTIC_COMPOSITE"
     assert "disagreementMinutes" in est
     assert "outliersExcluded" in est
+
+
+# ==============================================================================
+# P1.13 CORRECTION PASS: TEMPORAL & OBSERVER CORROBORATION REGRESSION TESTS
+# ==============================================================================
+
+def test_p1_13_corroboration_two_reports_within_30m_different_devices():
+    """Two candidate spikes within 30 min from different devices corroborate each other."""
+    now = datetime(2026, 11, 24, 12, 30, 0, tzinfo=timezone.utc)
+    reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "base-1"},
+        {"reportedWaitMinutes": 10.5, "queueLength": 11, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "base-2"},
+        {"reportedWaitMinutes": 9.5, "queueLength": 9, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "base-3"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "base-4"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "base-5"},
+        # Candidate spikes (> 10 + 25 = 35 min)
+        {"reportedWaitMinutes": 55.0, "queueLength": 60, "timestamp": (now - timedelta(minutes=10)).isoformat(), "deviceId": "dev-alpha"},
+        {"reportedWaitMinutes": 58.0, "queueLength": 65, "timestamp": (now - timedelta(minutes=15)).isoformat(), "deviceId": "dev-beta"},
+    ]
+    valid, outliers = filter_outliers(reports, now=now)
+    assert len(valid) == 7
+    assert len(outliers) == 0
+
+
+def test_p1_13_uncorroborated_two_reports_exceeding_30m_window():
+    """Two candidate spikes separated by > 30 minutes cannot corroborate each other."""
+    now = datetime(2026, 11, 24, 13, 0, 0, tzinfo=timezone.utc)
+    reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "base-1"},
+        {"reportedWaitMinutes": 10.5, "queueLength": 11, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "base-2"},
+        {"reportedWaitMinutes": 9.5, "queueLength": 9, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "base-3"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "base-4"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "base-5"},
+        # Candidate spikes 45 minutes apart (> 30 min window)
+        {"reportedWaitMinutes": 55.0, "queueLength": 60, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "dev-alpha"},
+        {"reportedWaitMinutes": 58.0, "queueLength": 65, "timestamp": (now - timedelta(minutes=50)).isoformat(), "deviceId": "dev-beta"},
+    ]
+    valid, outliers = filter_outliers(reports, now=now)
+    assert len(valid) == 5
+    assert len(outliers) == 2
+    for o in outliers:
+        assert o["outlierReason"] == "UNCORROBORATED_ISOLATED_SPIKE"
+
+
+def test_p1_13_uncorroborated_two_reports_same_device():
+    """Two candidate spikes from the same device cannot establish peer consensus."""
+    now = datetime(2026, 11, 24, 12, 30, 0, tzinfo=timezone.utc)
+    reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "base-1"},
+        {"reportedWaitMinutes": 10.5, "queueLength": 11, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "base-2"},
+        {"reportedWaitMinutes": 9.5, "queueLength": 9, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "base-3"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "base-4"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "base-5"},
+        # Same device submitting two spikes within 5 minutes
+        {"reportedWaitMinutes": 55.0, "queueLength": 60, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "dev-same"},
+        {"reportedWaitMinutes": 58.0, "queueLength": 65, "timestamp": (now - timedelta(minutes=10)).isoformat(), "deviceId": "dev-same"},
+    ]
+    valid, outliers = filter_outliers(reports, now=now)
+    assert len(valid) == 5
+    assert len(outliers) == 2
+    for o in outliers:
+        assert o["outlierReason"] == "UNCORROBORATED_ISOLATED_SPIKE"
+
+
+def test_p1_13_uncorroborated_missing_timestamp():
+    """Candidate spikes with missing timestamps cannot establish temporal concurrency."""
+    now = datetime(2026, 11, 24, 12, 30, 0, tzinfo=timezone.utc)
+    reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "base-1"},
+        {"reportedWaitMinutes": 10.5, "queueLength": 11, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "base-2"},
+        {"reportedWaitMinutes": 9.5, "queueLength": 9, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "base-3"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "base-4"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "base-5"},
+        # Two spikes, but missing timestamps
+        {"reportedWaitMinutes": 55.0, "queueLength": 60, "deviceId": "dev-alpha"},
+        {"reportedWaitMinutes": 58.0, "queueLength": 65, "timestamp": None, "deviceId": "dev-beta"},
+    ]
+    valid, outliers = filter_outliers(reports, now=now)
+    assert len(valid) == 5
+    assert len(outliers) == 2
+    for o in outliers:
+        assert o["outlierReason"] == "UNCORROBORATED_MISSING_TIMESTAMP"
+
+
+def test_p1_13_uncorroborated_invalid_timestamp():
+    """Candidate spikes with unparseable timestamps cannot establish temporal concurrency."""
+    now = datetime(2026, 11, 24, 12, 30, 0, tzinfo=timezone.utc)
+    reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "base-1"},
+        {"reportedWaitMinutes": 10.5, "queueLength": 11, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "base-2"},
+        {"reportedWaitMinutes": 9.5, "queueLength": 9, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "base-3"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "base-4"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "base-5"},
+        # Malformed timestamp strings
+        {"reportedWaitMinutes": 55.0, "queueLength": 60, "timestamp": "invalid-iso-string", "deviceId": "dev-alpha"},
+        {"reportedWaitMinutes": 58.0, "queueLength": 65, "timestamp": "2026-99-99T99:99:99Z", "deviceId": "dev-beta"},
+    ]
+    valid, outliers = filter_outliers(reports, now=now)
+    assert len(valid) == 5
+    assert len(outliers) == 2
+    for o in outliers:
+        assert o["outlierReason"] == "UNCORROBORATED_MISSING_TIMESTAMP"
+
+
+def test_p1_13_mixed_surge_peers_partial_corroboration():
+    """When 3 spikes exist, only mutually proximate peers within 30m corroborate; distant one is excluded."""
+    now = datetime(2026, 11, 24, 13, 0, 0, tzinfo=timezone.utc)
+    reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "base-1"},
+        {"reportedWaitMinutes": 10.5, "queueLength": 11, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "base-2"},
+        {"reportedWaitMinutes": 9.5, "queueLength": 9, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "base-3"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "base-4"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "base-5"},
+        # Two spikes 5m apart at T-10m and T-15m
+        {"reportedWaitMinutes": 55.0, "queueLength": 60, "timestamp": (now - timedelta(minutes=10)).isoformat(), "deviceId": "dev-alpha"},
+        {"reportedWaitMinutes": 58.0, "queueLength": 65, "timestamp": (now - timedelta(minutes=15)).isoformat(), "deviceId": "dev-beta"},
+        # Third spike 55m ago (> 30m away from dev-alpha and dev-beta)
+        {"reportedWaitMinutes": 60.0, "queueLength": 70, "timestamp": (now - timedelta(minutes=55)).isoformat(), "deviceId": "dev-gamma"},
+    ]
+    valid, outliers = filter_outliers(reports, now=now)
+    assert len(valid) == 7
+    assert len(outliers) == 1
+    assert outliers[0]["deviceId"] == "dev-gamma"
+    assert outliers[0]["outlierReason"] == "UNCORROBORATED_ISOLATED_SPIKE"
+
+
+def test_p1_13_isolated_high_wait_high_queue_cannot_self_corroborate():
+    """An isolated report with extreme wait and high queue cannot self-corroborate without a peer report."""
+    now = datetime(2026, 11, 24, 12, 30, 0, tzinfo=timezone.utc)
+    reports = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=5)).isoformat(), "deviceId": "base-1"},
+        {"reportedWaitMinutes": 10.5, "queueLength": 11, "timestamp": (now - timedelta(minutes=6)).isoformat(), "deviceId": "base-2"},
+        {"reportedWaitMinutes": 9.5, "queueLength": 9, "timestamp": (now - timedelta(minutes=7)).isoformat(), "deviceId": "base-3"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=8)).isoformat(), "deviceId": "base-4"},
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=9)).isoformat(), "deviceId": "base-5"},
+        # Extreme wait and queue without any peer
+        {"reportedWaitMinutes": 110.0, "queueLength": 250, "timestamp": (now - timedelta(minutes=2)).isoformat(), "deviceId": "dev-isolated"},
+    ]
+    valid, outliers = filter_outliers(reports, now=now)
+    assert len(valid) == 5
+    assert len(outliers) == 1
+    assert outliers[0]["deviceId"] == "dev-isolated"
+    assert outliers[0]["outlierReason"] == "UNCORROBORATED_ISOLATED_SPIKE"
+
+
+# ==============================================================================
+# P1.15 CORRECTION PASS: CONFIDENCE BOUNDARY (0.39, 0.40, 0.41) & EXPLANATION TESTS
+# ==============================================================================
+
+def test_p1_15_confidence_boundary_0_39_0_40_0_41():
+    """
+    Test confidence label boundary at exactly 0.40:
+    - confidence = 0.39 -> LIMITED
+    - confidence = 0.40 -> LIMITED
+    - confidence = 0.41 (with N >= 2) -> MODERATE
+    - single report is capped at <= 0.40 and strictly receives LIMITED, never MODERATE
+    """
+    now = datetime(2026, 11, 24, 12, 0, 0, tzinfo=timezone.utc)
+
+    # 1. Single report (N=1) capped <= 0.40 receives LIMITED
+    single_rep = [{"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": now.isoformat()}]
+    est_single = calculate_queue_estimate(single_rep, now=now)
+    assert est_single["confidence"] == 0.40
+    assert est_single["confidenceLabel"] == "LIMITED"
+    assert "Based on a single observation from" in est_single["evidenceExplanation"]
+    assert "More reports will improve accuracy." in est_single["evidenceExplanation"]
+
+    # 2. Score = 0.40 with N=2 -> LIMITED
+    reports_40 = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=12.5)).isoformat(), "deviceId": "d1"},
+        {"reportedWaitMinutes": 25.0, "queueLength": 20, "timestamp": (now - timedelta(minutes=12.5)).isoformat(), "deviceId": "d2"},
+    ]
+    est_40 = calculate_queue_estimate(reports_40, now=now)
+    assert est_40["confidence"] == 0.40
+    assert est_40["confidenceLabel"] == "LIMITED"
+    assert "Limited evidence based on 2 recent reports" in est_40["evidenceExplanation"]
+
+    # 3. Score = 0.39 with N=2 -> LIMITED
+    reports_39 = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=13.2)).isoformat(), "deviceId": "d1"},
+        {"reportedWaitMinutes": 25.0, "queueLength": 20, "timestamp": (now - timedelta(minutes=13.2)).isoformat(), "deviceId": "d2"},
+    ]
+    est_39 = calculate_queue_estimate(reports_39, now=now)
+    assert est_39["confidence"] == 0.39
+    assert est_39["confidenceLabel"] == "LIMITED"
+    assert "Limited evidence based on 2 recent reports" in est_39["evidenceExplanation"]
+
+    # 4. Score = 0.41 with N=2 -> MODERATE
+    reports_41 = [
+        {"reportedWaitMinutes": 10.0, "queueLength": 10, "timestamp": (now - timedelta(minutes=11.8)).isoformat(), "deviceId": "d1"},
+        {"reportedWaitMinutes": 25.0, "queueLength": 20, "timestamp": (now - timedelta(minutes=11.8)).isoformat(), "deviceId": "d2"},
+    ]
+    est_41 = calculate_queue_estimate(reports_41, now=now)
+    assert est_41["confidence"] == 0.41
+    assert est_41["confidenceLabel"] == "MODERATE"
+    assert "Moderate consensus based on 2 recent reports" in est_41["evidenceExplanation"]
+
+
+# ==============================================================================
+# P1.16 CORRECTION PASS: FAIL-CLOSED OPERATIONAL VERIFICATION STATUS TESTS
+# ==============================================================================
+
+def test_p1_16_fail_closed_verification_status_policy():
+    """Verify that only recognized verified statuses qualify under fail-closed policy."""
+    qualifying_est = {
+        "predictedWaitMinutes": 10.0,
+        "freshness": "LIVE",
+        "recentReportCount": 3,
+        "confidence": 0.70,
+        "distinctDevicesCount": 2,
+        "confidenceLabel": "HIGH",
+        "congestion": "MODERATE",
+        "newestReportAgeMinutes": 2.0,
+    }
+
+    # 1. Recognized verified status -> qualifies
+    for v_status in ["VERIFIED", "VERIFIED_CAMPUS_DIRECTORY", "STUDENT_SOURCED", "COMMUNITY_LISTING", "COMMUNITY_DIRECTORY"]:
+        locs = [{"id": "loc-1", "name": "Campus Mess", "active": True, "verificationStatus": v_status, "estimate": qualifying_est}]
+        rec = compute_smart_recommendation(locs)
+        assert rec["isEligible"] is True
+        assert rec["recommendedLocationId"] == "loc-1"
+
+    # 2. Explicitly UNVERIFIED -> disqualified
+    locs_unverified = [{"id": "loc-2", "name": "Unverified Stall", "active": True, "verificationStatus": "UNVERIFIED", "estimate": qualifying_est}]
+    rec_unverified = compute_smart_recommendation(locs_unverified)
+    assert rec_unverified["isEligible"] is False
+
+    # 3. Missing verificationStatus (None) -> disqualified
+    locs_none = [{"id": "loc-3", "name": "No Status Stall", "active": True, "verificationStatus": None, "estimate": qualifying_est}]
+    rec_none = compute_smart_recommendation(locs_none)
+    assert rec_none["isEligible"] is False
+
+    # 4. Unknown verificationStatus -> disqualified
+    locs_unknown = [{"id": "loc-4", "name": "Unknown Stall", "active": True, "verificationStatus": "RANDOM_STATUS", "estimate": qualifying_est}]
+    rec_unknown = compute_smart_recommendation(locs_unknown)
+    assert rec_unknown["isEligible"] is False
+
+    # 5. Inactive outlet -> disqualified
+    locs_inactive = [{"id": "loc-5", "name": "Inactive Stall", "active": False, "verificationStatus": "STUDENT_SOURCED", "estimate": qualifying_est}]
+    rec_inactive = compute_smart_recommendation(locs_inactive)
+    assert rec_inactive["isEligible"] is False
+
+    # 6. Verified outlet with higher wait wins against unverified outlet with lower wait
+    competing_locs = [
+        {
+            "id": "unverified-low-wait",
+            "name": "Unverified Fast Stall",
+            "active": True,
+            "verificationStatus": "UNVERIFIED",
+            "estimate": {**qualifying_est, "predictedWaitMinutes": 2.0},
+        },
+        {
+            "id": "verified-standard-wait",
+            "name": "Verified Reliable Mess",
+            "active": True,
+            "verificationStatus": "STUDENT_SOURCED",
+            "estimate": {**qualifying_est, "predictedWaitMinutes": 12.0},
+        },
+    ]
+    rec_comp = compute_smart_recommendation(competing_locs)
+    assert rec_comp["isEligible"] is True
+    assert rec_comp["recommendedLocationId"] == "verified-standard-wait"
+    assert rec_comp["predictedWaitMinutes"] == 12.0

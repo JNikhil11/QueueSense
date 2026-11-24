@@ -704,13 +704,25 @@ Status Definitions:
 - **Root Cause:** Failure to distinguish isolated uncorroborated anomalies from peer-corroborated regime shifts in non-stationary queuing systems.
 - **Files Changed:** `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py`, `frontend/src/test/estimation.test.ts`
 - **Implemented Remediation:**
-  1. **Corroborated Surge Detection:** When candidate deviations exceed the statistical threshold, the system checks for peer corroboration ($\ge 2$ candidate reports within 30 minutes agreeing within $\Delta \le 20.0$ min). Corroborated reports represent real dining hall surges and are preserved in the estimation pool.
-  2. **Isolated Spike Suppression:** An isolated single report with extreme deviation without peer corroboration is flagged and isolated to `outliers` with reason `UNCORROBORATED_ISOLATED_SPIKE`, preventing a single malicious input from distorting the estimate.
+  1. **Corroborated Surge Detection:** When candidate deviations exceed the statistical threshold, the system enforces strict temporal and observer peer corroboration:
+     - Mutual temporal proximity: $|t_r - t_{\text{peer}}| \le 30.0$ minutes (`SURGE_CORROBORATION_WINDOW_MIN`).
+     - Distinct client device identifiers: where available, $dev_r \neq dev_{\text{peer}}$ is strictly enforced. Two reports from the same device cannot self-corroborate.
+     - Value consistency: $|w_r - w_{\text{peer}}| \le 20.0$ minutes (`SURGE_CONSISTENCY_DELTA_MIN`).
+     - Conservative timestamp handling: reports with missing or unparseable timestamps cannot establish concurrency and are strictly isolated to `outliers` with reason `UNCORROBORATED_MISSING_TIMESTAMP`.
+     - Elevated queue length alone does NOT substitute for peer corroboration; an isolated extreme wait report cannot self-corroborate via queue count.
+  2. **Isolated Spike/Drop Suppression:** An isolated single report with extreme deviation without valid peer corroboration is flagged as `UNCORROBORATED_ISOLATED_SPIKE` or `UNCORROBORATED_ISOLATED_DROP`, preventing uncorroborated spikes or drops from dominating the estimate.
   3. **Zero-MAD Safety:** When all observations are identical ($\text{MAD} = 0.0$), the minimum scale is bounded to $\ge 5.0$m and cutoff to $\ge 25.0$m, preventing zero division or false rejection.
   4. **Small Sample Handling ($N < 5$):** For small samples where empirical MAD lacks statistical power, all physically plausible reports ($[0, 120]$ min, $[0, 300]$ queue) are preserved.
 - **Exact Tests Added:**
-  - `test_p1_13_scenario_1_normal_queue_low_variance` through `test_p1_13_scenario_12_surge_followed_by_rapid_return_to_normal` in `backend/tests/test_batch3_statistics.py` (covering all 12 adversarial scenarios specified in directive).
-- **Residual Risks:** An organized group of colluding users submitting 2+ coordinated false reports within 5 minutes could simulate a false rush. This is bounded by upstream IP/NAT rate limits and requires authenticated SSO for complete cryptographic prevention.
+  - `test_p1_13_scenario_1_normal_queue_low_variance` through `test_p1_13_scenario_12_surge_followed_by_rapid_return_to_normal` in `backend/tests/test_batch3_statistics.py`.
+  - `test_p1_13_corroboration_two_reports_within_30m_different_devices`: Corroborates two candidate spikes within 30 min from different devices.
+  - `test_p1_13_uncorroborated_two_reports_exceeding_30m_window`: Disqualifies spikes separated by > 30 min.
+  - `test_p1_13_uncorroborated_two_reports_same_device`: Rejects self-corroboration from duplicate device IDs.
+  - `test_p1_13_uncorroborated_missing_timestamp`: Conservative rejection when timestamps are missing.
+  - `test_p1_13_uncorroborated_invalid_timestamp`: Conservative rejection when timestamps are unparseable.
+  - `test_p1_13_mixed_surge_peers_partial_corroboration`: Only temporally proximate peers corroborate; distant spike excluded.
+  - `test_p1_13_isolated_high_wait_high_queue_cannot_self_corroborate`: Elevated queue count does not substitute for peer corroboration.
+- **Residual Risks:** An organized group of colluding users submitting 2+ coordinated false reports within 30 minutes from distinct devices could simulate a false rush. This is bounded by upstream IP/NAT rate limits and requires authenticated SSO for complete cryptographic prevention.
 - **Status:** **`VERIFIED FIXED`**
 
 ### P1.14 — Time-Decay Model, Decay Constant and Observation Cutoff
@@ -731,35 +743,51 @@ Status Definitions:
 
 ### P1.15 — Evidence-Weighting Heuristic (45/35/20)
 - **Severity:** P1 (Scoring Methodology & Scientific Honesty)
-- **Original Evidence:** The 45/35/20 confidence formula ($0.45 \times \text{volume} + 0.35 \times \text{recency} + 0.20 \times \text{agreement}$) injected an arbitrary constant ($0.08$) when $N=1$, and lacked dynamic renormalization when evidence factors were unavailable.
-- **Reproduction:** Tested confidence on single-report input; verified static $0.08$ additive without mathematical justification.
-- **Root Cause:** Treating heuristic engineering scoring factors as complete without dynamic renormalization for missing components.
+- **Original Evidence:** The 45/35/20 confidence formula ($0.45 \times \text{volume} + 0.35 \times \text{recency} + 0.20 \times \text{agreement}$) injected an arbitrary constant ($0.08$) when $N=1$, lacked dynamic renormalization when evidence factors were unavailable, and had an ambiguous label boundary around 0.40.
+- **Reproduction:** Tested confidence on single-report input; verified static $0.08$ additive without mathematical justification. Evaluated boundary conditions around 0.40.
+- **Root Cause:** Treating heuristic engineering scoring factors as complete without dynamic renormalization for missing components and precise boundary classification.
 - **Files Changed:** `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py`, `frontend/src/test/estimation.test.ts`
 - **Implemented Remediation:**
   1. **Dynamic Renormalization:** When agreement is undefined ($N=1$), active weights are renormalized: $w'_{\text{vol}} = 0.45 / 0.80 = 0.5625$ and $w'_{\text{rec}} = 0.35 / 0.80 = 0.4375$, strictly summing to 1.0.
-  2. **Epistemic Uncertainty Bounding:** Because a single report carries unverified variance, single-observation confidence is strictly capped at $\le 0.40$ (limiting label to `"LIMITED"` / `"MODERATE"`).
-  3. **Explicit Labeling:** Output payload explicitly labels `confidenceScoreType: "HEURISTIC_COMPOSITE"` to prevent clients from misinterpreting scores as Bayesian posterior probabilities.
+  2. **Epistemic Uncertainty Bounding:** Because a single report carries unverified single-observer variance, single-observation confidence is strictly capped at $\le 0.40$.
+  3. **Strict Label Boundary at 0.40:**
+     - Scores $> 0.40$ (with $N \ge 2$) receive `"MODERATE"`.
+     - Scores $\le 0.40$ receive `"LIMITED"`.
+     - Single-report confidence is capped at $\le 0.40$ and strictly receives `"LIMITED"`, never `"MODERATE"`.
+  4. **Aligned Explanation Text:**
+     - If `MODERATE`: `"Moderate consensus based on {count_str}; updated {age_str}."`
+     - If `LIMITED` ($N=1$): `"Based on a single observation from {age_str}. More reports will improve accuracy."`
+     - If `LIMITED` ($N>1$): `"Limited evidence based on {count_str}; updated {age_str}."`
+  5. **Explicit Labeling:** Output payload explicitly labels `confidenceScoreType: "HEURISTIC_COMPOSITE"` to prevent clients from misinterpreting scores as Bayesian posterior probabilities.
 - **Exact Tests Added:**
   - `test_p1_15_full_model_weights_sum_to_one`, `test_p1_15_dynamic_renormalization_for_single_observation`, `test_p1_15_disagreement_penalizes_confidence`, `test_p1_15_missing_evidence_zero_reports`.
+  - `test_p1_15_confidence_boundary_0_39_0_40_0_41`: Tests exact boundaries at 0.39, 0.40, and 0.41, confirming single-report cap and explanation text alignment.
 - **Residual Risks:** Weights are heuristic engineering constants; real probabilistic confidence intervals require empirical ground-truth error distributions.
 - **Status:** **`VERIFIED FIXED`**
 
 ### P1.16 — Recommendation Confidence, Freshness and Operational Thresholds
 - **Severity:** P1 (Recommendation Validity & Abuse Resistance)
-- **Original Evidence:** Cold-start recommendation required $\ge 3$ reports, but counted raw submissions rather than independent observers. A single device cycling 3 submissions artificially satisfied the threshold. Unverified outlets could also be recommended if they had reports.
-- **Reproduction:** Injected 3 reports from a single `deviceId` within 5 minutes; verified that earlier engine recommended the outlet as consensus-backed.
-- **Root Cause:** Equating raw report count with independent corroborating evidence.
-- **Files Changed:** `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py`, `frontend/src/test/estimation.test.ts`
+- **Original Evidence:** Cold-start recommendation required $\ge 3$ reports, but counted raw submissions rather than independent observers. A single device cycling 3 submissions artificially satisfied the threshold. Unverified outlets could also be recommended if they had reports, and verification status was not forwarded by the recommendation handler.
+- **Reproduction:** Injected 3 reports from a single `deviceId` within 5 minutes; verified that earlier engine recommended the outlet as consensus-backed. Verified that omitting `verificationStatus` in handler allowed unverified outlets to compete.
+- **Root Cause:** Equating raw report count with independent corroborating evidence, and lack of a strict fail-closed operational verification check.
+- **Files Changed:** `backend/functions/get_recommendations/app.py`, `backend/shared/prediction.py`, `frontend/src/services/api.ts`, `backend/tests/test_batch3_statistics.py`, `backend/tests/test_api_handlers.py`, `frontend/src/test/estimation.test.ts`
 - **Implemented Remediation:**
-  1. **Independent Device Corroboration:** Recommendation qualification requires $\ge 3$ fresh reports AND evidence from at least $\ge 2$ distinct client devices (`distinctDevicesCount >= 2`). A single device cycling submissions is disqualified (`state: "insufficient_data"`).
-  2. **Operational Status Enforcement:** Inactive outlets (`active: False`) and unverified listings (`verificationStatus: "UNVERIFIED"`) are strictly disqualified from receiving recommendations.
-  3. **Fail-Safe Recommendation States:**
+  1. **Handler Forwarding:** `get_recommendations/app.py` forwards `"verificationStatus": loc.get("verificationStatus")` into `locations_with_estimates`.
+  2. **Strict Fail-Closed Verification Policy:** Only recognized verified statuses (`VERIFIED`, `VERIFIED_CAMPUS_DIRECTORY`, `STUDENT_SOURCED`, `COMMUNITY_LISTING`, `COMMUNITY_DIRECTORY`) qualify. Missing (`None`), empty, `"UNVERIFIED"`, `"UNVERIFIED_LISTING"`, or unknown statuses are strictly disqualified. A verified outlet always wins over an unverified outlet with a lower wait time.
+  3. **Independent Client Device Corroboration:** Recommendation qualification requires $\ge 3$ fresh reports AND evidence from at least $\ge 2$ distinct client devices (`distinctDevicesCount >= 2`). A single device cycling submissions is disqualified (`state: "insufficient_data"`).
+  4. **Semantics & Residual Risk Disclosure:** `distinctDevicesCount` is strictly documented as distinct client instance identifiers (CSPRNG UUIDs stored in browser storage), NOT verified human observers or Sybil resistance. Without SSO authentication, an adversary rotating client identifiers or using multiple devices/browsers can satisfy device counts; campus NAT IP ceilings (30 req / 5 min) provide secondary containment.
+  5. **Fail-Safe Recommendation States:**
      - `"recommended"`: Winner found with verified status, fresh data, and independent corroboration.
-     - `"insufficient_data"`: Thresholds not met across campus.
+     - `"insufficient_data"`: Fresh data exists but qualification thresholds are not met across campus.
      - `"stale_data"`: All campus observations are $> 20$ minutes old.
      - `"no_active_outlets"`: No outlets are open or active.
 - **Exact Tests Added:**
   - `test_p1_16_qualifies_with_three_distinct_device_reports`, `test_p1_16_disqualifies_single_device_repeated_submissions`, `test_p1_16_disqualifies_unverified_and_inactive_outlets`, `test_p1_16_stale_data_state_transition`, `test_p1_16_no_active_outlets_state_transition`.
+  - `test_p1_16_fail_closed_verification_status_policy`: Verifies all approved statuses qualify and unverified, missing, or unknown statuses fail closed.
+  - `test_get_recommendations_handler_fail_closed_verification`: Handler integration test verifying verified outlet wins against unverified outlet with shorter wait.
+  - `test_get_recommendations_handler_disqualifies_all_unverified`: Handler integration test verifying fail-closed state when all outlets lack verified status.
+- **Residual Risks:** Sybil attacks via multiple devices or client identifier rotation are constrained by campus IP ceilings (30 req / 5 min), but absolute Sybil resistance requires authenticated student credentials.
+- **Status:** **`VERIFIED FIXED`**
 - **Residual Risks:** Sybil attacks via multiple devices are constrained by campus IP ceilings (30 req / 5 min), but absolute Sybil resistance requires authenticated student credentials.
 - **Status:** **`VERIFIED FIXED`**
 

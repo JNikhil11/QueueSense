@@ -455,17 +455,37 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
     }
 
     // Corroborate spikes: require at least 2 reports agreeing on elevated condition
+    // Strict temporal (within 30m) and distinct device corroboration
     const corroboratedSpikes: QueueReport[] = [];
     for (const r of candidateSpikes) {
       const w = Number(r.reportedWaitMinutes);
+      const reportTime = new Date(r.timestamp).getTime();
+      const devR = (r as any).deviceId || (r as any).clientHash || (r as any).reporterId;
+
+      if (isNaN(reportTime)) {
+        statisticalOutliers++;
+        continue;
+      }
+
       let peerMatches = 0;
-      if (candidateSpikes.length >= 2) {
-        for (const peer of candidateSpikes) {
-          if (peer !== r && Math.abs(w - Number(peer.reportedWaitMinutes)) <= 20.0) {
-            peerMatches++;
-          }
+      for (const peer of candidateSpikes) {
+        if (peer === r) continue;
+        const peerTime = new Date(peer.timestamp).getTime();
+        if (isNaN(peerTime)) continue;
+
+        // Temporal proximity within 30 minutes
+        if (Math.abs(reportTime - peerTime) > 30 * 60 * 1000) continue;
+
+        // Distinct device identifiers if present
+        const devPeer = (peer as any).deviceId || (peer as any).clientHash || (peer as any).reporterId;
+        if (devR && devPeer && devR === devPeer) continue;
+
+        // Value consistency within 20m
+        if (Math.abs(w - Number(peer.reportedWaitMinutes)) <= 20.0) {
+          peerMatches++;
         }
       }
+
       if (peerMatches >= 1) {
         corroboratedSpikes.push(r);
       } else {
@@ -473,12 +493,39 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
       }
     }
 
-    // Corroborate drops: require at least 2 reports agreeing on low condition
+    // Corroborate drops: require at least 2 reports agreeing on low condition within 30m from distinct devices
     const corroboratedDrops: QueueReport[] = [];
-    if (candidateDrops.length >= 2) {
-      corroboratedDrops.push(...candidateDrops);
-    } else {
-      statisticalOutliers += candidateDrops.length;
+    for (const r of candidateDrops) {
+      const w = Number(r.reportedWaitMinutes);
+      const reportTime = new Date(r.timestamp).getTime();
+      const devR = (r as any).deviceId || (r as any).clientHash || (r as any).reporterId;
+
+      if (isNaN(reportTime)) {
+        statisticalOutliers++;
+        continue;
+      }
+
+      let peerMatches = 0;
+      for (const peer of candidateDrops) {
+        if (peer === r) continue;
+        const peerTime = new Date(peer.timestamp).getTime();
+        if (isNaN(peerTime)) continue;
+
+        if (Math.abs(reportTime - peerTime) > 30 * 60 * 1000) continue;
+
+        const devPeer = (peer as any).deviceId || (peer as any).clientHash || (peer as any).reporterId;
+        if (devR && devPeer && devR === devPeer) continue;
+
+        if (Math.abs(w - Number(peer.reportedWaitMinutes)) <= 20.0) {
+          peerMatches++;
+        }
+      }
+
+      if (peerMatches >= 1) {
+        corroboratedDrops.push(r);
+      } else {
+        statisticalOutliers++;
+      }
     }
 
     validReports = [...normal, ...corroboratedSpikes, ...corroboratedDrops];
@@ -607,7 +654,7 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
 
   let confidenceLabel: QueueEstimate['confidenceLabel'] = 'VERY LOW';
   if (confidence >= 0.7) confidenceLabel = 'HIGH';
-  else if (confidence >= 0.4) confidenceLabel = 'MODERATE';
+  else if (confidence > 0.4 && recentReports.length >= 2) confidenceLabel = 'MODERATE';
   else if (confidence >= 0.2) confidenceLabel = 'LIMITED';
 
   const countStr = `${recentReports.length} recent report${recentReports.length === 1 ? '' : 's'}`;
@@ -617,9 +664,13 @@ export function computeClientEstimate(reports: QueueReport[]): QueueEstimate {
   if (confidenceLabel === 'HIGH') {
     explanation = `Strong agreement across ${countStr}; latest report from ${ageStr}.`;
   } else if (confidenceLabel === 'MODERATE') {
-    explanation = `Solid estimate based on ${countStr}; updated ${ageStr}.`;
+    explanation = `Moderate consensus based on ${countStr}; updated ${ageStr}.`;
   } else if (confidenceLabel === 'LIMITED') {
-    explanation = `Based on a single observation from ${ageStr}. More reports will improve accuracy.`;
+    if (recentReports.length === 1) {
+      explanation = `Based on a single observation from ${ageStr}. More reports will improve accuracy.`;
+    } else {
+      explanation = `Limited evidence based on ${countStr}; updated ${ageStr}.`;
+    }
   } else {
     explanation = `Observations are aging (${ageStr}); estimate may not reflect sudden rushes.`;
   }
@@ -857,11 +908,20 @@ export function createApiClient(config: ApiClientConfig = {}) {
         (c) => c.estimate && ['LIVE', 'RECENT'].includes(c.estimate.freshness)
       );
 
-      // Must be active, not unverified, have at least 3 fresh reports, >= 50% confidence, and >= 2 distinct devices
+      const VERIFIED_STATUSES = new Set([
+        'VERIFIED',
+        'VERIFIED_CAMPUS_DIRECTORY',
+        'STUDENT_SOURCED',
+        'COMMUNITY_LISTING',
+        'COMMUNITY_DIRECTORY',
+      ]);
+
+      // Must be active, verified, have at least 3 fresh reports, >= 50% confidence, and >= 2 distinct devices
       const eligible = candidates.filter(
         (c) =>
           c.active &&
-          c.verificationStatus !== 'UNVERIFIED_LISTING' &&
+          c.verificationStatus &&
+          VERIFIED_STATUSES.has(c.verificationStatus) &&
           c.estimate &&
           c.estimate.predictedWaitMinutes !== null &&
           ['LIVE', 'RECENT'].includes(c.estimate.freshness) &&
@@ -873,7 +933,7 @@ export function createApiClient(config: ApiClientConfig = {}) {
       if (eligible.length === 0) {
         let state: SmartRecommendation['state'] = 'insufficient_data';
         let reason =
-          'Not enough recent queue reports across campus to make a reliable recommendation yet. At least 3 fresh observations (within 20 minutes), 50%+ confidence, and independent corroboration from multiple devices are required.';
+          'Not enough recent queue reports across campus to make a reliable recommendation yet. At least 3 fresh observations (within 20 minutes), 50%+ confidence, and corroboration from multiple distinct client devices are required.';
 
         if (!hasActiveLocations) {
           state = 'no_active_outlets';

@@ -46,6 +46,7 @@ def lambda_handler(event, context):
                     "name": loc.get("name"),
                     "category": loc.get("category"),
                     "active": loc.get("active", True),
+                    "verificationStatus": loc.get("verificationStatus"),
                     "estimate": est,
                 }
             )

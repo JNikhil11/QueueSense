@@ -938,6 +938,7 @@ def test_cold_start_recommendation_protection():
             "id": "iitb-mess-h12-14",
             "name": "Hostel 12-14 Dining Hall",
             "active": True,
+            "verificationStatus": "STUDENT_SOURCED",
             "estimate": {
                 "predictedWaitMinutes": 5.0,
                 "confidence": 0.35,  # Too low
@@ -966,6 +967,7 @@ def test_recommendation_qualifies_with_three_reports_and_high_confidence():
             "id": "iitb-mess-h12-14",
             "name": "Hostel 12-14 Dining Hall",
             "active": True,
+            "verificationStatus": "STUDENT_SOURCED",
             "estimate": {
                 "predictedWaitMinutes": 6.5,
                 "confidence": 0.72,
